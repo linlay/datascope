@@ -14,3 +14,10 @@ coverage.out
 /data/*.sqlite3
 /data/legacy/
 /data/oauth/
+
+/data/databases.json
+/data/databases.json.lock
+
+/config/databases/
+/config/databases.lock
+/data/databases.json.bak

@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"sql-rewrite-server/internal/rewrite"
@@ -26,6 +28,24 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 	names, err := st.TableNames(ctx)
 	if err != nil {
 		return nil, err
+	}
+	for _, pol := range cfg.Tables {
+		if len(pol.Columns) == 0 {
+			continue
+		}
+		schema, err := st.Describe(ctx, pol.Table)
+		if err != nil {
+			return nil, err
+		}
+		known := map[string]bool{}
+		for _, c := range schema.Columns {
+			known[strings.ToLower(c.Name)] = true
+		}
+		for _, c := range pol.Columns {
+			if !known[strings.ToLower(c)] {
+				return nil, fmt.Errorf("表 %s 没有字段 %s", pol.Table, c)
+			}
+		}
 	}
 	rw, err := rewrite.New(cfg, names)
 	if err != nil {
@@ -105,5 +125,13 @@ func (s *QueryService) Query(ctx context.Context, query string, userID int64, ma
 
 // Execute runs an already rewritten statement with its binds.
 func (s *QueryService) Execute(ctx context.Context, r *Rewritten, maxRows int) (*store.QueryResult, error) {
+	if maxRows <= 0 {
+		maxRows = store.DefaultMaxRows
+	}
+	for _, name := range r.TableNames() {
+		if pol, ok := s.Config().Lookup(name); ok && pol.MaxRows > 0 {
+			maxRows = min(maxRows, pol.MaxRows)
+		}
+	}
 	return s.Store.Query(ctx, r.RewrittenSQL, maxRows, r.args...)
 }

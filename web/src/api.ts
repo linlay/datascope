@@ -1,6 +1,6 @@
 // Typed client for the Go admin API (proxied at /api by the dev server).
 
-export type Scheme = 'NONE' | 'EMPLOYEE' | 'CUSTOMER' | 'RESTRICTED';
+export type Scheme = string;
 export type Row = Record<string, unknown>;
 
 export interface TableInfo {
@@ -86,6 +86,9 @@ export interface SchemeInfo {
 
 export interface PolicyView {
   table: string;
+  enabled?: boolean;
+  columns: string[] | null;
+  max_rows: number;
   scheme: Scheme;
   reason: string;
   alternative?: string;
@@ -183,7 +186,22 @@ export class ApiError extends Error {
   }
 }
 
+export let selectedDatabase = localStorage.getItem('sql-rewrite-database') || 'default';
+export function selectDatabase(id: string) {
+ selectedDatabase = id; localStorage.setItem('sql-rewrite-database', id); usersPromise = undefined;
+}
+export interface Database {
+ id: string; name: string; driver: string; path: string; mcp_enabled: boolean; tools: string[]; revision: number; etag?: string;
+ config: { version: number; schemes: SchemeInfo[]; fragments: Record<string,string>; tables: PolicyView[] };
+}
+export const databases = {
+ list: () => request<Database[]>('/api/databases'),
+ get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
+ add: (body: {id: string; name: string; driver: string; path: string}) => post<Database>('/api/databases', body),
+ save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
+};
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+ if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;
   const response = await fetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },

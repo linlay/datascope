@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Card, Descriptions, Empty, Input, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType, SorterResult } from 'antd/es/table/interface';
-import { api, type BrowseResult, type Row, type Scheme, type TableInfo, type TableSchema } from '../api';
-import { CellValue, SchemeTag, SqlBlock, schemeMeta } from '../components/shared';
+import { api, type BrowseResult, type Row, type TableInfo, type TableSchema } from '../api';
+import { CellValue, SchemeTag, SqlBlock } from '../components/shared';
 
 const { Text } = Typography;
 
@@ -23,7 +23,7 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
   const groups = useMemo(() => {
     const term = search.trim().toLowerCase();
     const visible = tables.filter((t) => !term || t.name.includes(term) || t.comment.includes(term));
-    return (Object.keys(schemeMeta) as Scheme[])
+    return Array.from(new Set(tables.map(t=>t.scheme)))
       .map((scheme) => ({ scheme, tables: visible.filter((t) => t.scheme === scheme) }))
       .filter((g) => g.tables.length > 0);
   }, [tables, search]);

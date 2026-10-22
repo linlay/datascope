@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ConfigProvider, Layout, Menu, Tag, theme, type ThemeConfig } from 'antd';
+import { Alert, Button, ConfigProvider, Form, Input, Layout, Menu, Modal, Select, Space, Tag, theme, type ThemeConfig } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { DataBrowser } from './pages/DataBrowser';
-import { McpInspector } from './pages/McpInspector';
-import { Policies } from './pages/Policies';
+import { McpManagement } from './pages/McpManagement';
+import { DatabaseManager } from './pages/DatabaseManager';
+import { databases, selectDatabase, selectedDatabase, type Database } from './api';
 import { SqlWorkbench } from './pages/SqlWorkbench';
 
 type Page = 'table' | 'sql' | 'policies' | 'mcp';
@@ -17,7 +18,7 @@ function parseHash(): Route {
   const [path] = window.location.hash.replace(/^#\/?/, '').split('?');
   const [page, table] = path.split('/');
   if (page === 'sql' || page === 'policies' || page === 'mcp') return { page };
-  return { page: 'table', table: table ? decodeURIComponent(table) : undefined };
+  return { page: page === 'table' || table ? 'table' : 'policies', table: table ? decodeURIComponent(table) : undefined };
 }
 
 function useDarkMode() {
@@ -73,13 +74,27 @@ function buildTheme(dark: boolean): ThemeConfig {
 const titles: Record<Page, string> = {
   sql: 'SQL控制台',
   table: '表数据',
-  policies: '规则配置',
-  mcp: 'MCP 检查',
+  policies: '数据库访问策略',
+  mcp: 'MCP 配置与测试',
 };
 
 export function App() {
   const [route, setRoute] = useState(parseHash);
   const dark = useDarkMode();
+ const [items,setItems]=useState<Database[]>([]);
+ const [dbID,setDbID]=useState(selectedDatabase);
+ const [adding,setAdding]=useState(false);
+ const [creating,setCreating]=useState(false);
+ const [error,setError]=useState<string>();
+ const [form]=Form.useForm();
+ const refresh=()=>databases.list().then(setItems).catch(e=>setError(e.message));
+ useEffect(()=>{void refresh();},[]);
+ const switchDB=(id:string)=>{selectDatabase(id);setDbID(id);if(route.page==='table') window.location.hash='#/table';};
+ useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) switchDB(items[0].id);},[items,dbID]);
+ const add=async()=>{
+  try { const values=await form.validateFields();setCreating(true);const d=await databases.add({...values,driver:'sqlite'});await refresh();switchDB(d.id);window.location.hash='#/policies';setAdding(false);form.resetFields();setError(undefined); }
+  catch(e) { if(e instanceof Error) setError(e.message); } finally {setCreating(false);}
+ };
 
   useEffect(() => {
     const onHash = () => {
@@ -106,8 +121,8 @@ export function App() {
     <ConfigProvider locale={zhCN} theme={buildTheme(dark)}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
-          <span className="app-title">SQL ReWrite</span>
-          <Tag color="red">超级管理员 · 全量数据</Tag>
+          <Space><span className="app-title">SQL Rewrite</span><Select aria-label="切换数据库" value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/><Button onClick={()=>setAdding(true)}>＋ 数据库</Button></Space>
+          <Tag color="blue">数据库代理管理平台</Tag>
           <Menu
             mode="horizontal"
             theme={dark ? 'dark' : 'light'}
@@ -117,13 +132,19 @@ export function App() {
             onClick={({ key }) => (window.location.hash = `#/${key}`)}
           />
         </Layout.Header>
-        <Layout.Content className="app-content">
+        <Layout.Content className="app-content" key={dbID}>
+ {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {route.page === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
           {route.page === 'sql' && <SqlWorkbench />}
-          {route.page === 'policies' && <Policies />}
-          {route.page === 'mcp' && <McpInspector />}
+          {route.page === 'policies' && <DatabaseManager id={dbID} onSaved={()=>{void refresh();}} />}
+          {route.page === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
       </Layout>
+      <Modal title="添加数据库" open={adding} onCancel={()=>setAdding(false)} onOk={add} confirmLoading={creating} okText="添加数据库" destroyOnHidden>
+       {error && <Alert type="error" title={error}/>}
+       <Form form={form} layout="vertical"><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><Form.Item name="id" label="数据库 ID" rules={[{required:true},{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/,message:'使用字母、数字、下划线或连字符，最多 64 位'}]}><Input placeholder="business"/></Form.Item><Form.Item name="path" label="SQLite 文件路径（服务端）" rules={[{required:true}]}><Input placeholder="/absolute/path/database.sqlite3"/></Form.Item></Form>
+       <p>数据库以只读方式连接。添加后请配置访问策略，再开启 MCP。</p>
+      </Modal>
     </ConfigProvider>
   );
 }

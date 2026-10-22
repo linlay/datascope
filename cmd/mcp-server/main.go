@@ -15,10 +15,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"sql-rewrite-server/internal/catalog"
 	"sql-rewrite-server/internal/envflag"
 	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
 	"sql-rewrite-server/internal/store"
 )
 
@@ -31,6 +30,7 @@ func main() {
 
 func run() error {
 	dbPath := flag.String("db", envflag.String("SQLITE_PATH", "data/securities_demo.sqlite3"), "SQLite 数据库路径（只读打开）")
+	databaseID := flag.String("database", envflag.String("MCP_DATABASE", "default"), "stdio 连接的数据库 ID")
 	transport := flag.String("transport", envflag.String("MCP_TRANSPORT", "http"), "传输方式：http（Streamable HTTP）或 stdio")
 	addr := flag.String("addr", envflag.String("SERVER_ADDR", "127.0.0.1:8080"), "HTTP 监听地址")
 	path := flag.String("path", envflag.String("MCP_PATH", "/mcp"), "MCP HTTP 端点路径")
@@ -38,7 +38,7 @@ func run() error {
 	queryTimeout := flag.Duration("query-timeout", envflag.Duration("QUERY_TIMEOUT", store.DefaultQueryTimeout), "单条查询超时")
 	userHeader := flag.String("user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "网关传入可信用户编号的请求头")
 	defaultUserID := flag.Int64("default-user-id", envflag.Int64("MCP_DEFAULT_USER_ID", 0), "请求头缺失时使用的用户编号（stdio 或本地调试）；0 表示拒绝")
-	debug := flag.Bool("debug", envflag.Bool("MCP_DEBUG", false), "调试模式：开放 raw_query、customer_scope，query 返回改写后的 SQL")
+	debug := flag.Bool("debug", envflag.Bool("MCP_DEBUG", false), "兼容旧参数；管理模式不开放绕过权限的调试工具")
 	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", "config/rewrite.yml"), "SQL 改写规则配置文件")
 	asOf := flag.String("as-of", envflag.String("REWRITE_AS_OF", store.DefaultAsOf.Format(time.RFC3339)), "授权过期判断的参考时间（RFC 3339）")
 	authMode := envflag.String("MCP_AUTH_MODE", "oauth")
@@ -69,17 +69,26 @@ func run() error {
 		return err
 	}
 	defer st.Close()
-	cfg, err := rewrite.LoadConfig(*rewriteConfig)
+	catalogue, err := catalog.Bootstrap(envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
 		return err
 	}
-	svc, err := service.New(context.Background(), st, cfg, asOfTime)
+	initial, err := catalogue.Get("default")
 	if err != nil {
 		return err
 	}
-	server := mcpserver.New(svc, mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug})
+	svc, err := catalogue.Open(context.Background(), initial)
+	if err != nil {
+		return err
+	}
+	defer svc.Store.Close()
+
+	opts := mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID}
 	if *debug {
-		logger.Warn("debug mode: raw_query is exposed and returns unrewritten data")
+		logger.Warn("managed MCP does not expose raw_query or customer_scope; use the admin SQL console for raw queries")
+	}
+	if !*stateless {
+		logger.Warn("managed HTTP uses stateless requests so policy changes apply immediately")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -88,24 +97,24 @@ func run() error {
 	switch *transport {
 	case "stdio":
 		logger.Info("serving MCP over stdio", "db", st.Path(), "default_user_id", *defaultUserID)
-		return server.Run(ctx, &mcp.StdioTransport{})
+		return mcpserver.ManagedServer(catalogue, *databaseID, svc, opts).Run(ctx, &mcp.StdioTransport{})
 	case "http":
-		return serveHTTP(ctx, logger, server, st, *addr, *path, *stateless, authMode, issuer, resource)
+		handler, err := mcpserver.ManagedHTTPHandler(catalogue, st, mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID}, authMode, issuer, resource, *path)
+		if err != nil {
+			return err
+		}
+		return serveHTTP(ctx, logger, handler, st, *addr, *path)
 	default:
 		return fmt.Errorf("未知传输方式 %q，可选 http 或 stdio", *transport)
 	}
 }
 
-func serveHTTP(ctx context.Context, logger *slog.Logger, server *mcp.Server, st *store.Store, addr, path string, stateless bool, mode, issuer, resource string) error {
-	mux, err := mcpserver.HTTPHandler(server, st, mode, issuer, resource, path, stateless)
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+func serveHTTP(ctx context.Context, logger *slog.Logger, handler http.Handler, st *store.Store, addr, path string) error {
+	srv := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("serving MCP over Streamable HTTP", "url", "http://"+addr+path, "db", st.Path(), "stateless", stateless)
+		logger.Info("serving MCP over Streamable HTTP", "url", "http://"+addr+path, "db", st.Path(), "stateless", true)
 		errCh <- srv.ListenAndServe()
 	}()
 	select {

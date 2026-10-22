@@ -258,3 +258,10 @@ details > summary {
     padding: 10px 8px;
   }
 }
+
+@media (max-width: 1000px) {
+ .app-header.ant-layout-header { flex-wrap: wrap; height: auto; gap: 0 10px; }
+ .app-header > .ant-tag { display: none; }
+ .app-header .ant-menu-horizontal { flex: 0 0 100% !important; }
+ .browser-tables { top: 94px; }
+}

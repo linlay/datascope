@@ -1,16 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
-import { api, type CallResult, type Check, type CheckStatus, type McpTool, type Report, type ServerInfo } from '../api';
+import { Alert, Button, Card, Descriptions, Empty, Input, Select, Space, Tag, Typography } from 'antd';
+import { api, type CallResult, type McpTool, type ServerInfo } from '../api';
 import { ResultTable, SqlBlock, UserPicker } from '../components/shared';
 
 const { Paragraph, Text } = Typography;
-
-const statusMeta: Record<CheckStatus, { color: string; label: string }> = {
-  pass: { color: 'success', label: '通过' },
-  fail: { color: 'error', label: '失败' },
-  warn: { color: 'warning', label: '警告' },
-  skip: { color: 'default', label: '跳过' },
-};
 
 export function McpInspector() {
   const [info, setInfo] = useState<ServerInfo>();
@@ -71,88 +64,9 @@ export function McpInspector() {
           />
         )}
       </Card>
-      <VerifyCard />
+      <Alert type="info" showIcon title="当前数据库的 MCP 实际接口" description="接口目录由数据库的访问策略控制；关闭的表与字段不会暴露。可在下方以员工身份验证查询权限。" />
       <ToolPlayground tools={info?.tools ?? []} />
     </Space>
-  );
-}
-
-function VerifyCard() {
-  const [report, setReport] = useState<Report>();
-  const [error, setError] = useState<string>();
-  const [running, setRunning] = useState(false);
-
-  const run = () => {
-    setRunning(true);
-    api
-      .mcpVerify()
-      .then((r) => {
-        setReport(r);
-        setError(undefined);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setRunning(false));
-  };
-
-  return (
-    <Card
-      size="small"
-      title="一键校验：MCP 返回是否正确"
-      extra={
-        <Button type="primary" onClick={run} loading={running}>
-          运行校验
-        </Button>
-      }
-    >
-      <Paragraph type="secondary">
-        后台以 MCP 客户端身份连接 MCP server，模拟网关注入不同用户身份，逐项比对：协议版本、工具目录、表结构、超级管理员结果与原始数据、改写验收案例、权限案例，以及只读与拒绝规则。
-      </Paragraph>
-      {error && <Alert type="error" showIcon message={error} />}
-      {report && (
-        <Space orientation="vertical" style={{ width: '100%' }}>
-          <Row gutter={24}>
-            <Col><Statistic title="通过" value={report.passed} styles={{ content: { color: '#389e0d' } }} /></Col>
-            <Col><Statistic title="失败" value={report.failed} styles={{ content: { color: report.failed ? '#cf1322' : undefined } }} /></Col>
-            <Col><Statistic title="警告" value={report.warned} styles={{ content: { color: report.warned ? '#d48806' : undefined } }} /></Col>
-            <Col><Statistic title="跳过" value={report.skipped} /></Col>
-            <Col><Statistic title="耗时" value={report.elapsed_ms} suffix="ms" /></Col>
-          </Row>
-          <Table<Check & { key: number }>
-            size="small"
-            pagination={false}
-            dataSource={report.checks.map((c, i) => ({ ...c, key: i }))}
-            expandable={{
-              rowExpandable: (c) => c.expected !== undefined || c.actual !== undefined,
-              expandedRowRender: (c) => (
-                <Row gutter={16}>
-                  <Col span={12}>
-                    <Text strong>预期</Text>
-                    <pre className="sql-block">{JSON.stringify(c.expected, null, 2)}</pre>
-                  </Col>
-                  <Col span={12}>
-                    <Text strong>MCP 实际返回</Text>
-                    <pre className="sql-block">{JSON.stringify(c.actual, null, 2)}</pre>
-                  </Col>
-                </Row>
-              ),
-            }}
-            columns={[
-              { title: '分组', dataIndex: 'group', width: 110 },
-              { title: '检查项', dataIndex: 'name', width: 320 },
-              {
-                title: '结果',
-                dataIndex: 'status',
-                width: 80,
-                filters: Object.entries(statusMeta).map(([value, m]) => ({ value, text: m.label })),
-                onFilter: (value, c) => c.status === value,
-                render: (s: CheckStatus) => <Tag color={statusMeta[s].color}>{statusMeta[s].label}</Tag>,
-              },
-              { title: '说明', dataIndex: 'detail', ellipsis: true },
-            ]}
-          />
-        </Space>
-      )}
-    </Card>
   );
 }
 

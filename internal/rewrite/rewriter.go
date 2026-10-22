@@ -29,8 +29,8 @@ func IsDenied(err error) bool {
 // Rewriter rewrites SELECT statements against a known set of tables.
 type Rewriter struct {
 	cfg    *Config
-	tables map[string]bool // every real table name, lower case
-	quoted map[string]bool // identifiers quoted in the policy SQL, lower case
+	tables map[string]bool   // every real table name, lower case
+	quoted map[string]bool   // identifiers quoted in the policy SQL, lower case
 	subSQL map[string]string // one-line subquery text per table
 }
 
@@ -43,7 +43,7 @@ func New(cfg *Config, tableNames []string) (*Rewriter, error) {
 		quotedNames(pol.CompiledSQL, r.quoted)
 	}
 	for _, pol := range cfg.Tables {
-		if !pol.Passthrough {
+		if !pol.Passthrough || len(pol.Columns) > 0 {
 			r.subSQL[pol.Table] = unquoteIdents(pol.subquery.String(), r.quoted)
 		}
 	}
@@ -222,13 +222,16 @@ func (v *visitor) rewriteTable(x *sql.QualifiedTableName) (sql.Source, error) {
 	if !ok {
 		return nil, deny("表 %s 没有配置改写规则", name)
 	}
+	if pol.Enabled != nil && !*pol.Enabled {
+		return nil, deny("表 %s 已禁止访问", name)
+	}
 	alias := x.Alias
 	if alias == nil {
 		alias = &sql.Ident{Name: sql.IdentName(x.Name), Quoted: true}
 	}
 	v.refs = append(v.refs, TableRef{Table: name, Alias: alias.Name, Scheme: pol.Scheme})
 	v.addSplice(x, name)
-	if pol.Passthrough {
+	if pol.Passthrough && len(pol.Columns) == 0 {
 		return &sql.QualifiedTableName{Schema: &sql.Ident{Name: "main"}, Name: &sql.Ident{Name: name}, Alias: alias}, nil
 	}
 	return &sql.ParenSource{X: pol.subquery.Clone(), Alias: alias}, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,8 @@ const (
 // Options configures identity and debug tools.
 type Options struct {
 	AuthMode string
+	Managed  bool
+	Tools    []string
 	// UserHeader carries the trusted user id, set by the gateway in front of
 	// this server. The AI never supplies identity.
 	UserHeader string
@@ -46,12 +49,17 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	if opts.UserHeader == "" {
 		opts.UserHeader = DefaultUserHeader
 	}
+	title, guidance := "证券业务 SQL 查询（权限改写）", instructions
+	if opts.Managed {
+		title = "SQL 数据库代理"
+		guidance = "使用 SQLite 方言。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
+	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    Name,
-		Title:   "证券业务 SQL 查询（权限改写）",
+		Title:   title,
 		Version: Version,
 	}, &mcp.ServerOptions{
-		Instructions: instructions,
+		Instructions: guidance,
 		// Only tools are offered; drop the SDK's historical default logging capability.
 		Capabilities: &mcp.ServerCapabilities{},
 	})
@@ -60,14 +68,14 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tables",
 		Title:       "列出数据表",
-		Description: "列出样例库中的全部数据表，包含中文表注释和访问方案（NONE 公共字典 / EMPLOYEE 员工权限 / CUSTOMER 客户权限 / RESTRICTED 仅超级管理员）。",
+		Description: "列出当前数据库允许访问的数据表、表注释和访问方案。",
 		Annotations: readOnly("列出数据表"),
 	}, h.listTables)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "describe_table",
 		Title:       "查看表结构",
-		Description: "返回指定表的字段、类型、主键、外键引用、索引、中文字段注释、建表语句及访问方案。",
+		Description: "返回指定表允许访问的字段、类型与访问方案；配置字段白名单时隐藏完整建表语句、索引及外键信息。",
 		Annotations: readOnly("查看表结构"),
 	}, h.describeTable)
 
@@ -98,6 +106,13 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		}, h.customerScope)
 	}
 
+	if opts.Managed {
+		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope"} {
+			if !slices.Contains(opts.Tools, name) {
+				server.RemoveTools(name)
+			}
+		}
+	}
 	return server
 }
 
@@ -167,14 +182,18 @@ type listTablesOutput struct {
 }
 
 func (h handlers) listTables(ctx context.Context, _ *mcp.CallToolRequest, _ listTablesInput) (*mcp.CallToolResult, listTablesOutput, error) {
+	h = h.current(ctx)
 	tables, err := h.svc.Store.Tables(ctx)
 	if err != nil {
 		return nil, listTablesOutput{}, err
 	}
-	out := listTablesOutput{Tables: make([]tableEntry, len(tables))}
-	for i, t := range tables {
+	out := listTablesOutput{Tables: []tableEntry{}}
+	for _, t := range tables {
+		if pol, ok := h.svc.Config().Lookup(t.Name); ok && pol.Enabled != nil && !*pol.Enabled {
+			continue
+		}
 		// Row counts are global, not per user, so they are not exposed here.
-		out.Tables[i] = tableEntry{Name: t.Name, Comment: t.Comment, Access: AccessFor(h.svc.Config(), t.Name)}
+		out.Tables = append(out.Tables, tableEntry{Name: t.Name, Comment: t.Comment, Access: AccessFor(h.svc.Config(), t.Name)})
 	}
 	return nil, out, nil
 }
@@ -189,9 +208,28 @@ type describeTableOutput struct {
 }
 
 func (h handlers) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in describeTableInput) (*mcp.CallToolResult, *describeTableOutput, error) {
+	h = h.current(ctx)
+	pol, ok := h.svc.Config().Lookup(in.Table)
+	if !ok || (pol.Enabled != nil && !*pol.Enabled) {
+		return nil, nil, fmt.Errorf("表不可访问")
+	}
 	schema, err := h.svc.Store.Describe(ctx, in.Table)
 	if err != nil {
 		return nil, nil, err
+	}
+	if pol.Columns != nil {
+		allowed := []store.Column{}
+		for _, col := range schema.Columns {
+			if slices.ContainsFunc(pol.Columns, func(name string) bool { return strings.EqualFold(name, col.Name) }) {
+				allowed = append(allowed, col)
+			}
+		}
+		schema.Columns = allowed
+		schema.DDL = ""
+		schema.Indexes = []string{}
+		for i := range schema.Columns {
+			schema.Columns[i].References = ""
+		}
 	}
 	return nil, &describeTableOutput{TableSchema: schema, Access: AccessFor(h.svc.Config(), schema.Name)}, nil
 }
@@ -211,6 +249,7 @@ type queryOutput struct {
 }
 
 func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, *queryOutput, error) {
+	h = h.current(ctx)
 	uid, err := h.userID(req)
 	if err != nil {
 		return nil, nil, err

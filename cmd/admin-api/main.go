@@ -15,11 +15,10 @@ import (
 	"time"
 
 	"sql-rewrite-server/internal/adminapi"
+	"sql-rewrite-server/internal/catalog"
 	"sql-rewrite-server/internal/envflag"
 	"sql-rewrite-server/internal/mcpserver"
 	"sql-rewrite-server/internal/oauth"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
 	"sql-rewrite-server/internal/store"
 )
 
@@ -53,14 +52,19 @@ func run() error {
 		return err
 	}
 	defer st.Close()
-	cfg, err := rewrite.LoadConfig(*rewriteConfig)
+	catalogue, err := catalog.Bootstrap(envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
 		return err
 	}
-	svc, err := service.New(context.Background(), st, cfg, asOfTime)
+	initial, err := catalogue.Get("default")
 	if err != nil {
 		return err
 	}
+	svc, err := catalogue.Open(context.Background(), initial)
+	if err != nil {
+		return err
+	}
+	defer svc.Store.Close()
 
 	inspector := &adminapi.Inspector{
 		Endpoint:    *mcpURL,
@@ -69,7 +73,8 @@ func run() error {
 		UserHeader:  *userHeader,
 		HTTPClient:  &http.Client{Timeout: 60 * time.Second},
 	}
-	handler := adminapi.Handler(svc, inspector)
+
+	handler := adminapi.ManagedHandler(catalogue, inspector)
 	mode := envflag.String("MCP_AUTH_MODE", "oauth")
 	if mode != "oauth" && mode != "header" && mode != "none" {
 		return fmt.Errorf("invalid MCP_AUTH_MODE %q", mode)

@@ -206,12 +206,20 @@ type Table struct {
 
 // Tables lists user tables with their Chinese comments and row counts.
 func (s *Store) Tables(ctx context.Context) ([]Table, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT m.name, COALESCE(c.comment_zh, '')
 		FROM sqlite_schema m
 		LEFT JOIN schema_comments c ON c.table_name = m.name AND c.column_name = ''
 		WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'
-		ORDER BY m.name`)
+		ORDER BY m.name`
+	var hasComments int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='schema_comments'").Scan(&hasComments); err != nil {
+		return nil, err
+	}
+	if hasComments == 0 {
+		query = "SELECT name, '' FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+	}
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +284,14 @@ func (s *Store) Describe(ctx context.Context, table string) (*TableSchema, error
 	comments := map[string]string{}
 	rows, err := s.db.QueryContext(ctx, `SELECT column_name, comment_zh FROM schema_comments WHERE table_name = ?`, table)
 	if err != nil {
-		return nil, err
+		var count int
+		if check := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name='schema_comments'").Scan(&count); check != nil || count != 0 {
+			return nil, err
+		}
+		rows, err = s.db.QueryContext(ctx, "SELECT '' AS column_name, '' AS comment_zh WHERE 0")
+		if err != nil {
+			return nil, err
+		}
 	}
 	for rows.Next() {
 		var col, comment string

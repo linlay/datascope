@@ -45,10 +45,13 @@ type SchemeInfo struct {
 
 // Policy is the configured rewrite rule for one table.
 type Policy struct {
-	Table       string `yaml:"table" json:"table"`
-	Scheme      Scheme `yaml:"scheme" json:"scheme"`
-	Reason      string `yaml:"reason" json:"reason"`
-	Alternative string `yaml:"alternative" json:"alternative,omitempty"`
+	Table       string   `yaml:"table" json:"table"`
+	Enabled     *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Columns     []string `yaml:"columns" json:"columns"`
+	MaxRows     int      `yaml:"max_rows,omitempty" json:"max_rows"`
+	Scheme      Scheme   `yaml:"scheme" json:"scheme"`
+	Reason      string   `yaml:"reason" json:"reason"`
+	Alternative string   `yaml:"alternative" json:"alternative,omitempty"`
 	// Divergent marks an alternative that can return different rows from the
 	// chosen path (a real policy decision), as opposed to an equivalent path.
 	Divergent bool `yaml:"divergent" json:"divergent"`
@@ -163,6 +166,14 @@ func (c *Config) compile() error {
 }
 
 func (c *Config) compilePolicy(pol *Policy, schemes map[Scheme]bool) error {
+	pol.CompiledSQL = ""
+	pol.CompiledGuard = ""
+	pol.Params = nil
+	pol.GuardParams = nil
+	pol.subquery = nil
+	if pol.MaxRows < 0 || pol.MaxRows > 1000 {
+		return errors.New("max_rows 必须为 0 到 1000")
+	}
 	if !schemes[pol.Scheme] {
 		return fmt.Errorf("未定义的方案 %q", pol.Scheme)
 	}
@@ -171,6 +182,9 @@ func (c *Config) compilePolicy(pol *Policy, schemes map[Scheme]bool) error {
 		return errors.New("passthrough 与 sql 只能二选一")
 	case !pol.Passthrough && strings.TrimSpace(pol.SQL) == "":
 		return errors.New("缺少 sql；若确实不需要改写，请显式设置 passthrough: true")
+	}
+	if pol.Columns != nil && len(pol.Columns) == 0 && (pol.Enabled == nil || *pol.Enabled) {
+		return errors.New("可访问表至少选择一个字段")
 	}
 	if pol.Passthrough {
 		pol.Params = []string{}
@@ -184,6 +198,23 @@ func (c *Config) compilePolicy(pol *Policy, schemes map[Scheme]bool) error {
 			return fmt.Errorf("sql: %w", err)
 		}
 		pol.CompiledSQL, pol.Params, pol.subquery = text, params, stmt
+	}
+	if len(pol.Columns) > 0 {
+		quote := func(v string) string { return "\"" + strings.ReplaceAll(v, "\"", "\"\"") + "\"" }
+		cols := make([]string, len(pol.Columns))
+		for i, col := range pol.Columns {
+			cols[i] = "__access." + quote(col)
+		}
+		source := "main." + quote(pol.Table)
+		if !pol.Passthrough {
+			source = "(" + pol.CompiledSQL + ")"
+		}
+		text := "SELECT " + strings.Join(cols, ", ") + " FROM " + source + " AS __access"
+		stmt, err := parseTemplate(text)
+		if err != nil {
+			return err
+		}
+		pol.CompiledSQL, pol.subquery = text, stmt
 	}
 	if strings.TrimSpace(pol.DenyUnless) != "" {
 		text, params, err := c.template(pol.DenyUnless)
@@ -292,4 +323,25 @@ func parseTemplate(text string) (*sql.SelectStatement, error) {
 		return nil, err
 	}
 	return sel, nil
+}
+
+// Validate recompiles a configuration edited through the management API.
+func (c *Config) Validate() error { return c.compile() }
+
+// MarshalYAML preserves null (all columns) versus [] (no columns).
+func (p Policy) MarshalYAML() (any, error) {
+	type plain Policy
+	var node yaml.Node
+	if err := node.Encode(plain(p)); err != nil {
+		return nil, err
+	}
+	if p.Columns == nil {
+		for i := 0; i < len(node.Content); i += 2 {
+			if node.Content[i].Value == "columns" {
+				node.Content[i+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+				break
+			}
+		}
+	}
+	return &node, nil
 }

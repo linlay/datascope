@@ -2,7 +2,7 @@ GOPROXY ?= https://goproxy.cn,direct
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 
-.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build test clean init
+.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build test clean init init-shop
 
 # 三个服务分别在三个终端启动：MCP server、后台 API、前端。
 run-mcp:
@@ -24,6 +24,7 @@ build:
 	$(GO_ENV) go build -o bin/mcp-server ./cmd/mcp-server
 	$(GO_ENV) go build -o bin/admin-api ./cmd/admin-api
 	$(GO_ENV) go build -o bin/gen-data ./cmd/gen-data
+	$(GO_ENV) go build -o bin/gen-shop ./cmd/gen-shop
 	cd web && npm run build
 
 test:
@@ -36,3 +37,6 @@ clean:
 # 已有数据库会拒绝覆盖；使用 -db 指定新文件。
 init:
 	$(GO_ENV) go run ./cmd/gen-data
+
+init-shop:
+	$(GO_ENV) go run ./cmd/gen-shop
