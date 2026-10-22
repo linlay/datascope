@@ -56,7 +56,11 @@ function buildTheme(dark: boolean): ThemeConfig {
       Card: { headerHeight: 40, headerHeightSM: 36, paddingLG: 14 },
       Table: {
         colorBgContainer: 'transparent',
-        headerBg: dark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(120, 120, 128, 0.06)',
+        headerBg: dark ? '#262629' : '#f5f5f7',
+        // Set explicitly: antd derives these from the translucent container, which renders near-black on hover.
+        rowHoverBg: dark ? '#2c2c30' : '#f0f6ff',
+        bodySortBg: dark ? '#222225' : '#fafafc',
+        headerSortHoverBg: dark ? '#303034' : '#ebebf0',
         cellPaddingBlock: 6,
         cellPaddingInline: 10,
         cellPaddingBlockSM: 4,

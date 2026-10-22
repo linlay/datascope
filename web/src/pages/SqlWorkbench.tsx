@@ -116,7 +116,6 @@ export function SqlWorkbench() {
                 <UserPicker size="small" disabled={disabled} value={userId} onChange={(id) => { if (busy.current) return; setUserId(id); setRewritten(undefined); setResult(undefined); }} style={{ minWidth: 0, width: '100%' }} />
               </div>
               <Segmented size="small" value={view} onChange={setView} options={[{ value: 'diff', label: 'Git diff' }, { value: 'sql', label: '完整 SQL' }]} />
-              <Button size="small" type="text" disabled={!rewritten?.data} onClick={() => { if (rewritten?.data) void navigator.clipboard.writeText(rewritten.data.rewritten_sql); }}>复制 SQL</Button>
             </div>
             <div className="sql-preview">
               {rewritten?.error ? <Alert type={rewritten.denied ? 'warning' : 'error'} showIcon message={rewritten.denied ? '改写拒绝' : '改写失败'} description={rewritten.error} /> : rewritten?.data ? <>
