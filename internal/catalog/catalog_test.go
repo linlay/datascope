@@ -521,7 +521,13 @@ func TestCustomMCPPaths(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	oauthHandler.ServeHTTP(w, httptest.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp/finance", nil))
-	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(resource)) {
+	var metadata struct {
+		Resource string `json:"resource"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || metadata.Resource != resource+"/finance" {
 		t.Fatalf("OAuth metadata %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()

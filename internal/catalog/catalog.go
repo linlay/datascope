@@ -181,6 +181,24 @@ func (d Database) MCPRoute() string {
 	return d.ID
 }
 
+// AllowsMCPResource accepts only configured, enabled endpoints on the pinned
+// public resource URL. An arbitrary URL or a renamed/disabled route is rejected.
+func (c *Catalog) AllowsMCPResource(base, resource string) bool {
+	items, err := c.List()
+	if err != nil {
+		return false
+	}
+	for _, item := range items {
+		if !item.MCPEnabled {
+			continue
+		}
+		if resource == strings.TrimRight(base, "/")+"/"+item.MCPRoute() || (item.ID == "default" && resource == base) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Catalog) ByMCPPath(segment string) (*Database, error) {
 	items, err := c.List()
 	if err != nil {

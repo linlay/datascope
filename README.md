@@ -56,11 +56,11 @@ config/databases/
 | 分库 MCP | `/mcp/{mcp_path}`（逐库配置后缀，`MCP_PATH` 调整公共前缀） |
 | 兼容默认库 | `/mcp`、原有 `/api/tables` 等接口 |
 
-每个数据库可在“MCP 配置与测试”中单独设置 MCP 路径后缀，例如 `mcp_path: securities` 对应 `/mcp/securities`。后缀以字母或数字开头，仅支持字母、数字、下划线、连字符，最长 64 位，所有数据库间必须唯一（包含关闭 MCP 的数据库）。修改后立即生效，旧的分库路径返回 404，页面测试自动采用新地址；旧客户端需要更新连接地址。未配置 `mcp_path` 的旧文件兼容使用数据库 ID，启动时自动补齐字段。`/mcp` 仍作为初始库的兼容入口，stdio 仍按数据库 ID 选择，不依赖 HTTP 路径。自定义路径沿用现有 OAuth 保护与代理资源授权。
+每个数据库可在“MCP 配置与测试”中单独设置 MCP 路径后缀，例如 `mcp_path: securities` 对应 `/mcp/securities`。后缀以字母或数字开头，仅支持字母、数字、下划线、连字符，最长 64 位，所有数据库间必须唯一（包含关闭 MCP 的数据库）。修改后立即生效，旧的分库路径返回 404，页面测试自动采用新地址；旧客户端需要更新连接地址。未配置 `mcp_path` 的旧文件兼容使用数据库 ID，启动时自动补齐字段。`/mcp` 仍作为初始库的兼容入口，stdio 仍按数据库 ID 选择，不依赖 HTTP 路径。自定义路径使用该完整端点地址作为独立 OAuth 资源。
 
 HTTP 固定使用无状态 MCP 请求，以便每次请求读取最新策略。stdio 通过 `-database <id>` 或 `MCP_DATABASE` 选择数据库，也遵循该库服务与接口开关。`raw_query` / `customer_scope` 可按库选择开启，默认不启用。`raw_query` 绕过表、字段及行权限改写，数据库仍保持只读；两个工具仅管理员可调用，OAuth 下另需 `sql:debug`。`customer_scope` 适用于证券样例库。
 
-OAuth 沿用默认身份库的员工体系，各数据源共享 `MCP_RESOURCE_URL` 对应的代理资源授权，路径负责选择数据源，逐库规则负责控制查询权限；目前不是每库独立 OAuth 授权服务器或独立令牌 audience。所有新增数据源的 `${userId}` 都使用这套可信身份编号。
+OAuth 共用员工身份体系与授权服务器，但每个数据库连接独立授权。`MCP_RESOURCE_URL` 配置公共资源根地址，各库完整 MCP 地址分别作为资源元数据的 `resource`、授权请求的 `resource` 和 JWT 的 `aud`；例如 `/mcp/securities` 的令牌不能用于 `/mcp/shop_demo`。授权码和刷新令牌也绑定该完整地址。修改 MCP 路径后客户端需要更新地址并重新授权，关闭 MCP 的数据库不能新建或刷新授权。所有新增数据源的 `${userId}` 都使用这套可信身份编号。
 
 ## 小型商店测试库
 
@@ -109,14 +109,14 @@ SELECT 支持 JOIN、嵌套查询、CTE、UNION、窗口函数；拒绝写操作
 
 实现按 [MCP Authorization 规范](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) 分为授权服务器和资源服务器，使用官方 Go SDK 的 `auth.RequireBearerToken` 与受保护资源元数据处理器。
 
-1. 在 agent-platform 使用“MCP 地址导入”，地址使用 `MCP_RESOURCE_URL`，保持 `authMode: mcp`。
+1. 在 agent-platform 使用“MCP 地址导入”，地址使用管理平台显示的所选数据库完整 MCP 地址（例如 `http://127.0.0.1:8083/mcp/default`），保持 `authMode: mcp`。
 2. “账号授权”会通过资源元数据发现 `OAUTH_ISSUER`，动态注册公共客户端，再打开员工登录授权页。
 3. 输入工号与配置的演示密码，同意查询授权。客户端以授权码 + PKCE S256 换取令牌，必须携带精确 `resource`。
 4. 换身份时重新发起账号授权登录另一员工。本服务不建立自动登录会话。
 
-端点：`/.well-known/oauth-authorization-server`、`/oauth/register`、`/oauth/authorize`、`/oauth/token`、`/oauth/jwks.json`；MCP 端提供 `/.well-known/oauth-protected-resource/mcp` 及根路径别名。未携带或无效令牌返回 401 和 `WWW-Authenticate` 发现地址。令牌校验签名、issuer、audience、过期时间、scope 与当前员工状态，忽略 `X-User-Id`。
+端点：`/.well-known/oauth-authorization-server`、`/oauth/register`、`/oauth/authorize`、`/oauth/token`、`/oauth/jwks.json`；MCP 端为各连接提供 `/.well-known/oauth-protected-resource/mcp/{mcp_path}`，资源标识与该连接完整地址一致；另保留 `/mcp` 对应的元数据与根路径别名。未携带或无效令牌返回 401 和 `WWW-Authenticate` 发现地址。令牌校验签名、issuer、audience、过期时间、scope 与当前员工状态，忽略 `X-User-Id`。
 
-JWT 使用 RS256，有效 1 小时，`sub=工号`、`aud=MCP_RESOURCE_URL`。刷新令牌有效 7 天，单次使用并轮换；重用旧刷新令牌会撤销该刷新族。授权码 2 分钟、单次使用，绑定客户端、redirect URI、resource 与 PKCE；登录表单有 CSRF 校验。私钥仅由 admin-api 持有（0600 文件），MCP 通过固定 issuer 拉取 JWKS，缓存 5 分钟。客户端注册与授权状态保存到独立 SQLite，重启后可继续使用。
+JWT 使用 RS256，有效 1 小时，`sub=工号`、`aud=当前连接的完整 MCP 地址`（兼容 `/mcp` 入口时为公共根地址）。刷新令牌有效 7 天，单次使用并轮换；重用旧刷新令牌会撤销该刷新族。授权码 2 分钟、单次使用，绑定客户端、redirect URI、resource 与 PKCE；登录表单有 CSRF 校验。私钥仅由 admin-api 持有（0600 文件），MCP 通过固定 issuer 拉取 JWKS，缓存 5 分钟。客户端注册与授权状态保存到独立 SQLite，重启后可继续使用。
 
 普通员工只签发 `sql:query`；管理员请求时可获得 `sql:debug`。管理模式提供五个工具供逐库勾选，默认只启用三个基础工具；`MCP_DEBUG` 控制 query 是否返回改写 SQL 和 binds，工具启停由数据库 YAML 的 `tools` 列表决定。SQL 工作台也可查看改写结果和 binds。
 
@@ -128,7 +128,7 @@ JWT 使用 RS256，有效 1 小时，`sub=工号`、`aud=MCP_RESOURCE_URL`。刷
 
 `OAUTH_DEBUG_LOGIN=true` 会在授权页出现无需密码的员工模拟选择器，仅本机演示使用，默认关闭。后台“MCP 配置与测试”由 admin-api 为所选在职员工签发令牌，真实通过 MCP 校验与改写，不由前端持有签名私钥。离职员工不能签发令牌，可在 SQL 工作台验证其空范围。
 
-按已有 platform 设计，授权凭据可能为部署级共享；本仓库无法控制 platform 的凭据隔离方式，也尚未完成外部 platform 的实际联调。
+客户端应按完整 MCP 地址分别保存各数据库连接的授权凭据；即使客户端在部署内共享凭据存储，也不能将一个数据库的令牌用于另一个数据库。本仓库集成测试覆盖分库元数据严格校验、登录、PKCE 换令牌、刷新与 MCP 调用；外部 Platform 的浏览器回调仍需实际联调。
 
 ## 控制台与部署边界
 

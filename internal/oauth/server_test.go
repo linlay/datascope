@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"sql-rewrite-server/internal/adminapi"
+	"sql-rewrite-server/internal/catalog"
 	"sql-rewrite-server/internal/mcpserver"
 	"sql-rewrite-server/internal/oauth"
 	"sql-rewrite-server/internal/rewrite"
@@ -37,9 +39,11 @@ type env struct {
 	issuer, resource, key string
 	st                    *store.Store
 	svc                   *service.QueryService
+	catalog               *catalog.Catalog
 }
 
-func setup(t *testing.T) *env {
+func setup(t *testing.T) *env { return setupMode(t, false) }
+func setupMode(t *testing.T, managed bool) *env {
 	t.Helper()
 	st, e := store.Open(testutil.Demo(t), 0)
 	if e != nil {
@@ -60,7 +64,16 @@ func setup(t *testing.T) *env {
 	resource := "http://" + m.Listener.Addr().String() + "/mcp"
 	dir := t.TempDir()
 	key := filepath.Join(dir, "signing.pem")
-	as, e := oauth.New(oauth.Config{Issuer: issuer, Resource: resource, KeyPath: key, StatePath: filepath.Join(dir, "state.sqlite3"), Password: "test-demo-password"}, st)
+	var catalogue *catalog.Catalog
+	var allowed func(string) bool
+	if managed {
+		catalogue, e = catalog.New(filepath.Join(dir, "databases"), st, cfg, store.DefaultAsOf, 0)
+		if e != nil {
+			t.Fatal(e)
+		}
+		allowed = func(target string) bool { return catalogue.AllowsMCPResource(resource, target) }
+	}
+	as, e := oauth.New(oauth.Config{Issuer: issuer, Resource: resource, ResourceAllowed: allowed, KeyPath: key, StatePath: filepath.Join(dir, "state.sqlite3"), Password: "test-demo-password"}, st)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -69,13 +82,17 @@ func setup(t *testing.T) *env {
 	a.Start()
 	t.Cleanup(a.Close)
 	server := mcpserver.New(svc, mcpserver.Options{AuthMode: "oauth", Debug: true})
-	m.Config.Handler, e = mcpserver.HTTPHandler(server, st, "oauth", issuer, resource, "/mcp", true)
+	if managed {
+		m.Config.Handler, e = mcpserver.ManagedHTTPHandler(catalogue, st, mcpserver.Options{AuthMode: "oauth"}, "oauth", issuer, resource, "/mcp")
+	} else {
+		m.Config.Handler, e = mcpserver.HTTPHandler(server, st, "oauth", issuer, resource, "/mcp", true)
+	}
 	if e != nil {
 		t.Fatal(e)
 	}
 	m.Start()
 	t.Cleanup(m.Close)
-	return &env{as, issuer, resource, key, st, svc}
+	return &env{as: as, issuer: issuer, resource: resource, key: key, st: st, svc: svc, catalog: catalogue}
 }
 func request(t *testing.T, c *http.Client, method, endpoint string, form url.Values, token string) (int, http.Header, []byte) {
 	t.Helper()
@@ -356,4 +373,178 @@ func TestLoginRequiresCookieAndReportsStalePage(t *testing.T) {
 	if strings.Contains(string(body), "test-demo-password") {
 		t.Fatal("password reflected")
 	}
+}
+
+func TestManagedEndpointOAuthDiscoveryLoginAndAudience(t *testing.T) {
+	e := setupMode(t, true)
+	id := register(t, e)
+	if err := e.catalog.Add(context.Background(), catalog.Database{ID: "other", Name: "Other", Driver: "sqlite", Path: e.st.Path()}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := e.catalog.Get("other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.MCPEnabled = true
+	other.Tools = []string{"list_tables"}
+	if err = e.catalog.Save(context.Background(), *other); err != nil {
+		t.Fatal(err)
+	}
+	origin := strings.TrimSuffix(e.resource, "/mcp")
+	var previousToken, lastRefresh string
+	for _, suffix := range []string{"", "/default", "/finance"} {
+		t.Run("resource"+suffix, func(t *testing.T) {
+			if suffix == "/finance" {
+				d, err := e.catalog.Get("default")
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.MCPPath = "finance"
+				if err = e.catalog.Save(context.Background(), *d); err != nil {
+					t.Fatal(err)
+				}
+				status, _, _ := request(t, http.DefaultClient, "POST", e.resource+"/default", nil, "")
+				if status != 404 {
+					t.Fatalf("old route status %d", status)
+				}
+			}
+			endpoint := e.resource + suffix
+			status, h, _ := request(t, http.DefaultClient, "POST", endpoint, nil, "")
+			if status != 401 {
+				t.Fatalf("challenge status %d", status)
+			}
+			challenges, err := oauthex.ParseWWWAuthenticate(h.Values("WWW-Authenticate"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			metadataURL := ""
+			for _, challenge := range challenges {
+				if strings.EqualFold(challenge.Scheme, "Bearer") {
+					metadataURL = challenge.Params["resource_metadata"]
+				}
+			}
+			expectedMetadata := origin + "/.well-known/oauth-protected-resource/mcp" + suffix
+			if metadataURL != expectedMetadata {
+				t.Fatalf("metadata pointer %q want %q", metadataURL, expectedMetadata)
+			}
+			// This is the SDK's exact resource check that Platform reported failing.
+			metadata, err := oauthex.GetProtectedResourceMetadata(context.Background(), metadataURL, endpoint, http.DefaultClient)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.Resource != endpoint {
+				t.Fatal("resource mismatch")
+			}
+			scoped := *e
+			scoped.resource = endpoint
+			authCode := code(t, &scoped, id, "E0001")
+			form := url.Values{"grant_type": {"authorization_code"}, "client_id": {id}, "redirect_uri": {"http://127.0.0.1/callback"}, "code": {authCode}, "code_verifier": {verifier}, "resource": {endpoint}}
+			wrong := url.Values{}
+			for key, values := range form {
+				wrong[key] = values
+			}
+			wrong.Set("resource", e.resource+"/other")
+			exchange(t, e, wrong, 400)
+			tokens := exchange(t, e, form, 200)
+			token := tokens["access_token"].(string)
+			claimsRaw, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var claims struct{ Aud string }
+			if err = json.Unmarshal(claimsRaw, &claims); err != nil {
+				t.Fatal(err)
+			}
+			if claims.Aud != endpoint {
+				t.Fatalf("audience %q want %q", claims.Aud, endpoint)
+			}
+			session := connect(t, &scoped, token)
+			if tools, err := session.ListTools(context.Background(), nil); err != nil || len(tools.Tools) != 3 {
+				t.Fatalf("tools %v %v", tools, err)
+			}
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "query", Arguments: map[string]any{"sql": "SELECT COUNT(*) AS n FROM customers"}})
+			if err != nil || result.IsError {
+				t.Fatalf("query %v %v", result, err)
+			}
+			// Correctly signed tokens for another database or the root alias cannot
+			// be replayed at this endpoint.
+			status, _, _ = request(t, http.DefaultClient, "POST", e.resource+"/other", nil, token)
+			if status != 401 {
+				t.Fatalf("cross-resource token accepted: %d", status)
+			}
+			if previousToken != "" {
+				status, _, _ = request(t, http.DefaultClient, "POST", endpoint, nil, previousToken)
+				if status != 401 {
+					t.Fatalf("previous audience accepted: %d", status)
+				}
+			}
+			refresh := url.Values{"grant_type": {"refresh_token"}, "client_id": {id}, "refresh_token": {tokens["refresh_token"].(string)}, "resource": {endpoint}}
+			refresh.Set("resource", e.resource+"/other")
+			exchange(t, e, refresh, 400)
+			refresh.Set("resource", endpoint)
+			rotated := exchange(t, e, refresh, 200)
+			verified := &oauth.Verifier{Issuer: e.issuer, Resource: endpoint, Store: e.st}
+			if _, err := verified.Verify(context.Background(), rotated["access_token"].(string), nil); err != nil {
+				t.Fatal("refreshed token audience invalid", err)
+			}
+			previousToken = token
+			lastRefresh = rotated["refresh_token"].(string)
+		})
+	}
+	// The management inspector must request the same audience as the scoped URL.
+	in := &adminapi.Inspector{Endpoint: e.resource, Service: e.svc, Token: e.as.SignEmployee}
+	in.TokenForDatabase = func(ctx context.Context, userID int64, databaseID string) (string, error) {
+		d, err := e.catalog.Get(databaseID)
+		if err != nil {
+			return "", err
+		}
+		return e.as.SignEmployeeForResource(ctx, userID, e.resource+"/"+d.MCPRoute())
+	}
+	w := httptest.NewRecorder()
+	adminapi.ManagedHandler(e.catalog, in).ServeHTTP(w, httptest.NewRequest("GET", "/api/databases/default/mcp/info", nil))
+	if w.Code != 200 {
+		t.Fatalf("scoped inspector %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), e.resource+"/finance") {
+		t.Fatal("inspector used old resource")
+	}
+	// A second database receives its own usable token and its own tool selection.
+	otherToken, err := e.as.SignEmployeeForResource(context.Background(), 1, e.resource+"/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherEnv := *e
+	otherEnv.resource += "/other"
+	if tools, err := connect(t, &otherEnv, otherToken).ListTools(context.Background(), nil); err != nil || len(tools.Tools) != 1 {
+		t.Fatalf("second database tools %v %v", tools, err)
+	}
+	if status, _, _ := request(t, http.DefaultClient, "POST", e.resource+"/finance", nil, otherToken); status != 401 {
+		t.Fatalf("second database token accepted by first: %d", status)
+	}
+	// The authorization server only accepts exact active endpoints on the
+	// configured origin, never arbitrary descendants or caller-supplied hosts.
+	for _, target := range []string{"https://attacker.example/mcp/finance", e.resource + "/not-configured", e.resource + "/default", e.resource + "/finance/extra"} {
+		q := url.Values{"client_id": {id}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "code_challenge_method": {"S256"}, "code_challenge": {challenge()}, "resource": {target}}
+		status, _, body := request(t, http.DefaultClient, "GET", e.issuer+"/oauth/authorize?"+q.Encode(), nil, "")
+		if status != 400 || !strings.Contains(string(body), "invalid_target") {
+			t.Fatalf("target accepted %q: %d", target, status)
+		}
+	}
+	// Disabling this database prevents new tokens and refresh without affecting others.
+	d, err := e.catalog.Get("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.MCPEnabled = false
+	if err = e.catalog.Save(context.Background(), *d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.as.SignEmployeeForResource(context.Background(), 1, e.resource+"/finance"); err == nil {
+		t.Fatal("disabled database received a token")
+	}
+	exchange(t, e, url.Values{"grant_type": {"refresh_token"}, "client_id": {id}, "refresh_token": {lastRefresh}, "resource": {e.resource + "/finance"}}, 400)
+	if _, err = e.as.SignEmployeeForResource(context.Background(), 1, e.resource+"/other"); err != nil {
+		t.Fatal("disabling one database affected another", err)
+	}
+
 }

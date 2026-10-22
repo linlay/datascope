@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -80,12 +81,30 @@ func run() error {
 		return fmt.Errorf("invalid MCP_AUTH_MODE %q", mode)
 	}
 	if mode == "oauth" {
-		as, err := oauth.New(oauth.Config{Issuer: envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), Resource: envflag.String("MCP_RESOURCE_URL", *mcpURL), KeyPath: envflag.String("OAUTH_KEY_PATH", "data/oauth/signing.pem"), StatePath: envflag.String("OAUTH_STATE_PATH", "data/oauth/state.sqlite3"), Password: envflag.String("OAUTH_DEMO_PASSWORD", ""), DebugLogin: envflag.Bool("OAUTH_DEBUG_LOGIN", false)}, st)
+		resourceBase := envflag.String("MCP_RESOURCE_URL", *mcpURL)
+		as, err := oauth.New(oauth.Config{
+			Issuer:   envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"),
+			Resource: resourceBase,
+			ResourceAllowed: func(resource string) bool {
+				return catalogue.AllowsMCPResource(resourceBase, resource)
+			},
+			KeyPath:    envflag.String("OAUTH_KEY_PATH", "data/oauth/signing.pem"),
+			StatePath:  envflag.String("OAUTH_STATE_PATH", "data/oauth/state.sqlite3"),
+			Password:   envflag.String("OAUTH_DEMO_PASSWORD", ""),
+			DebugLogin: envflag.Bool("OAUTH_DEBUG_LOGIN", false),
+		}, st)
 		if err != nil {
 			return err
 		}
 		defer as.Close()
 		inspector.Token = as.SignEmployee
+		inspector.TokenForDatabase = func(ctx context.Context, userID int64, databaseID string) (string, error) {
+			d, err := catalogue.Get(databaseID)
+			if err != nil {
+				return "", err
+			}
+			return as.SignEmployeeForResource(ctx, userID, strings.TrimRight(resourceBase, "/")+"/"+d.MCPRoute())
+		}
 		handler = as.Handler(handler)
 	}
 	srv := &http.Server{

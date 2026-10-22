@@ -69,19 +69,16 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		if segment != "" {
 			endpoint = prefix + segment
 		}
-		// All endpoints accept tokens for the configured proxy resource; the URL
-		// selects a database, never credentials or policy supplied by the caller.
-		h, err := HTTPHandler(New(svc, selected), identity, mode, issuer, resource, endpoint, true)
+		// Discovery, authorization resource and token audience identify the exact
+		// endpoint. Build from the pinned public URL, never the request Host.
+		endpointResource := resource
+		if segment != "" {
+			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
+		}
+		h, err := HTTPHandler(New(svc, selected), identity, mode, issuer, endpointResource, endpoint, true)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
-		}
-		if strings.HasPrefix(r.URL.Path, metaPrefix) {
-			clone := r.Clone(r.Context())
-			u := *r.URL
-			u.Path = "/.well-known/oauth-protected-resource"
-			clone.URL = &u
-			r = clone
 		}
 		h.ServeHTTP(w, r)
 	}), nil

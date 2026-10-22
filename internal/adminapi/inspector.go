@@ -29,9 +29,10 @@ type Inspector struct {
 	FixturesDir string // permission_cases.json and rewrite_cases.json; optional
 	// UserHeader is the header the MCP server trusts for identity; the
 	// inspector sets it the way a gateway would.
-	UserHeader string
-	Token      func(context.Context, int64) (string, error)
-	HTTPClient *http.Client
+	UserHeader       string
+	Token            func(context.Context, int64) (string, error)
+	TokenForDatabase func(context.Context, int64, string) (string, error)
+	HTTPClient       *http.Client
 }
 
 // userHeaderTransport plays the gateway: it stamps the trusted user header.

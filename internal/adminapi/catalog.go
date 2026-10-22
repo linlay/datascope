@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"net/http"
 	"sql-rewrite-server/internal/catalog"
 	"strings"
@@ -100,6 +101,11 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 			in.FixturesDir = ""
 		}
 		in.Endpoint = view(*d).MCPEndpoint
+		if inspector.TokenForDatabase != nil {
+			in.Token = func(ctx context.Context, userID int64) (string, error) {
+				return inspector.TokenForDatabase(ctx, userID, d.ID)
+			}
+		}
 		clone := r.Clone(r.Context())
 		u := *r.URL
 		u.Path = path

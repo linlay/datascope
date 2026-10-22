@@ -48,6 +48,9 @@ func hash(s string) string { v := sha256.Sum256([]byte(s)); return b64.EncodeToS
 type Config struct {
 	Issuer, Resource, KeyPath, StatePath, Password string
 	DebugLogin                                     bool
+	// ResourceAllowed validates exact configured endpoint URLs. Without it,
+	// this authorization server only issues tokens for Resource.
+	ResourceAllowed func(string) bool
 }
 type Server struct {
 	cfg                       Config
@@ -220,6 +223,16 @@ func (s *Server) putGrant(id, kind string, g grant) error {
 var challengeRE = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var verifierRE = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
+func (s *Server) allowsResource(resource string) bool {
+	if !ValidURL(resource, false) {
+		return false
+	}
+	if s.cfg.ResourceAllowed != nil {
+		return s.cfg.ResourceAllowed(resource)
+	}
+	return resource == s.cfg.Resource
+}
+
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	c, e := s.getClient(q.Get("client_id"))
@@ -237,12 +250,16 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || !challengeRE.MatchString(q.Get("code_challenge")) || q.Get("resource") != s.cfg.Resource {
+	if len(q["resource"]) != 1 || !s.allowsResource(q.Get("resource")) {
+		oauthError(w, "invalid_target")
+		return
+	}
+	if q.Get("response_type") != "code" || q.Get("code_challenge_method") != "S256" || !challengeRE.MatchString(q.Get("code_challenge")) {
 		oauthError(w, "invalid_request")
 		return
 	}
 	nonce := random()
-	g := grant{Client: c.ID, Redirect: q.Get("redirect_uri"), Resource: s.cfg.Resource, Challenge: q.Get("code_challenge"), Scope: scope, Family: q.Get("state"), Expires: time.Now().Add(10 * time.Minute).Unix()}
+	g := grant{Client: c.ID, Redirect: q.Get("redirect_uri"), Resource: q.Get("resource"), Challenge: q.Get("code_challenge"), Scope: scope, Family: q.Get("state"), Expires: time.Now().Add(10 * time.Minute).Unix()}
 	if e = s.putGrant(nonce, "login", g); e != nil {
 		http.Error(w, "login unavailable", 500)
 		return
@@ -259,7 +276,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.DebugLogin {
 		users, _ = s.store.Users(r.Context())
 	}
-	loginPage.Execute(w, map[string]any{"Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": s.cfg.Resource, "Debug": s.cfg.DebugLogin, "Users": users})
+	loginPage.Execute(w, map[string]any{"Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": g.Resource, "Debug": s.cfg.DebugLogin, "Users": users})
 }
 
 func loginCookieName(nonce string) string { return "oauth_login_" + hash(nonce)[:16] }
@@ -338,7 +355,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	var raw string
 	var g grant
-	if tx.QueryRow("SELECT data FROM grants WHERE id=? AND kind='login'", hash(nonce)).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Expires <= time.Now().Unix() {
+	if tx.QueryRow("SELECT data FROM grants WHERE id=? AND kind='login'", hash(nonce)).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Expires <= time.Now().Unix() || !s.allowsResource(g.Resource) {
 		loginProblem(w, r, "授权页面已过期或已经提交过，请重新发起账号授权。")
 		return
 	}
@@ -371,6 +388,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest.String(), http.StatusSeeOther)
 }
 func (s *Server) SignEmployee(ctx context.Context, id int64) (string, error) {
+	return s.SignEmployeeForResource(ctx, id, s.cfg.Resource)
+}
+
+func (s *Server) SignEmployeeForResource(ctx context.Context, id int64, resource string) (string, error) {
+	if !s.allowsResource(resource) {
+		return "", errors.New("unknown or disabled OAuth resource")
+	}
 	us, e := s.store.Users(ctx)
 	if e != nil {
 		return "", e
@@ -381,14 +405,14 @@ func (s *Server) SignEmployee(ctx context.Context, id int64) (string, error) {
 			if u.RoleCode == "ADMIN" {
 				scope += " sql:debug"
 			}
-			return s.sign(u.EmpNo, scope)
+			return s.sign(u.EmpNo, scope, resource)
 		}
 	}
 	return "", errors.New("inactive or unknown employee")
 }
-func (s *Server) sign(sub, scope string) (string, error) {
+func (s *Server) sign(sub, scope, resource string) (string, error) {
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "at+jwt", "kid": "demo-rsa-1"})
-	claims, _ := json.Marshal(map[string]any{"iss": s.cfg.Issuer, "aud": s.cfg.Resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random()})
+	claims, _ := json.Marshal(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random()})
 	body := b64.EncodeToString(header) + "." + b64.EncodeToString(claims)
 	h := sha256.Sum256([]byte(body))
 	sig, e := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, h[:])
@@ -401,6 +425,10 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.PostForm
+	if len(q["resource"]) != 1 || !s.allowsResource(q.Get("resource")) {
+		oauthError(w, "invalid_target")
+		return
+	}
 	c, e := s.getClient(q.Get("client_id"))
 	if e != nil {
 		oauthError(w, "invalid_client")
@@ -457,7 +485,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		}
 		g.Scope = want
 	}
-	access, e := s.sign(g.Subject, g.Scope)
+	access, e := s.sign(g.Subject, g.Scope, g.Resource)
 	if e != nil {
 		http.Error(w, "signing failed", 500)
 		return
