@@ -1,0 +1,295 @@
+// Package rewrite turns AI-generated SELECT statements into permission-scoped
+// SQL. The only transformation is structural: every table in FROM / JOIN is
+// replaced by the subquery configured for that table (config/rewrite.yml).
+package rewrite
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"slices"
+	"strings"
+
+	sql "github.com/rqlite/sql"
+	"gopkg.in/yaml.v3"
+)
+
+// Bind variables a template may use. Values come from the trusted server
+// context and are passed as named parameters, never spliced into SQL text.
+const (
+	VarUserID = "userId"
+	VarAsOf   = "asOf"
+)
+
+// Variables documents every bind variable available to templates.
+var Variables = []VariableInfo{
+	{Name: VarUserID, Description: "当前员工内部编号，来自 OAuth 工号映射或可信网关"},
+	{Name: VarAsOf, Description: "授权过期判断的参考时间（RFC 3339 字符串）"},
+}
+
+type VariableInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Scheme is a rewrite category label defined in the config.
+type Scheme string
+
+type SchemeInfo struct {
+	Scheme      Scheme `yaml:"scheme" json:"scheme"`
+	Name        string `yaml:"name" json:"name"`
+	Description string `yaml:"description" json:"description"`
+}
+
+// Policy is the configured rewrite rule for one table.
+type Policy struct {
+	Table       string `yaml:"table" json:"table"`
+	Scheme      Scheme `yaml:"scheme" json:"scheme"`
+	Reason      string `yaml:"reason" json:"reason"`
+	Alternative string `yaml:"alternative" json:"alternative,omitempty"`
+	// Divergent marks an alternative that can return different rows from the
+	// chosen path (a real policy decision), as opposed to an equivalent path.
+	Divergent bool `yaml:"divergent" json:"divergent"`
+	// Passthrough leaves the table unfiltered. It must be explicit so a
+	// forgotten sql never silently means "no filtering".
+	Passthrough bool   `yaml:"passthrough" json:"passthrough"`
+	SQL         string `yaml:"sql" json:"sql,omitempty"`
+	// DenyUnless is a boolean SQL expression evaluated before execution; if it
+	// is false the whole statement is rejected with DenyMessage.
+	DenyUnless  string `yaml:"deny_unless" json:"deny_unless,omitempty"`
+	DenyMessage string `yaml:"deny_message" json:"deny_message,omitempty"`
+
+	// Compiled forms, with fragments expanded and ${var} turned into :var.
+	CompiledSQL   string   `yaml:"-" json:"compiled_sql,omitempty"`
+	CompiledGuard string   `yaml:"-" json:"compiled_deny_unless,omitempty"`
+	Params        []string `yaml:"-" json:"params"`
+	GuardParams   []string `yaml:"-" json:"deny_unless_params,omitempty"`
+	subquery      *sql.SelectStatement
+}
+
+// Config is a loaded and validated rewrite configuration.
+type Config struct {
+	Version   int               `yaml:"version" json:"version"`
+	Schemes   []SchemeInfo      `yaml:"schemes" json:"schemes"`
+	Fragments map[string]string `yaml:"fragments" json:"fragments"`
+	Tables    []*Policy         `yaml:"tables" json:"tables"`
+	Path      string            `yaml:"-" json:"path"`
+
+	byTable map[string]*Policy
+}
+
+// LoadConfig reads and validates a rewrite config file.
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取改写配置: %w", err)
+	}
+	cfg, err := ParseConfig(data)
+	if err != nil {
+		return nil, fmt.Errorf("改写配置 %s: %w", path, err)
+	}
+	cfg.Path = path
+	return cfg, nil
+}
+
+// ParseConfig parses and validates config YAML.
+func ParseConfig(data []byte) (*Config, error) {
+	var cfg Config
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true) // a misspelled key must not be silently ignored
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, err
+	}
+	if err := cfg.compile(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// Lookup returns the policy for a table (case-insensitive).
+func (c *Config) Lookup(table string) (*Policy, bool) {
+	pol, ok := c.byTable[strings.ToLower(table)]
+	return pol, ok
+}
+
+// SchemeName returns the display name of a scheme.
+func (c *Config) SchemeName(s Scheme) string {
+	for _, info := range c.Schemes {
+		if info.Scheme == s {
+			return info.Name
+		}
+	}
+	return string(s)
+}
+
+var (
+	fragmentRef = regexp.MustCompile(`\{\{\s*([A-Za-z0-9_]+)\s*\}\}`)
+	variableRef = regexp.MustCompile(`\$\{\s*([A-Za-z0-9_]+)\s*\}`)
+)
+
+func (c *Config) compile() error {
+	if c.Version != 1 {
+		return fmt.Errorf("不支持的配置版本 %d", c.Version)
+	}
+	schemes := map[Scheme]bool{}
+	for _, s := range c.Schemes {
+		if s.Scheme == "" || schemes[s.Scheme] {
+			return fmt.Errorf("方案 %q 为空或重复", s.Scheme)
+		}
+		schemes[s.Scheme] = true
+	}
+
+	c.byTable = map[string]*Policy{}
+	var errs []error
+	for i, pol := range c.Tables {
+		if pol == nil || pol.Table == "" {
+			errs = append(errs, fmt.Errorf("tables[%d] 缺少 table", i))
+			continue
+		}
+		name := strings.ToLower(pol.Table)
+		if c.byTable[name] != nil {
+			errs = append(errs, fmt.Errorf("表 %s 重复登记", name))
+			continue
+		}
+		pol.Table = name
+		c.byTable[name] = pol
+		if err := c.compilePolicy(pol, schemes); err != nil {
+			errs = append(errs, fmt.Errorf("表 %s: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (c *Config) compilePolicy(pol *Policy, schemes map[Scheme]bool) error {
+	if !schemes[pol.Scheme] {
+		return fmt.Errorf("未定义的方案 %q", pol.Scheme)
+	}
+	switch {
+	case pol.Passthrough && strings.TrimSpace(pol.SQL) != "":
+		return errors.New("passthrough 与 sql 只能二选一")
+	case !pol.Passthrough && strings.TrimSpace(pol.SQL) == "":
+		return errors.New("缺少 sql；若确实不需要改写，请显式设置 passthrough: true")
+	}
+	if pol.Passthrough {
+		pol.Params = []string{}
+	} else {
+		text, params, err := c.template(pol.SQL)
+		if err != nil {
+			return fmt.Errorf("sql: %w", err)
+		}
+		stmt, err := parseTemplate(text)
+		if err != nil {
+			return fmt.Errorf("sql: %w", err)
+		}
+		pol.CompiledSQL, pol.Params, pol.subquery = text, params, stmt
+	}
+	if strings.TrimSpace(pol.DenyUnless) != "" {
+		text, params, err := c.template(pol.DenyUnless)
+		if err != nil {
+			return fmt.Errorf("deny_unless: %w", err)
+		}
+		if _, err := parseTemplate(GuardQuery(text)); err != nil {
+			return fmt.Errorf("deny_unless: %w", err)
+		}
+		pol.CompiledGuard, pol.GuardParams = text, params
+		if pol.DenyMessage == "" {
+			pol.DenyMessage = "无权查询表 " + pol.Table
+		}
+	}
+	return nil
+}
+
+// GuardQuery wraps a deny_unless expression into a statement returning 0 or 1.
+func GuardQuery(expr string) string {
+	return "SELECT CASE WHEN (" + expr + ") THEN 1 ELSE 0 END"
+}
+
+// template expands {{fragments}} and turns ${var} into :var bind parameters.
+func (c *Config) template(text string) (string, []string, error) {
+	expanded, err := c.expand(text, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	var params []string
+	var unknown []string
+	out := variableRef.ReplaceAllStringFunc(expanded, func(m string) string {
+		name := variableRef.FindStringSubmatch(m)[1]
+		if !slices.ContainsFunc(Variables, func(v VariableInfo) bool { return v.Name == name }) {
+			unknown = append(unknown, name)
+		} else if !slices.Contains(params, name) {
+			params = append(params, name)
+		}
+		return ":" + name
+	})
+	if len(unknown) > 0 {
+		return "", nil, fmt.Errorf("未知变量 ${%s}", strings.Join(unknown, "}、${"))
+	}
+	if strings.Contains(out, "${") || strings.Contains(out, "{{") {
+		return "", nil, errors.New("存在无法解析的 ${...} 或 {{...}}")
+	}
+	slices.Sort(params)
+	return strings.TrimSpace(out), params, nil
+}
+
+func (c *Config) expand(text string, stack []string) (string, error) {
+	var err error
+	out := fragmentRef.ReplaceAllStringFunc(text, func(m string) string {
+		if err != nil {
+			return m
+		}
+		name := fragmentRef.FindStringSubmatch(m)[1]
+		body, ok := c.Fragments[name]
+		switch {
+		case !ok:
+			err = fmt.Errorf("未定义的片段 {{%s}}", name)
+		case slices.Contains(stack, name):
+			err = fmt.Errorf("片段循环引用：%s → %s", strings.Join(stack, " → "), name)
+		default:
+			var expanded string
+			expanded, err = c.expand(body, append(stack, name))
+			return expanded
+		}
+		return m
+	})
+	return out, err
+}
+
+// parseTemplate parses a configured SELECT and checks the invariants the
+// rewriter relies on: every table is written main.<table>, and the only bind
+// parameters are known variables.
+func parseTemplate(text string) (*sql.SelectStatement, error) {
+	parser := sql.NewParser(strings.NewReader(text))
+	stmt, err := parser.ParseStatement()
+	if err != nil {
+		return nil, fmt.Errorf("SQL 解析失败：%w", err)
+	}
+	if next, err := parser.ParseStatement(); next != nil || err == nil {
+		return nil, errors.New("只能是单条语句")
+	}
+	sel, ok := stmt.(*sql.SelectStatement)
+	if !ok {
+		return nil, errors.New("必须是 SELECT 语句")
+	}
+	_, err = sql.Walk(sql.VisitFunc(func(n sql.Node) (sql.Node, error) {
+		switch x := n.(type) {
+		case *sql.QualifiedTableName:
+			if !strings.EqualFold(sql.IdentName(x.Schema), "main") {
+				return nil, fmt.Errorf("表 %s 必须写成 main.%s", sql.IdentName(x.Name), sql.IdentName(x.Name))
+			}
+		case *sql.QualifiedTableFunctionName:
+			return nil, fmt.Errorf("不支持表值函数 %s", sql.IdentName(x.Name))
+		case *sql.BindExpr:
+			name := strings.TrimLeft(x.Name, ":@$?")
+			if !slices.ContainsFunc(Variables, func(v VariableInfo) bool { return v.Name == name }) || !strings.HasPrefix(x.Name, ":") {
+				return nil, fmt.Errorf("不允许的绑定参数 %s，请使用 ${变量}", x.Name)
+			}
+		}
+		return n, nil
+	}), sel)
+	if err != nil {
+		return nil, err
+	}
+	return sel, nil
+}
