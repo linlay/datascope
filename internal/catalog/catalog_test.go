@@ -361,6 +361,7 @@ func TestYAMLFilesAndLegacyMigration(t *testing.T) {
 	first := mustGet(t, c, "default")
 	second := mustGet(t, c, "default")
 	second.ID = "second"
+	second.MCPPath = "second"
 	second.Name = "Second"
 	no := false
 	second.Config.Tables[0].Enabled = &no
@@ -435,5 +436,97 @@ func TestYAMLFilesAndLegacyMigration(t *testing.T) {
 	}
 	if _, err = migrated.List(); err == nil {
 		t.Fatal("malformed config was ignored")
+	}
+}
+
+func TestCustomMCPPaths(t *testing.T) {
+	c, path := setup(t)
+	ctx := context.Background()
+	st, err := store.Open(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	h, err := mcpserver.ManagedHTTPHandler(c, st, mcpserver.Options{AuthMode: "none", DefaultUserID: 1}, "none", "", "", "/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(h)
+	defer server.Close()
+	connectPath := func(path string) *mcp.ClientSession {
+		client := mcp.NewClient(&mcp.Implementation{Name: "path-test", Version: "1"}, nil)
+		s, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + path}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+		return s
+	}
+	old := connectPath("/mcp/default")
+	d := mustGet(t, c, "default")
+	d.MCPPath = "finance"
+	if err = c.Save(ctx, *d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = old.ListTools(ctx, nil); err == nil {
+		t.Fatal("old endpoint still served the database")
+	}
+	if tools, err := connectPath("/mcp/finance").ListTools(ctx, nil); err != nil || len(tools.Tools) != 3 {
+		t.Fatalf("new endpoint %v %v", tools, err)
+	}
+	if _, err := connectPath("/mcp").ListTools(ctx, nil); err != nil {
+		t.Fatal("legacy root endpoint lost", err)
+	}
+	if err = c.Add(ctx, catalog.Database{ID: "conflict", Name: "Conflict", Driver: "sqlite", Path: path, MCPPath: "finance"}); err == nil {
+		t.Fatal("duplicate path accepted during add")
+	}
+	if err = c.Add(ctx, catalog.Database{ID: "second", Name: "Second", Driver: "sqlite", Path: path, MCPPath: "retail"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"finance", "../test", "a/b", "/finance", "a b", "a?b", strings.Repeat("x", 65)} {
+		d = mustGet(t, c, "second")
+		d.MCPPath = invalid
+		if err = c.Save(ctx, *d); err == nil {
+			t.Fatalf("accepted path %q", invalid)
+		}
+	}
+	if mustGet(t, c, "second").MCPRoute() != "retail" {
+		t.Fatal("failed save changed existing route")
+	}
+	restarted := &catalog.Catalog{Path: c.Path, AsOf: store.DefaultAsOf}
+	if found, err := restarted.ByMCPPath("finance"); err != nil || found.ID != "default" {
+		t.Fatalf("path persistence: %v %v", found, err)
+	}
+	svc, err := c.Open(ctx, mustGet(t, c, "default"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Store.Close()
+	admin := adminapi.ManagedHandler(c, &adminapi.Inspector{Endpoint: server.URL + "/mcp", Service: svc})
+	for _, url := range []string{"/api/databases/default", "/api/databases/default/mcp/info"} {
+		w := httptest.NewRecorder()
+		admin.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
+		if w.Code != 200 {
+			t.Fatalf("%s: %d %s", url, w.Code, w.Body.String())
+		}
+		if !bytes.Contains(w.Body.Bytes(), []byte(server.URL+"/mcp/finance")) {
+			t.Fatalf("old inspector endpoint: %s", w.Body.String())
+		}
+	}
+	// Custom paths retain OAuth discovery and reject unauthenticated calls.
+	resource := "http://127.0.0.1:8083/mcp"
+	oauthHandler, err := mcpserver.ManagedHTTPHandler(c, st, mcpserver.Options{AuthMode: "oauth"}, "oauth", "http://127.0.0.1:8081", resource, "/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	oauthHandler.ServeHTTP(w, httptest.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp/finance", nil))
+	if w.Code != 200 || !bytes.Contains(w.Body.Bytes(), []byte(resource)) {
+		t.Fatalf("OAuth metadata %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	oauthHandler.ServeHTTP(w, httptest.NewRequest("POST", "/mcp/finance", bytes.NewBufferString(`{}`)))
+	if w.Code != 401 || w.Header().Get("WWW-Authenticate") == "" {
+		t.Fatalf("custom route bypassed OAuth: %d", w.Code)
 	}
 }

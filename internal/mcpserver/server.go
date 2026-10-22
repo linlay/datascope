@@ -28,14 +28,16 @@ type Options struct {
 	AuthMode string
 	Managed  bool
 	Tools    []string
+	// IdentityStore is the shared trusted employee directory for all data sources.
+	IdentityStore *store.Store
 	// UserHeader carries the trusted user id, set by the gateway in front of
 	// this server. The AI never supplies identity.
 	UserHeader string
 	// DefaultUserID is used when the header is absent (e.g. stdio). Zero
 	// means no default: requests without identity are rejected.
 	DefaultUserID int64
-	// Debug registers raw_query and customer_scope and returns the rewritten
-	// SQL from query. Never enable in production.
+	// Debug returns rewritten SQL from query and enables debug tools on legacy servers.
+	// Managed servers use the database tool selection to enable debug tools.
 	Debug bool
 }
 
@@ -88,12 +90,12 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		Annotations: readOnly("执行 SQL（按权限改写）"),
 	}, h.query)
 
-	if opts.Debug {
+	if opts.Debug || opts.Managed {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:  "raw_query",
 			Title: "原始 SQL（调试）",
 			Description: "调试专用：不做任何改写，按原样执行传入的单条 SQL，可看到全部数据。数据库以只读方式打开。" +
-				"生产环境不开放此工具。",
+				"仅允许管理员调用，OAuth 需 sql:debug 权限。",
 			Annotations: readOnly("原始 SQL（调试）"),
 		}, h.rawQuery)
 
@@ -271,6 +273,7 @@ type rawQueryInput struct {
 }
 
 func (h handlers) rawQuery(ctx context.Context, req *mcp.CallToolRequest, in rawQueryInput) (*mcp.CallToolResult, *store.QueryResult, error) {
+	h = h.current(ctx)
 	if err := h.debugAllowed(ctx, req); err != nil {
 		return nil, nil, err
 	}
@@ -293,6 +296,7 @@ type customerScopeOutput struct {
 }
 
 func (h handlers) customerScope(ctx context.Context, req *mcp.CallToolRequest, in customerScopeInput) (*mcp.CallToolResult, customerScopeOutput, error) {
+	h = h.current(ctx)
 	if err := h.debugAllowed(ctx, req); err != nil {
 		return nil, customerScopeOutput{}, err
 	}
@@ -322,7 +326,11 @@ func (h handlers) debugAllowed(ctx context.Context, req *mcp.CallToolRequest) er
 	if err != nil {
 		return err
 	}
-	users, err := h.svc.Store.Users(ctx)
+	identity := h.opts.IdentityStore
+	if identity == nil {
+		identity = h.svc.Store
+	}
+	users, err := identity.Users(ctx)
 	if err != nil {
 		return err
 	}

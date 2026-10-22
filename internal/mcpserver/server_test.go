@@ -2,12 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"sql-rewrite-server/internal/catalog"
 	"sql-rewrite-server/internal/testutil"
 	"strconv"
 	"testing"
@@ -233,5 +235,103 @@ func TestNoneIgnoresIdentityHeader(t *testing.T) {
 	call(t, s, "query", map[string]any{"sql": "SELECT count(*) AS n FROM customers"}, &r)
 	if r.Rows[0]["n"] != float64(27) {
 		t.Fatalf("header overrode none: %v", r)
+	}
+}
+
+func TestManagedRawQueryUsesSelectedDatabaseAndSharedIdentity(t *testing.T) {
+	ctx := context.Background()
+	identity, err := store.Open(testutil.Demo(t), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer identity.Close()
+	cfg, err := rewrite.LoadConfig("../../config/rewrite.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := service.New(ctx, identity, cfg, store.DefaultAsOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := catalog.New(filepath.Join(t.TempDir(), "databases"), identity, cfg, store.DefaultAsOf, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "target.sqlite3")
+	target, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = target.Exec("CREATE TABLE records(id INTEGER, secret TEXT); INSERT INTO records VALUES(1, 'test-only')")
+	target.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Add(ctx, catalog.Database{ID: "target", Name: "Target", Driver: "sqlite", Path: path}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := c.Get("target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.MCPEnabled = true
+	d.Tools = []string{"raw_query"}
+	if err = c.Save(ctx, *d); err != nil {
+		t.Fatal(err)
+	}
+	connectManaged := func(uid int64) *mcp.ClientSession {
+		server := ManagedServer(c, "target", svc, Options{AuthMode: "none", DefaultUserID: uid, IdentityStore: identity})
+		left, right := mcp.NewInMemoryTransports()
+		ss, err := server.Connect(ctx, left, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ss.Close() })
+		client := mcp.NewClient(&mcp.Implementation{Name: "managed-test", Version: "1"}, nil)
+		session, err := client.Connect(ctx, right, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { session.Close() })
+		return session
+	}
+	admin := connectManaged(175)
+	if names := toolNames(t, admin); !slices.Equal(names, []string{"raw_query"}) {
+		t.Fatalf("tools %v", names)
+	}
+	var result queryResult
+	if res := call(t, admin, "raw_query", map[string]any{"sql": "SELECT * FROM records"}, &result); res.IsError || result.RowCount != 1 {
+		t.Fatalf("target raw query: %+v %+v", res, result)
+	}
+	if res := call(t, admin, "raw_query", map[string]any{"sql": "DELETE FROM records"}, nil); !res.IsError {
+		t.Fatal("raw query wrote data")
+	}
+	if res := call(t, connectManaged(1), "raw_query", map[string]any{"sql": "SELECT * FROM records"}, nil); !res.IsError {
+		t.Fatal("ordinary employee used raw_query")
+	}
+	d, err = c.Get("target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Tools = []string{}
+	if err = c.Save(ctx, *d); err != nil {
+		t.Fatal(err)
+	}
+	if names := toolNames(t, admin); len(names) != 0 {
+		t.Fatalf("revoked tools %v", names)
+	}
+	if _, err = admin.CallTool(ctx, &mcp.CallToolParams{Name: "raw_query", Arguments: map[string]any{"sql": "SELECT * FROM records"}}); err == nil {
+		t.Fatal("revoked raw_query still callable")
+	}
+}
+
+func TestManagedToolSelectionRegistersDebugTools(t *testing.T) {
+	url := startServer(t, Options{Managed: true, Tools: []string{"raw_query", "customer_scope"}})
+	session := connect(t, url, "", 175)
+	if names := toolNames(t, session); !slices.Equal(names, []string{"customer_scope", "raw_query"}) {
+		t.Fatalf("managed debug tools %v", names)
+	}
+	if res := call(t, session, "customer_scope", map[string]any{"user_id": 1}, nil); res.IsError {
+		t.Fatalf("customer scope %v", res)
 	}
 }

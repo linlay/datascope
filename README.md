@@ -31,7 +31,7 @@ make test          # 独立临时库，Go 测试 + 前端类型检查
 1. 添加数据库：填写名称、唯一 ID 与文件路径。连接只读；新数据源默认关闭 MCP、禁止所有表。
 2. 在“数据库访问策略”选择表，设置是否开放、字段白名单、行权限 SQL 模板、前置 `deny_unless` 检查和最多返回行数。`columns: null` 允许全部字段，包括未来新增字段；非空数组只开放指定字段。
 3. 行权限模板继续支持 `main.表名`、`${userId}`、`${asOf}` 和当前数据库的 `{{片段}}`。字段白名单应用在行权限子查询外层，因此 `SELECT *` 仅返回白名单字段，隐藏字段也不能用于外层 WHERE、JOIN 或子查询。
-4. 在“MCP 配置与测试”中勾选 MCP 接口并打开 MCP，点击“保存并生效”。每库可独立启停 `list_tables`、`describe_table`、`query`；保存后，HTTP / stdio 后续请求立即采用当前配置。已经执行中的请求使用请求开始时的配置。
+4. 在“MCP 配置与测试”中勾选 MCP 接口并打开 MCP，点击“保存并生效”。每库可独立启停 `list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`；保存后，HTTP / stdio 后续请求立即采用当前配置。已经执行中的请求使用请求开始时的配置。
 5. “表数据”“SQL 控制台”“数据库访问策略”和“MCP 配置与测试”跟随当前数据库；切换数据库时保留所在菜单。表数据与原始 SQL 是管理员全量视图；“改写执行”和 MCP 查询执行访问策略。
 
 最大返回行数取请求值、涉及各表上限与全局硬上限（1000）中的最小值；请求未指定时默认 200。此项限制**结果行数**，不限制聚合查询扫描的底层记录数；执行时间仍受 `QUERY_TIMEOUT` 限制。`max_rows: 0` 表示使用全局限制。
@@ -53,10 +53,12 @@ config/databases/
 | 数据库目录 | `GET /api/databases`、`POST /api/databases` |
 | 查看 / 保存数据库策略 | `GET /api/databases/{id}`、`PUT /api/databases/{id}` |
 | 当前数据库管理 API | `/api/databases/{id}/tables`、`/query`、`/rewrite`、`/mcp/info`、`/mcp/call` |
-| 分库 MCP | `/mcp/{id}`（`MCP_PATH` 可调整前缀） |
+| 分库 MCP | `/mcp/{mcp_path}`（逐库配置后缀，`MCP_PATH` 调整公共前缀） |
 | 兼容默认库 | `/mcp`、原有 `/api/tables` 等接口 |
 
-HTTP 固定使用无状态 MCP 请求，以便每次请求读取最新策略。stdio 通过 `-database <id>` 或 `MCP_DATABASE` 选择数据库，也遵循该库服务与接口开关。管理模式不开放绕过权限的 `raw_query` / `customer_scope`；原始查询使用管理员 SQL 控制台。
+每个数据库可在“MCP 配置与测试”中单独设置 MCP 路径后缀，例如 `mcp_path: securities` 对应 `/mcp/securities`。后缀以字母或数字开头，仅支持字母、数字、下划线、连字符，最长 64 位，所有数据库间必须唯一（包含关闭 MCP 的数据库）。修改后立即生效，旧的分库路径返回 404，页面测试自动采用新地址；旧客户端需要更新连接地址。未配置 `mcp_path` 的旧文件兼容使用数据库 ID，启动时自动补齐字段。`/mcp` 仍作为初始库的兼容入口，stdio 仍按数据库 ID 选择，不依赖 HTTP 路径。自定义路径沿用现有 OAuth 保护与代理资源授权。
+
+HTTP 固定使用无状态 MCP 请求，以便每次请求读取最新策略。stdio 通过 `-database <id>` 或 `MCP_DATABASE` 选择数据库，也遵循该库服务与接口开关。`raw_query` / `customer_scope` 可按库选择开启，默认不启用。`raw_query` 绕过表、字段及行权限改写，数据库仍保持只读；两个工具仅管理员可调用，OAuth 下另需 `sql:debug`。`customer_scope` 适用于证券样例库。
 
 OAuth 沿用默认身份库的员工体系，各数据源共享 `MCP_RESOURCE_URL` 对应的代理资源授权，路径负责选择数据源，逐库规则负责控制查询权限；目前不是每库独立 OAuth 授权服务器或独立令牌 audience。所有新增数据源的 `${userId}` 都使用这套可信身份编号。
 
@@ -116,7 +118,7 @@ SELECT 支持 JOIN、嵌套查询、CTE、UNION、窗口函数；拒绝写操作
 
 JWT 使用 RS256，有效 1 小时，`sub=工号`、`aud=MCP_RESOURCE_URL`。刷新令牌有效 7 天，单次使用并轮换；重用旧刷新令牌会撤销该刷新族。授权码 2 分钟、单次使用，绑定客户端、redirect URI、resource 与 PKCE；登录表单有 CSRF 校验。私钥仅由 admin-api 持有（0600 文件），MCP 通过固定 issuer 拉取 JWKS，缓存 5 分钟。客户端注册与授权状态保存到独立 SQLite，重启后可继续使用。
 
-普通员工只签发 `sql:query`；管理员请求时可获得 `sql:debug`。管理模式仅开放逐库启用的三个只读工具，`MCP_DEBUG` 作为兼容参数保留，不开放绕过策略的工具。SQL 工作台可查看改写结果和 binds。
+普通员工只签发 `sql:query`；管理员请求时可获得 `sql:debug`。管理模式提供五个工具供逐库勾选，默认只启用三个基础工具；`MCP_DEBUG` 控制 query 是否返回改写 SQL 和 binds，工具启停由数据库 YAML 的 `tools` 列表决定。SQL 工作台也可查看改写结果和 binds。
 
 `MCP_AUTH_MODE`：
 

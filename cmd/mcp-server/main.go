@@ -38,7 +38,7 @@ func run() error {
 	queryTimeout := flag.Duration("query-timeout", envflag.Duration("QUERY_TIMEOUT", store.DefaultQueryTimeout), "单条查询超时")
 	userHeader := flag.String("user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "网关传入可信用户编号的请求头")
 	defaultUserID := flag.Int64("default-user-id", envflag.Int64("MCP_DEFAULT_USER_ID", 0), "请求头缺失时使用的用户编号（stdio 或本地调试）；0 表示拒绝")
-	debug := flag.Bool("debug", envflag.Bool("MCP_DEBUG", false), "兼容旧参数；管理模式不开放绕过权限的调试工具")
+	debug := flag.Bool("debug", envflag.Bool("MCP_DEBUG", false), "query 返回改写 SQL；管理模式工具启停由逐库配置控制")
 	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", "config/rewrite.yml"), "SQL 改写规则配置文件")
 	asOf := flag.String("as-of", envflag.String("REWRITE_AS_OF", store.DefaultAsOf.Format(time.RFC3339)), "授权过期判断的参考时间（RFC 3339）")
 	authMode := envflag.String("MCP_AUTH_MODE", "oauth")
@@ -83,10 +83,7 @@ func run() error {
 	}
 	defer svc.Store.Close()
 
-	opts := mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID}
-	if *debug {
-		logger.Warn("managed MCP does not expose raw_query or customer_scope; use the admin SQL console for raw queries")
-	}
+	opts := mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}
 	if !*stateless {
 		logger.Warn("managed HTTP uses stateless requests so policy changes apply immediately")
 	}
@@ -99,7 +96,7 @@ func run() error {
 		logger.Info("serving MCP over stdio", "db", st.Path(), "default_user_id", *defaultUserID)
 		return mcpserver.ManagedServer(catalogue, *databaseID, svc, opts).Run(ctx, &mcp.StdioTransport{})
 	case "http":
-		handler, err := mcpserver.ManagedHTTPHandler(catalogue, st, mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID}, authMode, issuer, resource, *path)
+		handler, err := mcpserver.ManagedHTTPHandler(catalogue, st, opts, authMode, issuer, resource, *path)
 		if err != nil {
 			return err
 		}

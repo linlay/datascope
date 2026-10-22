@@ -6,8 +6,23 @@ import (
 	"strings"
 )
 
+type databaseView struct {
+	catalog.Database
+	MCPEndpoint string `json:"mcp_endpoint"`
+}
+
 // ManagedHandler scopes every existing console API to an explicit database.
 func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
+	view := func(d catalog.Database) databaseView {
+		return databaseView{Database: d, MCPEndpoint: strings.TrimRight(inspector.Endpoint, "/") + "/" + d.MCPRoute()}
+	}
+	respondDatabase := func(w http.ResponseWriter, d *catalog.Database, err error) {
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, view(*d), nil)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/databases", func(w http.ResponseWriter, r *http.Request) {
 		items, err := c.List()
@@ -16,7 +31,11 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 			return
 		}
 		// Connection details are available only through the local admin API.
-		respond(w, items, nil)
+		views := make([]databaseView, len(items))
+		for i, d := range items {
+			views[i] = view(d)
+		}
+		respond(w, views, nil)
 	})
 	mux.HandleFunc("POST /api/databases", func(w http.ResponseWriter, r *http.Request) {
 		var d catalog.Database
@@ -28,9 +47,12 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 			return
 		}
 		item, err := c.Get(d.ID)
-		respond(w, item, err)
+		respondDatabase(w, item, err)
 	})
-	mux.HandleFunc("GET /api/databases/{id}", func(w http.ResponseWriter, r *http.Request) { d, err := c.Get(r.PathValue("id")); respond(w, d, err) })
+	mux.HandleFunc("GET /api/databases/{id}", func(w http.ResponseWriter, r *http.Request) {
+		d, err := c.Get(r.PathValue("id"))
+		respondDatabase(w, d, err)
+	})
 	mux.HandleFunc("PUT /api/databases/{id}", func(w http.ResponseWriter, r *http.Request) {
 		var d catalog.Database
 		if !decode(w, r, &d) {
@@ -42,7 +64,7 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 			return
 		}
 		item, err := c.Get(d.ID)
-		respond(w, item, err)
+		respondDatabase(w, item, err)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		id := "default"
@@ -77,7 +99,7 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 		if id != "default" {
 			in.FixturesDir = ""
 		}
-		in.Endpoint = strings.TrimRight(inspector.Endpoint, "/") + "/" + id
+		in.Endpoint = view(*d).MCPEndpoint
 		clone := r.Clone(r.Context())
 		u := *r.URL
 		u.Path = path

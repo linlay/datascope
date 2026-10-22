@@ -24,7 +24,8 @@ import (
 	"sql-rewrite-server/internal/store"
 )
 
-var Tools = []string{"list_tables", "describe_table", "query"}
+var DefaultTools = []string{"list_tables", "describe_table", "query"}
+var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope"}
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
@@ -33,6 +34,7 @@ type Database struct {
 	Driver     string          `json:"driver" yaml:"driver"`
 	Path       string          `json:"path" yaml:"path"`
 	MCPEnabled bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
+	MCPPath    string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
 	Tools      []string        `json:"tools" yaml:"tools"`
 	Config     *rewrite.Config `json:"config" yaml:"config"`
 	Revision   int             `json:"revision" yaml:"revision"`
@@ -76,7 +78,7 @@ func Bootstrap(path string, st *store.Store, configPath string, asOf time.Time, 
 		if st == nil {
 			return fmt.Errorf("首次导入需要数据库连接")
 		}
-		*items = []Database{{ID: "default", Name: databaseName(st.Path()), Driver: "sqlite", Path: st.Path(), MCPEnabled: true, Tools: Tools, Config: cfg, Revision: 1}}
+		*items = []Database{{ID: "default", Name: databaseName(st.Path()), Driver: "sqlite", Path: st.Path(), MCPEnabled: true, MCPPath: "default", Tools: DefaultTools, Config: cfg, Revision: 1}}
 		return nil
 	})
 	return c, err
@@ -86,7 +88,7 @@ func New(path string, st *store.Store, cfg *rewrite.Config, asOf time.Time, time
 	c := &Catalog{Path: path, AsOf: asOf, Timeout: timeout}
 	err := c.update(func(items *[]Database) error {
 		if len(*items) == 0 {
-			*items = []Database{{ID: "default", Name: databaseName(st.Path()), Driver: "sqlite", Path: st.Path(), MCPEnabled: true, Tools: Tools, Config: cfg, Revision: 1}}
+			*items = []Database{{ID: "default", Name: databaseName(st.Path()), Driver: "sqlite", Path: st.Path(), MCPEnabled: true, MCPPath: "default", Tools: DefaultTools, Config: cfg, Revision: 1}}
 		}
 		return migrateDatabaseNames(items)
 	})
@@ -103,8 +105,16 @@ func databaseName(path string) string {
 
 func migrateDatabaseNames(items *[]Database) error {
 	for i := range *items {
+		changed := false
 		if (*items)[i].Name == "默认数据库" {
 			(*items)[i].Name = databaseName((*items)[i].Path)
+			changed = true
+		}
+		if (*items)[i].MCPPath == "" {
+			(*items)[i].MCPPath = (*items)[i].ID
+			changed = true
+		}
+		if changed {
 			(*items)[i].Revision++
 		}
 	}
@@ -119,6 +129,7 @@ func (c *Catalog) List() ([]Database, error) {
 	}
 	items := []Database{}
 	seen := map[string]bool{}
+	routes := map[string]bool{}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yml" {
 			continue
@@ -145,6 +156,10 @@ func (c *Catalog) List() ([]Database, error) {
 		if entry.Name() != configFilename(item) {
 			return nil, fmt.Errorf("配置 %s 的文件名应为 %s", path, configFilename(item))
 		}
+		if !validID.MatchString(item.MCPRoute()) || routes[item.MCPRoute()] {
+			return nil, fmt.Errorf("配置 %s 的 MCP 路径无效或重复", path)
+		}
+		routes[item.MCPRoute()] = true
 		seen[item.ID] = true
 		items = append(items, item)
 	}
@@ -155,6 +170,28 @@ func (c *Catalog) List() ([]Database, error) {
 		return items[i].ID < items[j].ID
 	})
 	return items, nil
+}
+
+// MCPRoute is the path segment beneath the shared MCP prefix. Legacy files
+// without mcp_path retain their existing database-ID endpoint.
+func (d Database) MCPRoute() string {
+	if d.MCPPath != "" {
+		return d.MCPPath
+	}
+	return d.ID
+}
+
+func (c *Catalog) ByMCPPath(segment string) (*Database, error) {
+	items, err := c.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.MCPRoute() == segment {
+			return &item, nil
+		}
+	}
+	return nil, fmt.Errorf("MCP 路径不存在: %s", segment)
 }
 
 func configFilename(d Database) string {
@@ -211,6 +248,9 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	}
 	if d.Driver != "sqlite" {
 		return fmt.Errorf("目前支持 SQLite 数据源")
+	}
+	if d.MCPPath == "" {
+		d.MCPPath = d.ID
 	}
 	path, err := filepath.Abs(d.Path)
 	if err != nil || d.Path == "" {
@@ -314,10 +354,18 @@ func (c *Catalog) update(fn func(*[]Database) error) error {
 		return err
 	}
 	files := map[string][]byte{}
+	routes := map[string]bool{}
 	for _, item := range items {
 		if !validID.MatchString(item.ID) {
 			return fmt.Errorf("无效数据库 ID %q", item.ID)
 		}
+		if !validID.MatchString(item.MCPRoute()) {
+			return fmt.Errorf("MCP 路径只允许字母、数字、下划线或连字符，最多 64 位")
+		}
+		if routes[item.MCPRoute()] {
+			return fmt.Errorf("MCP 路径 %s 已被其他数据库使用", item.MCPRoute())
+		}
+		routes[item.MCPRoute()] = true
 		name := configFilename(item)
 		if _, ok := files[name]; ok {
 			return fmt.Errorf("数据库配置文件名冲突: %s", name)

@@ -191,7 +191,7 @@ export function selectDatabase(id: string) {
  selectedDatabase = id; localStorage.setItem('sql-rewrite-database', id); usersPromise = undefined;
 }
 export interface Database {
- id: string; name: string; driver: string; path: string; mcp_enabled: boolean; tools: string[]; revision: number; etag?: string;
+ id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
  config: { version: number; schemes: SchemeInfo[]; fragments: Record<string,string>; tables: PolicyView[] };
 }
 export const databases = {

@@ -26,21 +26,27 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			w.Write([]byte(`{"status":"ok"}`))
 			return
 		}
-		id := "default"
+		segment := ""
 		prefix := strings.TrimRight(path, "/") + "/"
 		metaPrefix := "/.well-known/oauth-protected-resource" + prefix
 		switch {
 		case r.URL.Path == path:
 		case strings.HasPrefix(r.URL.Path, prefix):
-			id = strings.TrimPrefix(r.URL.Path, prefix)
+			segment = strings.TrimPrefix(r.URL.Path, prefix)
 		case strings.HasPrefix(r.URL.Path, metaPrefix):
-			id = strings.TrimPrefix(r.URL.Path, metaPrefix)
+			segment = strings.TrimPrefix(r.URL.Path, metaPrefix)
 		case r.URL.Path == "/.well-known/oauth-protected-resource" || r.URL.Path == "/.well-known/oauth-protected-resource"+path:
 		default:
 			http.NotFound(w, r)
 			return
 		}
-		d, err := c.Get(id)
+		var d *catalog.Database
+		var err error
+		if segment == "" {
+			d, err = c.Get("default")
+		} else {
+			d, err = c.ByMCPPath(segment)
+		}
 		if err != nil {
 			http.Error(w, "数据库不存在", 404)
 			return
@@ -56,12 +62,12 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		}
 		defer svc.Store.Close()
 		selected := opts
-		selected.Debug = false
+		selected.IdentityStore = identity
 		selected.Tools = d.Tools
 		selected.Managed = true
 		endpoint := path
-		if r.URL.Path == prefix+id || r.URL.Path == metaPrefix+id {
-			endpoint = prefix + id
+		if segment != "" {
+			endpoint = prefix + segment
 		}
 		// All endpoints accept tokens for the configured proxy resource; the URL
 		// selects a database, never credentials or policy supplied by the caller.
@@ -85,7 +91,6 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 // such as stdio. Request-local services avoid races between concurrent calls.
 func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opts Options) *mcp.Server {
 	opts.Managed = true
-	opts.Debug = false
 	opts.Tools = catalog.Tools
 	server := New(svc, opts)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {

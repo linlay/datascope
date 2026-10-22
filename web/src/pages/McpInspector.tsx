@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Empty, Input, Select, Space, Tag, Typography } from 'antd';
 import { api, type CallResult, type McpTool, type ServerInfo } from '../api';
 import { ResultTable, SqlBlock, UserPicker } from '../components/shared';
+import { HelpTip } from '../components/HelpTip';
 
 const { Paragraph, Text } = Typography;
 
@@ -25,9 +26,18 @@ export function McpInspector() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Card size="small" title="MCP server" extra={<Button onClick={loadInfo} loading={loadingInfo}>刷新</Button>}>
+      <Card size="small" title="连接状态" extra={<Button onClick={loadInfo} loading={loadingInfo}>刷新</Button>}>
         {infoError && <Alert type="error" showIcon message="无法连接 MCP server" description={infoError} />}
         {info && (
+          <>
+          <Space wrap>
+            <Tag color={infoError ? 'default' : loadingInfo ? 'processing' : 'success'}>{infoError ? '上次连接' : loadingInfo ? '检查中' : '已连接'}</Tag>
+            <Text>{info.auth_mode === 'oauth' ? 'OAuth' : '可信身份头'}</Text>
+            <Text type="secondary">协议 {info.protocol_version}</Text>
+            <Text type="secondary">{info.tools.length} 个工具 · {info.elapsed_ms} ms</Text>
+          </Space>
+          <details className="mcp-connection-details">
+          <summary>连接详情</summary>
           <Descriptions
             size="small"
             column={{ xs: 1, md: 2, xl: 3 }}
@@ -62,9 +72,10 @@ export function McpInspector() {
               { key: 'instructions', label: '服务说明', span: 3, children: <Paragraph style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{info.instructions}</Paragraph> },
             ]}
           />
+          </details>
+          </>
         )}
       </Card>
-      <Alert type="info" showIcon title="当前数据库的 MCP 实际接口" description="接口目录由数据库的访问策略控制；关闭的表与字段不会暴露。可在下方以员工身份验证查询权限。" />
       <ToolPlayground tools={info?.tools ?? []} />
     </Space>
   );
@@ -117,21 +128,21 @@ function ToolPlayground({ tools }: { tools: McpTool[] }) {
     | undefined;
 
   return (
-    <Card size="small" title="工具调试：以指定用户身份调用 MCP 工具">
+    <Card size="small" title={<Space size={4}>工具测试<HelpTip label="工具测试">以所选员工身份调用真实 MCP 接口，服务端验证身份和权限。</HelpTip></Space>}>
       {tools.length === 0 ? (
         <Empty description="未获取到工具列表" />
       ) : (
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Space wrap>
-            <Select value={name} onChange={setName} style={{ width: 200 }} options={tools.map((t) => ({ value: t.name, label: t.name }))} />
+            <Select aria-label="测试工具" value={name} onChange={setName} style={{ width: 200 }} options={tools.map((t) => ({ value: t.name, label: t.name }))} />
+            {tool?.description && <HelpTip label="当前工具">{tool.description}</HelpTip>}
             <Text type="secondary">身份</Text>
             <UserPicker value={userId} onChange={setUserId} />
             <Button type="primary" onClick={call} loading={calling}>
               调用
             </Button>
           </Space>
-          {tool?.description && <Text type="secondary">{tool.description}</Text>}
-          <Input.TextArea className="mono" value={argsText} onChange={(e) => setArgsText(e.target.value)} autoSize={{ minRows: 3, maxRows: 10 }} />
+          <Input.TextArea aria-label="工具参数 JSON" className="mono" value={argsText} onChange={(e) => setArgsText(e.target.value)} autoSize={{ minRows: 3, maxRows: 10 }} />
           {error && <Alert type="error" showIcon message={error} />}
           {result && (
             <Space orientation="vertical" style={{ width: '100%' }}>
