@@ -80,17 +80,25 @@ internal/
 
 默认端点：`http://127.0.0.1:8081/mcp/admin`，使用平台账号完成 OAuth 授权。
 
-工具包括：
+管理入口收敛为三个工具，统一使用 `{action,args}`，由 `args.resourceType` 指定资源：
 
-- 用户：`list_users`、`create_user`、`disable_user`、`enable_user`、`reset_password`。
-- 数据库：`list_databases`、`create_database`、`get_database`、`update_database`、`test_connection`、`save_database`。
-- 授权：`list_database_grants`、`grant_database_permissions`、`revoke_database_permissions`。
-- 策略：`get_policy`、`validate_policy`、`save_policy`、`preview_rewrite`。
-- MCP：`configure_mcp`。
-- 知识：`list_knowledge`、`get_knowledge`、`save_knowledge`、`search_knowledge`、`read_knowledge`。
-- 审计：`search_audit_events`，支持数据库、请求 ID、limit/offset。
+| 工具 | 用途 | 支持的资源 |
+| --- | --- | --- |
+| `datascope_query` | 查询配置、用户、授权、知识和审计 | database、policy、user、grant、knowledge、audit |
+| `datascope_manage` | 创建与修改管理资源 | database、policy、mcp、user、grant、knowledge |
+| `datascope_inspect` | 连接测试、策略校验、SQL 改写预览 | database、policy |
 
-管理 MCP 通过业务动作维护管理 SQLite，不提供对内部库执行任意 SQL 的能力。Web 控制台的同等动作调用相同的应用服务。配置和知识更新需要最新 `revision`，旧版本不能覆盖新配置。
+例如读取数据库配置：
+
+```json
+{"action":"get","args":{"resourceType":"database","database_id":"default"}}
+```
+
+`deploy/connectors/datascope-admin/` 提供独立管理连接器，附带 `datascope-admin` skill 和数据库、策略、用户授权、知识、审计操作参考。在管理界面的“用户与授权 → 管理连接器”点击“下载连接器 ZIP”，下载包中的 MCP 地址由部署的 `OAUTH_ISSUER` 配置生成；通过完整连接器包导入并挂载到 Agent，完成管理端 OAuth 授权后使用。下载接口 `GET /api/connectors/datascope-admin.zip` 需要登录，不包含任何账号凭据。使用源码目录打包时，需按实际部署地址修改包内 `mcp.json`。只导入 MCP 地址不会携带 skill。打包可在仓库根运行 `(cd deploy/connectors && zip -r /tmp/datascope-admin.zip datascope-admin)`。
+
+工具 schema 保留简短的动作和资源枚举；资源与动作矩阵、详细参数和管理流程由配套 skill 描述，服务端严格拒绝不支持的组合、无关参数与错误类型。原有 25 个独立管理工具不再由管理 MCP 暴露；其他 MCP 客户端也需改用上述调用结构。Web 管理端的原业务动作接口保持不变。
+
+管理 MCP 通过业务动作维护管理 SQLite，不提供对内部库执行任意 SQL 的能力。Web 控制台与 MCP 复用同一应用服务，继续按原动作检查权限并记录审计。配置修改需要 `args.database.revision`，知识更新需要 `args.revision`，旧版本不能覆盖新配置。查询与诊断不保存业务配置，但仍记录审计；策略校验仍需 `policy.write`。
 
 ### 数据库 MCP
 
@@ -104,7 +112,7 @@ HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数�
 
 ## 配置生成业务查询工具
 
-在“MCP 配置与测试”的业务工具 JSON 中设置，或通过管理 MCP 的 `configure_mcp` 更新 `database.business_tools`：
+在“MCP 配置与测试”的业务工具 JSON 中设置，或通过管理 MCP 的 `datascope_manage`（`action:"save"`、`args.resourceType:"mcp"`）更新 `args.database.business_tools`：
 
 ```json
 [
@@ -167,4 +175,4 @@ make build         # 两个服务器、数据生成器与前端构建
 
 ## 标准连接器
 
-`deploy/connectors/datascope/` 提供标准 MCP 连接器配置：`connector.json` 定义连接器信息，`mcp.json` 定义服务地址与传输方式。使用前按实际部署地址修改 `mcp.json`；支持 MCP 的客户端可直接配置服务地址并完成 OAuth 授权。
+`deploy/connectors/datascope/` 提供业务查询连接器，`deploy/connectors/datascope-admin/` 提供携带管理 skill 的管理连接器；两者独立授权。标准 MCP 连接器配置中，`connector.json` 定义连接器信息，`mcp.json` 定义服务地址与传输方式。使用前按实际部署地址修改 `mcp.json`；支持 MCP 的客户端可直接配置服务地址并完成 OAuth 授权。

@@ -85,7 +85,8 @@ func run() error {
 		HTTPClient:  &http.Client{Timeout: 60 * time.Second},
 	}
 
-	app := &application.Service{Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp"), SecureCookies: envflag.Bool("SESSION_COOKIE_SECURE", strings.HasPrefix(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "https://"))}
+	adminResource := strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin"
+	app := &application.Service{ManagementMCPURL: adminResource, Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp"), SecureCookies: envflag.Bool("SESSION_COOKIE_SECURE", strings.HasPrefix(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "https://"))}
 	handler := adminapi.PlatformHandler(app, adminapi.ManagedHandler(catalogue, inspector))
 	mode := envflag.String("MCP_AUTH_MODE", "oauth")
 	inspector.AuthMode = mode
@@ -99,10 +100,10 @@ func run() error {
 			Resource:   resourceBase,
 			Management: manager,
 			ResourceAllowed: func(resource string) bool {
-				return resource == strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/")+"/mcp/admin" || catalogue.AllowsMCPResource(resourceBase, resource)
+				return resource == adminResource || catalogue.AllowsMCPResource(resourceBase, resource)
 			},
 			DatabaseForResource: func(resource string) (string, error) {
-				if resource == strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/")+"/mcp/admin" {
+				if resource == adminResource {
 					return "", nil
 				}
 				items, e := catalogue.List()
@@ -133,7 +134,6 @@ func run() error {
 			}
 			return as.SignEmployeeForResource(ctx, userID, strings.TrimRight(resourceBase, "/")+"/"+d.MCPRoute())
 		}
-		adminResource := strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin"
 		adminMCP, e := mcpserver.HTTPHandlerWithManagement(managementmcp.New(app), nil, "oauth", envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), adminResource, "/mcp/admin", true, manager, "")
 		if e != nil {
 			return e

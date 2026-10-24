@@ -1,0 +1,14 @@
+{
+  "id": "datascope-admin",
+  "name": "DataScope Admin",
+  "version": "1.0.0",
+  "type": "mcp",
+  "authMode": "mcp",
+  "description": "Manage DataScope databases, access policies, users, grants, knowledge and audit with a bundled management skill.",
+  "i18n": {
+    "zh-CN": {
+      "name": "DataScope 管理",
+      "description": "管理数据库、访问策略、用户、授权、业务知识和审计，附带管理操作技能。"
+    }
+  }
+}

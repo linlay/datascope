@@ -1,15 +1,16 @@
 package adminapi
 
 import (
-	"encoding/json"
-	"errors"
-	"golang.org/x/time/rate"
-	"net/http"
+	"datascope-server/deploy/connectors"
 	"datascope-server/internal/application"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"encoding/json"
+	"errors"
+	"golang.org/x/time/rate"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -90,6 +91,22 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 			}
 			http.SetCookie(w, &http.Cookie{Name: "platform_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 			writeJSON(w, 200, map[string]bool{"ok": true})
+			return
+		}
+		if r.URL.Path == "/api/connectors/datascope-admin.zip" {
+			if r.Method != http.MethodGet {
+				w.Header().Set("Allow", http.MethodGet)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			archive, err := connectors.AdminArchive(app.ManagementMCPURL)
+			if err != nil {
+				platformError(w, err)
+				return
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", `attachment; filename="datascope-admin.zip"`)
+			w.Write(archive)
 			return
 		}
 		if r.URL.Path == "/api/management/call" && r.Method == "POST" {

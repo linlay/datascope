@@ -1,6 +1,7 @@
 package platform_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"database/sql"
@@ -19,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/application"
 	"datascope-server/internal/audit"
@@ -31,6 +31,7 @@ import (
 	"datascope-server/internal/oauth"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fixture struct {
@@ -209,6 +210,54 @@ func TestPlatformHTTPPermissionsAndAudit(t *testing.T) {
 		t.Fatalf("old session %d", status)
 	}
 }
+
+func TestAdminConnectorDownload(t *testing.T) {
+	f := setup(t)
+	f.app.ManagementMCPURL = "https://datascope.example.com/mcp/admin"
+	s := api(t, f)
+	endpoint := s.URL + "/api/connectors/datascope-admin.zip"
+	status, _ := request(t, http.DefaultClient, "GET", endpoint, nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated download: %d", status)
+	}
+	client := login(t, s.URL, "reader", "reader-test-password")
+	response, err := client.Get(endpoint)
+	must(t, err)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/zip" || response.Header.Get("Content-Disposition") != `attachment; filename="datascope-admin.zip"` {
+		t.Fatalf("download response: %d %v", response.StatusCode, response.Header)
+	}
+	data, err := io.ReadAll(response.Body)
+	must(t, err)
+	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	must(t, err)
+	files := map[string][]byte{}
+	for _, file := range archive.File {
+		reader, err := file.Open()
+		must(t, err)
+		files[file.Name], err = io.ReadAll(reader)
+		reader.Close()
+		must(t, err)
+	}
+	for _, path := range []string{"connector.json", "mcp.json", "skills/datascope-admin/SKILL.md", "skills/datascope-admin/references/databases.md", "skills/datascope-admin/references/policies.md", "skills/datascope-admin/references/permissions-users.md", "skills/datascope-admin/references/knowledge.md", "skills/datascope-admin/references/audit.md"} {
+		if len(files["datascope-admin/"+path]) == 0 {
+			t.Fatalf("archive missing %s", path)
+		}
+	}
+	var config struct {
+		Servers map[string]struct {
+			URL string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	must(t, json.Unmarshal(files["datascope-admin/mcp.json"], &config))
+	if config.Servers["main"].URL != f.app.ManagementMCPURL {
+		t.Fatalf("download has wrong deployment URL: %s", config.Servers["main"].URL)
+	}
+	status, _ = request(t, client, "POST", endpoint, nil)
+	if status != http.StatusMethodNotAllowed {
+		t.Fatalf("download accepts POST: %d", status)
+	}
+}
 func TestCatalogMigrationConcurrencyAndInternalIsolation(t *testing.T) {
 	f := setup(t)
 	d, e := f.c.Get("default")
@@ -360,13 +409,85 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	adminToken, e := as.SignEmployeeForResource(ctx, f.admin.ID, adminResource)
 	must(t, e)
 	mgmt := connectMCP(t, adminResource, adminToken)
-	out, e = callMCP(t, mgmt, "create_user", map[string]any{"username": "created-by-mcp", "name": "Created", "password": "created-test-password"})
+	managementTools, e := mgmt.ListTools(ctx, nil)
+	must(t, e)
+	if len(managementTools.Tools) != 3 {
+		t.Fatalf("management tools: %+v", managementTools.Tools)
+	}
+	for _, tool := range managementTools.Tools {
+		if !slices.Contains([]string{"datascope_query", "datascope_manage", "datascope_inspect"}, tool.Name) || tool.Annotations == nil || tool.Annotations.ReadOnlyHint != (tool.Name != "datascope_manage") {
+			t.Fatalf("unexpected management tool: %+v", tool)
+		}
+	}
+	out, e = callMCP(t, mgmt, "datascope_manage", map[string]any{"action": "create", "args": map[string]any{"resourceType": "user", "username": "created-by-mcp", "name": "Created", "password": "created-test-password"}})
 	must(t, e)
 	if out.IsError {
 		t.Fatalf("management create %+v", out)
 	}
 	_, e = f.m.ByUsername(ctx, "created-by-mcp")
 	must(t, e)
+	// Exercise all three grouped tools over OAuth and retain domain audit names.
+	for _, tc := range []struct {
+		tool, action string
+		args         map[string]any
+	}{
+		{"datascope_query", "get", map[string]any{"resourceType": "database", "database_id": "default"}},
+		{"datascope_query", "get", map[string]any{"resourceType": "knowledge", "database_id": "default", "id": "items"}},
+		{"datascope_inspect", "test_connection", map[string]any{"resourceType": "database", "database_id": "default"}},
+		{"datascope_inspect", "preview_rewrite", map[string]any{"resourceType": "policy", "database_id": "default", "sql": "SELECT * FROM items"}},
+		{"datascope_query", "search", map[string]any{"resourceType": "audit", "database_id": "default", "limit": 100}},
+	} {
+		out, e = callMCP(t, mgmt, tc.tool, map[string]any{"action": tc.action, "args": tc.args})
+		must(t, e)
+		if out.IsError {
+			t.Fatalf("%s %s: %+v", tc.tool, tc.action, out)
+		}
+	}
+	raw, _ = json.Marshal(out.StructuredContent)
+	if !bytes.Contains(raw, []byte("action.test_connection")) {
+		t.Fatalf("lost domain audit action: %s", raw)
+	}
+	current, e := f.c.Get("default")
+	must(t, e)
+	out, e = callMCP(t, mgmt, "datascope_inspect", map[string]any{"action": "validate", "args": map[string]any{"resourceType": "policy", "database_id": "default", "database": current}})
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("validate: %+v", out)
+	}
+	current.Name = "Renamed over grouped MCP"
+	writeArgs := map[string]any{"action": "update", "args": map[string]any{"resourceType": "database", "database_id": "default", "database": current}}
+	out, e = callMCP(t, mgmt, "datascope_manage", writeArgs)
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("update: %+v", out)
+	}
+	// Replaying an old revision must fail, even with an administrator token.
+	out, e = callMCP(t, mgmt, "datascope_manage", writeArgs)
+	if e == nil && !out.IsError {
+		t.Fatal("accepted stale grouped write")
+	}
+	readerAdminToken, e := as.SignEmployeeForResource(ctx, f.reader.ID, adminResource)
+	must(t, e)
+	readerMgmt := connectMCP(t, adminResource, readerAdminToken)
+	for _, tc := range []struct {
+		tool, action string
+		args         map[string]any
+	}{
+		{"datascope_manage", "enable", map[string]any{"resourceType": "user", "user_id": f.admin.ID}},
+		{"datascope_query", "get", map[string]any{"resourceType": "knowledge", "database_id": "default", "id": "items"}},
+		{"datascope_manage", "update", writeArgs["args"].(map[string]any)},
+	} {
+		out, e = callMCP(t, readerMgmt, tc.tool, map[string]any{"action": tc.action, "args": tc.args})
+		if e == nil && !out.IsError {
+			t.Fatalf("grouped tool bypassed permissions: %s %s", tc.tool, tc.action)
+		}
+	}
+	// Published knowledge remains readable without knowledge.write.
+	out, e = callMCP(t, readerMgmt, "datascope_query", map[string]any{"action": "read", "args": map[string]any{"resourceType": "knowledge", "database_id": "default", "id": "items"}})
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("published knowledge: %+v", out)
+	}
 	// A database token must never be accepted by the management resource.
 	req, _ := http.NewRequest("POST", adminResource, strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+token)

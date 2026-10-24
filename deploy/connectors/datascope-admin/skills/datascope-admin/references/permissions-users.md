@@ -1,0 +1,27 @@
+# 用户与数据库授权
+
+下表列出 args 参数，另外提供 resourceType。user_id 是平台用户正整数 ID，business_user_id 是业务库中的身份编号；两者不可互换。
+
+| 工具 | resourceType | action | 参数 |
+| --- | --- | --- | --- |
+| datascope_query | user | list | 无 |
+| datascope_manage | user | create | username、name、password |
+| datascope_manage | user | enable / disable | user_id |
+| datascope_manage | user | reset_password | user_id、password |
+| datascope_query | grant | list | database_id |
+| datascope_manage | grant | grant | database_id、user_id、permissions、business_user_id |
+| datascope_manage | grant | revoke | database_id、user_id |
+
+user 所有动作需要 users.manage。创建用户不自动授予数据库权限，不创建系统管理员。密码至少 12 个字符；按用户给出的安全方式处理，不生成并公开可预测的默认密码。disable 和 reset_password 撤销旧会话与令牌；enable 不恢复已撤销的凭据。
+
+grant.list 需要 grant。授予或撤销通过服务端检查操作者权限，不能授予自己没有的权限。只有系统管理员可改变业务身份绑定。grant 的 permissions 是**完整替换列表**，不是增量追加。先 list，保留用户没有要求撤销的权限和当前 business_user_id；未绑定身份为 0。要求显式提供 business_user_id 是为了避免缺省零值意外改变已有绑定。普通授权操作者必须原样保留绑定；需修改绑定时由有权限的系统管理员处理。
+
+权限键：config.read（读配置）、config.write（改名称）、policy.write（改策略）、mcp.write（配置 MCP）、knowledge.read（读已发布知识）、knowledge.write（维护知识）、query（改写查询）、raw_query（绕过行字段策略的只读查询）、audit.read（审计）、grant（授权）、impersonate（模拟业务身份）。知识检索还需要 query。
+
+撤销全部数据库权限示例：
+
+```json
+{"action":"revoke","args":{"resourceType":"grant","database_id":"default","user_id":42}}
+```
+
+revoke 清空该用户该数据库的全部权限，保留业务身份绑定。若只撤销部分权限，先读取现有列表，再用 grant 提交剩余完整列表。操作后用 user.list 或 grant.list 核对，不附带更改其他数据库授权。

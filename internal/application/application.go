@@ -3,22 +3,23 @@ package application
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"reflect"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 )
 
 type Service struct {
-	Management    *management.Store
-	Catalog       *catalog.Catalog
-	MCPBase       string
-	SecureCookies bool
+	Management       *management.Store
+	Catalog          *catalog.Catalog
+	ManagementMCPURL string
+	MCPBase          string
+	SecureCookies    bool
 }
 type Input struct {
 	DatabaseID     string            `json:"database_id,omitempty"`
