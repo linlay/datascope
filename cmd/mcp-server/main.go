@@ -81,6 +81,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
+		return err
+	}
 	initial, err := catalogue.Get("default")
 	if err != nil {
 		return err

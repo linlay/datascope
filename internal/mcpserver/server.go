@@ -29,6 +29,7 @@ const (
 
 // Options configures identity and debug tools.
 type Options struct {
+	Catalog       *catalog.Catalog
 	BusinessTools []catalog.BusinessTool
 	Application   *application.Service
 	Management    *management.Store

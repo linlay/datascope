@@ -25,3 +25,15 @@ grant.list 需要 grant。授予或撤销通过服务端检查操作者权限，
 ```
 
 revoke 清空该用户该数据库的全部权限，保留业务身份绑定。若只撤销部分权限，先读取现有列表，再用 grant 提交剩余完整列表。操作后用 user.list 或 grant.list 核对，不附带更改其他数据库授权。
+
+
+## 逐库模拟业务账号
+
+平台用户用于管理；业务账号用于指定数据库 MCP 的员工认证，二者独立。先读取 database.authentication：local 表示当前库的独立模拟账号域，platform 或缺省表示旧平台账号兼容模式。新增数据库默认 local，账号为空。不要为了员工使用业务 MCP 而创建平台管理用户。
+
+- `datascope_query`：`action=list`，`args={resourceType:"business_account",database_id:"default"}`。
+- `datascope_manage`：`action=save`，`args={resourceType:"business_account",database_id:"default",account:{database_id:"default",username:"E0001",name:"员工姓名",business_user_id:1,permissions:["query","knowledge.read"],active:true},password:"至少12字符的初始密码",revision:0}`。
+- 更新账号先列表读取其 revision，再 save；password 留空保留原密码，active=false 停用。每次更新都会撤销旧访问令牌和刷新令牌。
+- 仅平台系统管理员可修改业务账号及数据库 authentication；list 需要当前库 grant 权限。业务账号仅支持 query、knowledge.read、raw_query，不能获得管理能力。
+- employee_directory=true 时，工号和业务身份必须对应当前数据库的 employees 目录，离职员工不能认证。其他数据库可关闭目录校验。
+- 同名工号可以属于多个 database，各自密码、身份编号和权限互不继承。

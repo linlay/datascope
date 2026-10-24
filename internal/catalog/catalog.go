@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -31,17 +32,19 @@ var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "cus
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
-	BusinessTools []BusinessTool  `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
-	ID            string          `json:"id" yaml:"id"`
-	Name          string          `json:"name" yaml:"name"`
-	Driver        string          `json:"driver" yaml:"driver"`
-	Path          string          `json:"path" yaml:"path"`
-	MCPEnabled    bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
-	MCPPath       string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
-	Tools         []string        `json:"tools" yaml:"tools"`
-	Config        *rewrite.Config `json:"config" yaml:"config"`
-	Revision      int             `json:"revision" yaml:"revision"`
-	ETag          string          `json:"etag,omitempty" yaml:"-"`
+	AuthenticationRevision int64           `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
+	Authentication         *Authentication `json:"authentication,omitempty" yaml:"authentication,omitempty"`
+	BusinessTools          []BusinessTool  `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
+	ID                     string          `json:"id" yaml:"id"`
+	Name                   string          `json:"name" yaml:"name"`
+	Driver                 string          `json:"driver" yaml:"driver"`
+	Path                   string          `json:"path" yaml:"path"`
+	MCPEnabled             bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
+	MCPPath                string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
+	Tools                  []string        `json:"tools" yaml:"tools"`
+	Config                 *rewrite.Config `json:"config" yaml:"config"`
+	Revision               int             `json:"revision" yaml:"revision"`
+	ETag                   string          `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
 	Management *management.Store
@@ -283,6 +286,12 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	return svc, nil
 }
 func (c *Catalog) Add(ctx context.Context, d Database) error {
+	if d.Authentication == nil && c.Management != nil {
+		d.Authentication = &Authentication{Type: "local", Label: d.Name + "业务账号"}
+	}
+	if err := d.ValidateAuthentication(); err != nil {
+		return err
+	}
 	if c.Management != nil {
 		if err := c.Management.ValidatePath(d.Path); err != nil {
 			return err
@@ -319,6 +328,7 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	d.MCPEnabled = false
 	d.Tools = []string{}
 	d.Revision = 1
+	d.AuthenticationRevision = 1
 	return c.updateContext(ctx, "database.create", d.ID, func(items *[]Database) error {
 		for _, item := range *items {
 			if item.ID == d.ID {
@@ -330,6 +340,9 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	})
 }
 func (c *Catalog) Save(ctx context.Context, d Database) error {
+	if err := d.ValidateAuthentication(); err != nil {
+		return err
+	}
 	if d.Tools == nil {
 		d.Tools = []string{}
 	}
@@ -352,6 +365,10 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 			if old.ID == d.ID {
 				if old.Revision != d.Revision || old.ETag != d.ETag {
 					return fmt.Errorf("配置已被其他窗口修改，请刷新后重试")
+				}
+				d.AuthenticationRevision = old.AuthenticationRevision
+				if !reflect.DeepEqual(d.Authentication, old.Authentication) {
+					d.AuthenticationRevision++
 				}
 				d.Path = old.Path
 				d.Driver = old.Driver

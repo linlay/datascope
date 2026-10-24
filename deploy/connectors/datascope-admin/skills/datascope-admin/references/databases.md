@@ -35,3 +35,6 @@
 业务工具使用 business_tools 数组，每项为 `{name,description,sql,parameters}`。parameters 为参数名到 `{type,description}` 的映射；type 为 string/integer/number/boolean，SQL 使用 `:arg_参数名` 绑定，每个声明参数都必须被使用。业务 SQL 继续受服务端改写约束。
 
 保存后重新 database.get 核对 revision 和目标字段。test_connection 检查保存配置下的连接和策略，不证明 OAuth 登录、所有业务 SQL 或数据库 MCP 均可用。管理地址的授权不能复用于数据库地址。
+
+
+数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；或显式选择 `{type:"platform"}` 保留旧平台账号兼容模式。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。local 模式每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。

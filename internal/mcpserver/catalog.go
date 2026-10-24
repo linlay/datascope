@@ -2,22 +2,22 @@ package mcpserver
 
 import (
 	"context"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"slices"
-	"datascope-server/internal/audit"
-	"datascope-server/internal/catalog"
-	"datascope-server/internal/service"
-	"datascope-server/internal/store"
 	"strings"
 	"sync"
 )
 
 // ManagedHTTPHandler resolves current configuration on every request. Stateless
 // sessions ensure a previously connected client cannot retain revoked tools.
-// Identity verification uses the original identity database for all data sources.
+// Identity verification follows each database's configured account realm.
 func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options, mode, issuer, resource, path string) (http.Handler, error) {
 	// Validate authentication configuration at startup using the existing handler.
 	if _, err := HTTPHandler(nil, identity, mode, issuer, resource, path, true); err != nil {
@@ -66,6 +66,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		}
 		defer svc.Store.Close()
 		selected := opts
+		selected.Catalog = c
 		selected.IdentityStore = identity
 		selected.Tools = d.Tools
 		selected.DatabaseID = d.ID
@@ -81,7 +82,12 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		if segment != "" {
 			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
 		}
-		h, err := HTTPHandlerWithManagement(New(svc, selected), identity, mode, issuer, endpointResource, endpoint, true, opts.Management, d.ID)
+		endpointIssuer := d.AuthorizationIssuer(issuer)
+		if d.LocalAuthentication() && mode != "oauth" {
+			http.Error(w, "独立业务账号认证需要 OAuth 模式", 503)
+			return
+		}
+		h, err := HTTPHandlerWithManagement(New(svc, selected), svc.Store, mode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -95,6 +101,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 // such as stdio. Request-local services avoid races between concurrent calls.
 func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opts Options) *mcp.Server {
 	opts.Managed = true
+	opts.Catalog = c
 	opts.DatabaseID = id
 	opts.Tools = catalog.Tools
 	server := New(svc, opts)

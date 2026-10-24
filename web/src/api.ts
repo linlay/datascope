@@ -192,6 +192,7 @@ export function selectDatabase(id: string) {
 }
 export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
 export interface Database {
+ authentication?: {type:"local"|"platform";label?:string;employee_directory?:boolean};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;

@@ -2,9 +2,9 @@ package adminapi
 
 import (
 	"context"
-	"net/http"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
+	"net/http"
 	"strings"
 )
 
@@ -88,6 +88,10 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 		d, err := c.Get(id)
 		if err != nil {
 			writeJSON(w, 404, map[string]string{"error": err.Error()})
+			return
+		}
+		if d.LocalAuthentication() && strings.HasPrefix(path, "/api/mcp/") {
+			writeJSON(w, 400, map[string]string{"error": "该数据库使用独立业务认证，请通过业务连接器使用员工工号和密码授权后测试"})
 			return
 		}
 		svc, err := c.Open(r.Context(), d)

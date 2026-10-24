@@ -22,25 +22,26 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
-	DatabaseID     string            `json:"database_id,omitempty"`
-	UserID         int64             `json:"user_id,omitempty"`
-	Username       string            `json:"username,omitempty"`
-	Name           string            `json:"name,omitempty"`
-	Password       string            `json:"password,omitempty"`
-	Database       *catalog.Database `json:"database,omitempty"`
-	Permissions    []string          `json:"permissions,omitempty"`
-	BusinessUserID int64             `json:"business_user_id,omitempty"`
-	SQL            string            `json:"sql,omitempty"`
-	Query          string            `json:"query,omitempty"`
-	ID             string            `json:"id,omitempty"`
-	Summary        string            `json:"summary,omitempty"`
-	Content        string            `json:"content,omitempty"`
-	Tables         []string          `json:"tables,omitempty"`
-	Published      bool              `json:"published,omitempty"`
-	Revision       int               `json:"revision,omitempty"`
-	Limit          int               `json:"limit,omitempty"`
-	Offset         int               `json:"offset,omitempty"`
-	RequestID      string            `json:"request_id,omitempty"`
+	Account        *management.BusinessAccount `json:"account,omitempty"`
+	DatabaseID     string                      `json:"database_id,omitempty"`
+	UserID         int64                       `json:"user_id,omitempty"`
+	Username       string                      `json:"username,omitempty"`
+	Name           string                      `json:"name,omitempty"`
+	Password       string                      `json:"password,omitempty"`
+	Database       *catalog.Database           `json:"database,omitempty"`
+	Permissions    []string                    `json:"permissions,omitempty"`
+	BusinessUserID int64                       `json:"business_user_id,omitempty"`
+	SQL            string                      `json:"sql,omitempty"`
+	Query          string                      `json:"query,omitempty"`
+	ID             string                      `json:"id,omitempty"`
+	Summary        string                      `json:"summary,omitempty"`
+	Content        string                      `json:"content,omitempty"`
+	Tables         []string                    `json:"tables,omitempty"`
+	Published      bool                        `json:"published,omitempty"`
+	Revision       int                         `json:"revision,omitempty"`
+	Limit          int                         `json:"limit,omitempty"`
+	Offset         int                         `json:"offset,omitempty"`
+	RequestID      string                      `json:"request_id,omitempty"`
 }
 type Knowledge struct {
 	ID         string   `json:"id"`
@@ -63,6 +64,12 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		return nil, e
 	}
 	defer func() { err = audit.Join(err, s.Management.Audit.Finish(ev, err)) }()
+	if _, business := guard.Business(ctx); business {
+		if action == "search_knowledge" || action == "read_knowledge" {
+			return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
+		}
+		return nil, management.ErrDenied
+	}
 	u, ok := guard.User(ctx)
 	if !ok {
 		return nil, management.ErrDenied
@@ -85,6 +92,49 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		default:
 			return nil, s.Management.ResetPassword(ctx, in.UserID, in.Password)
 		}
+	case "list_business_accounts", "save_business_account":
+		if e := require("grant"); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if !d.LocalAuthentication() {
+			return nil, errors.New("请先为数据库配置 local 业务认证来源")
+		}
+		if action == "list_business_accounts" {
+			return s.Management.BusinessAccounts(ctx, in.DatabaseID)
+		}
+		// Binding identities and credentials can impersonate any row scope. Restrict
+		// account administration to the platform recovery administrator.
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.Account == nil || in.Account.DatabaseID != in.DatabaseID {
+			return nil, errors.New("业务账号的 database_id 必须一致")
+		}
+		if d.Authentication.EmployeeDirectory {
+			svc, e := s.Catalog.Open(ctx, d)
+			if e != nil {
+				return nil, e
+			}
+			defer svc.Store.Close()
+			users, e := svc.Store.Users(ctx)
+			if e != nil {
+				return nil, e
+			}
+			matched := false
+			for _, employee := range users {
+				if employee.EmpNo == in.Account.Username && employee.ID == in.Account.BusinessUserID {
+					matched = true
+				}
+			}
+			if !matched {
+				return nil, errors.New("工号与业务身份不匹配员工目录")
+			}
+		}
+		return s.Management.SaveBusinessAccount(ctx, *in.Account, in.Password, int64(in.Revision))
 	case "list_databases":
 		ds, e := s.Catalog.List()
 		if e != nil {
@@ -198,6 +248,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
+		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
 		if old.Name != in.Database.Name {
 			if e := require("config.write"); e != nil {
 				return nil, e
@@ -216,7 +269,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.Save(ctx, *in.Database); e != nil {
@@ -419,6 +472,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 	}
 	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		d.Authentication = nil
 		d.Path = ""
 		d.Config = nil
 		d.BusinessTools = nil

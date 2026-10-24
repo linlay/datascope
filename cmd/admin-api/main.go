@@ -67,6 +67,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
+		return err
+	}
 	initial, err := catalogue.Get("default")
 	if err != nil {
 		return err
@@ -96,6 +99,7 @@ func run() error {
 	if mode == "oauth" {
 		resourceBase := envflag.String("MCP_RESOURCE_URL", *mcpURL)
 		as, err := oauth.New(oauth.Config{
+			Catalog:    catalogue,
 			Issuer:     envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"),
 			Resource:   resourceBase,
 			Management: manager,

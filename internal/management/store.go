@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"datascope-server/internal/audit"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"datascope-server/internal/audit"
 	"strings"
 	"time"
 )
@@ -102,6 +102,10 @@ func Open(path string, a *audit.Store) (*Store, error) {
 		}
 	}
 	m := &Store{DB: db, Path: abs, Audit: a}
+	if e = m.initBusinessAccounts(); e != nil {
+		db.Close()
+		return nil, e
+	}
 	if e = m.initSearch(); e != nil {
 		db.Close()
 		return nil, e
