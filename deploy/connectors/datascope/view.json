@@ -1,0 +1,67 @@
+{
+  "views": {
+    "sql": {
+      "title": "SQL 查询",
+      "description": "Parameterized read-only SQL with an editable variables form. Body: {title?, sql, variables, maxRows?}. Write each variable as a bare {{name}} placeholder (never inside quotes or comments); the view quotes values by type. Every variable needs type and default, so the view runs at once with defaults and users can change values and re-run. Test the SQL with the query tool using the default values before writing the block. Do not use query=.",
+      "renderer": "html",
+      "usage": ["display"],
+      "entry": "views/sql.html",
+      "assets": ["views/sql.css", "views/sql.js"],
+      "dataSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sql", "variables"],
+        "properties": {
+          "title": {"type": "string", "maxLength": 120},
+          "sql": {"type": "string", "minLength": 1, "maxLength": 20000, "description": "One read-only SELECT (SQLite dialect) with bare {{name}} placeholders."},
+          "variables": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,31}$"},
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "default"],
+              "properties": {
+                "type": {"enum": ["string", "integer", "number", "date", "boolean"]},
+                "label": {"type": "string", "maxLength": 40},
+                "description": {"type": "string", "maxLength": 200},
+                "default": {"type": ["string", "number", "boolean"], "description": "date uses YYYY-MM-DD."},
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "description": "Allowed values shown as a select; not for boolean or date.",
+                  "items": {
+                    "oneOf": [
+                      {"type": ["string", "number"]},
+                      {"type": "object", "additionalProperties": false, "required": ["value"], "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string", "maxLength": 80}}}
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "maxRows": {"type": "integer", "minimum": 1, "maximum": 1000}
+        }
+      },
+      "queries": {
+        "run": {
+          "description": "Run one read-only SELECT through the permission-rewriting query tool. The view sends the SQL with variables already filled in.",
+          "adapter": "mcp",
+          "component": "main",
+          "toolName": "query",
+          "paramsSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sql"],
+            "properties": {
+              "sql": {"type": "string", "minLength": 1, "maxLength": 40000},
+              "max_rows": {"type": "integer", "minimum": 1, "maximum": 1000}
+            }
+          }
+        }
+      }
+    }
+  }
+}

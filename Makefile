@@ -28,6 +28,7 @@ build:
 	cd web && npm run build
 
 test:
+	node --test deploy/connectors/tests/*.test.cjs
 	$(GO_ENV) go test ./...
 	cd web && npm run typecheck
 

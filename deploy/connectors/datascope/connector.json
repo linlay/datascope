@@ -1,8 +1,8 @@
 {
   "id": "datascope",
   "name": "DataScope 金融样例库",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "mcp",
   "authMode": "mcp",
-  "description": "证券经纪业务演示库，OAuth 员工身份与 SQL 权限改写。推荐直接使用 MCP 地址导入。"
+  "description": "证券经纪业务演示库，OAuth 员工身份与 SQL 权限改写，附带可修改变量的 SQL 查询视图。"
 }

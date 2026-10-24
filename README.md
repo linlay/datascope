@@ -167,7 +167,7 @@ SQL 在改写和执行前同步写入起始记录，审计不可用时拒绝执�
 证券演示库仍支持客户、资金账户、证券账户、交易与持仓等权限改写。结构和说明见 [DDL](sql/schema.sqlite.sql)、[数据字典](docs/data-dictionary.md)、[业务权限说明](docs/permissions.md)。`make init-shop` 可生成三张表的小型商店库。
 
 ```sh
-make test          # Go 全部测试 + 前端 TypeScript 检查
+make test          # 连接器 VIEW 回归测试 + Go 全部测试 + 前端 TypeScript 检查
 make build         # 两个服务器、数据生成器与前端构建
 ```
 
@@ -176,3 +176,24 @@ make build         # 两个服务器、数据生成器与前端构建
 ## 标准连接器
 
 `deploy/connectors/datascope/` 提供业务查询连接器，`deploy/connectors/datascope-admin/` 提供携带管理 skill 的管理连接器；两者独立授权。标准 MCP 连接器配置中，`connector.json` 定义连接器信息，`mcp.json` 定义服务地址与传输方式。使用前按实际部署地址修改 `mcp.json`；支持 MCP 的客户端可直接配置服务地址并完成 OAuth 授权。
+
+### 业务查询连接器的 SQL VIEW
+
+业务查询连接器附带 `sql` 显示视图（`view.json`、`views/`），供 Agent Platform 在对话中渲染可修改变量的查询结果。模型在回复中写不带 `query=` 的数据块，正文给出 SQL 原文和变量定义；SQL 中的变量用裸写的 `{{name}}` 占位：
+
+````markdown
+```view key=datascope/sql
+{"title":"客户日终余额",
+ "sql":"SELECT c.customer_no,c.name,b.fund_account_no,b.closing_balance/100.0 AS closing_balance_yuan FROM customers c JOIN daily_balances b ON b.customer_no=c.customer_no WHERE c.customer_type={{ctype}} AND b.trade_date={{day}} AND b.closing_balance>={{min}} ORDER BY b.closing_balance DESC",
+ "variables":{
+   "ctype":{"type":"string","label":"客户类型","default":"INDIVIDUAL","options":[{"value":"INDIVIDUAL","label":"个人"},{"value":"CORPORATE","label":"机构"}]},
+   "day":{"type":"date","label":"交易日","default":"2026-10-20"},
+   "min":{"type":"integer","label":"最低余额（分）","default":0}},
+ "maxRows":200}
+```
+````
+
+- 变量类型为 string、integer、number、date（`YYYY-MM-DD`）和 boolean，每个变量必须有 `default`；`options` 以下拉框展示可选值。
+- 视图打开后立即用默认值填入 SQL 并通过 `query` 工具执行；用户修改变量后重新填写并查询。输入留空表示使用默认值，“恢复默认”清除全部修改。修改的值不保存，历史中只保留原始块。
+- 视图按类型生成 SQL 字面量：字符串加单引号并转义，负数加括号，布尔写为 1/0；占位符不能写在引号或注释里，未声明的占位符直接报错。最终 SQL 仍由服务端解析并按权限改写，视图只调用 `query`，不使用 `raw_query`。
+- 数据库需启用 `query` 工具并为当前账号设置业务身份。连接器 ID 当前为默认库的 `datascope`；按库拼装的连接器下载尚未提供。
