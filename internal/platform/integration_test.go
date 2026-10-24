@@ -1,0 +1,514 @@
+package platform_test
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"datascope-server/internal/adminapi"
+	"datascope-server/internal/application"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/guard"
+	"datascope-server/internal/management"
+	"datascope-server/internal/managementmcp"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/oauth"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/store"
+)
+
+type fixture struct {
+	dir           string
+	m             *management.Store
+	a             *audit.Store
+	c             *catalog.Catalog
+	app           *application.Service
+	st            *store.Store
+	admin, reader management.User
+	ctx           context.Context
+}
+
+func setup(t *testing.T) *fixture {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	a, e := audit.Open(filepath.Join(dir, "audit.sqlite"))
+	must(t, e)
+	m, e := management.Open(filepath.Join(dir, "management.sqlite"), a)
+	must(t, e)
+	m.AllowedRoots = []string{dir}
+	must(t, m.Bootstrap(ctx, "admin", "admin-test-password"))
+	admin, e := m.ByUsername(ctx, "admin")
+	must(t, e)
+	path := filepath.Join(dir, "business.sqlite")
+	db, e := sql.Open("sqlite", path)
+	must(t, e)
+	_, e = db.Exec(`CREATE TABLE items(id INTEGER PRIMARY KEY,owner_id INTEGER,name TEXT,secret TEXT);INSERT INTO items VALUES(1,10,'one','s1'),(2,20,'two','s2'),(3,10,'three','s3');`)
+	must(t, e)
+	db.Close()
+	st, e := store.Open(path, time.Second)
+	must(t, e)
+	cfg := &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "CUSTOM", Name: "owner"}}, Fragments: map[string]string{}, Tables: []*rewrite.Policy{{Table: "items", Scheme: "CUSTOM", SQL: "SELECT * FROM main.items WHERE owner_id = ${userId}"}}}
+	_, e = catalog.New(filepath.Join(dir, "databases"), st, cfg, store.DefaultAsOf, time.Second)
+	must(t, e)
+	c, e := catalog.BootstrapManaged(ctx, m, filepath.Join(dir, "databases"), st, "unused", store.DefaultAsOf, time.Second, filepath.Join(dir, "old.json"))
+	must(t, e)
+	ctx = guard.WithUser(audit.With(ctx, audit.Metadata{ActorID: admin.ID, Source: "test"}), admin)
+	reader, e := m.CreateUser(ctx, "reader", "Reader", "reader-test-password")
+	must(t, e)
+	must(t, m.SaveGrant(ctx, admin.ID, management.Grant{UserID: reader.ID, DatabaseID: "default", BusinessUserID: 10, Permissions: []string{"query", "knowledge.read"}}))
+	must(t, m.SaveGrant(ctx, admin.ID, management.Grant{UserID: admin.ID, DatabaseID: "default", BusinessUserID: 20, Permissions: management.Permissions}))
+	f := &fixture{dir: dir, m: m, a: a, c: c, st: st, admin: admin, reader: reader, ctx: ctx}
+	f.app = &application.Service{Management: m, Catalog: c, MCPBase: "http://127.0.0.1:8080/mcp"}
+	t.Cleanup(func() { st.Close(); m.Close(); a.Close() })
+	return f
+}
+func must(t *testing.T, e error) {
+	t.Helper()
+	if e != nil {
+		t.Fatal(e)
+	}
+}
+func (f *fixture) readerContext() context.Context {
+	return guard.WithUser(audit.With(context.Background(), audit.Metadata{ActorID: f.reader.ID, Source: "test"}), f.reader)
+}
+func request(t *testing.T, c *http.Client, method, url string, body any) (int, []byte) {
+	t.Helper()
+	var raw []byte
+	if body != nil {
+		var e error
+		raw, e = json.Marshal(body)
+		must(t, e)
+	}
+	req, e := http.NewRequest(method, url, bytes.NewReader(raw))
+	must(t, e)
+	req.Header.Set("Content-Type", "application/json")
+	res, e := c.Do(req)
+	must(t, e)
+	defer res.Body.Close()
+	b, e := io.ReadAll(res.Body)
+	must(t, e)
+	return res.StatusCode, b
+}
+func api(t *testing.T, f *fixture) *httptest.Server {
+	t.Helper()
+	d, e := f.c.Get("default")
+	must(t, e)
+	svc, e := f.c.Open(f.ctx, d)
+	must(t, e)
+	t.Cleanup(func() { svc.Store.Close() })
+	s := httptest.NewServer(adminapi.PlatformHandler(f.app, adminapi.ManagedHandler(f.c, &adminapi.Inspector{Service: svc, Endpoint: "http://127.0.0.1:1/mcp"})))
+	t.Cleanup(s.Close)
+	return s
+}
+func login(t *testing.T, url, name, password string) *http.Client {
+	t.Helper()
+	jar, e := cookiejar.New(nil)
+	must(t, e)
+	c := &http.Client{Jar: jar}
+	status, b := request(t, c, "POST", url+"/api/auth/login", map[string]any{"username": name, "password": password})
+	if status != 200 {
+		t.Fatalf("login %d: %s", status, b)
+	}
+	return c
+}
+func TestPlatformHTTPPermissionsAndAudit(t *testing.T) {
+	f := setup(t)
+	s := api(t, f)
+	for _, path := range []string{"/api/databases", "/api/users", "/api/databases/default/tables", "/api/query"} {
+		status, _ := request(t, http.DefaultClient, "GET", s.URL+path, nil)
+		if status != 401 {
+			t.Fatalf("unauthenticated %s: %d", path, status)
+		}
+	}
+	c := login(t, s.URL, "reader", "reader-test-password")
+	status, b := request(t, c, "GET", s.URL+"/api/databases", nil)
+	if status != 200 || bytes.Contains(b, []byte(f.dir)) {
+		t.Fatalf("list leaks connection: %d %s", status, b)
+	}
+	var views []application.DatabaseView
+	must(t, json.Unmarshal(b, &views))
+	if len(views) != 1 || views[0].BusinessUserID != 10 {
+		t.Fatalf("views %s", b)
+	}
+	status, _ = request(t, c, "POST", s.URL+"/api/databases/default/query", map[string]any{"sql": "SELECT * FROM items"})
+	if status != 403 {
+		t.Fatalf("raw query %d", status)
+	}
+	status, _ = request(t, c, "POST", s.URL+"/api/databases/default/rewrite", map[string]any{"sql": "SELECT * FROM items", "user_id": 20})
+	if status != 403 {
+		t.Fatalf("impersonation %d", status)
+	}
+	status, b = request(t, c, "POST", s.URL+"/api/databases/default/rewrite", map[string]any{"sql": "SELECT * FROM items"})
+	if status != 200 {
+		t.Fatalf("query %d %s", status, b)
+	}
+	var result struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	must(t, json.Unmarshal(b, &result))
+	if len(result.Rows) != 2 {
+		t.Fatalf("owner filter: %s", b)
+	}
+	status, _ = request(t, c, "POST", s.URL+"/api/databases/default/rewrite", map[string]any{"sql": "DELETE FROM items"})
+	if status != 400 {
+		t.Fatalf("write %d", status)
+	}
+	status, _ = request(t, c, "POST", s.URL+"/api/management/call", map[string]any{"action": "create_user", "arguments": map[string]any{"username": "evil", "password": "evil-test-password"}})
+	if status != 403 {
+		t.Fatalf("create user %d", status)
+	}
+	req, _ := http.NewRequest("POST", s.URL+"/api/auth/logout", strings.NewReader("{}"))
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	res, e := c.Do(req)
+	must(t, e)
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Fatalf("CSRF %d", res.StatusCode)
+	}
+	events, e := f.a.List(f.ctx, "default", "", 200, 0)
+	must(t, e)
+	var execution, denied, invalid bool
+	for _, ev := range events {
+		if ev.Kind == "sql.execute" {
+			execution = true
+			if ev.OriginalSQL == "" || ev.RewrittenSQL == "" || ev.ExecutedSQL == "" || ev.ActorID != f.reader.ID || ev.SubjectID != 10 || ev.RequestID == "" {
+				t.Fatalf("incomplete execution %+v", ev)
+			}
+		}
+		if ev.Kind == "access.denied" {
+			denied = true
+		}
+		if ev.Kind == "sql.rewrite" && ev.Status == "failed" && ev.OriginalSQL == "DELETE FROM items" {
+			invalid = true
+		}
+	}
+	if !execution || !denied || !invalid {
+		t.Fatalf("missing events execution=%v denied=%v invalid=%v", execution, denied, invalid)
+	}
+	must(t, f.m.ResetPassword(f.ctx, f.reader.ID, "reader-new-password"))
+	status, _ = request(t, c, "GET", s.URL+"/api/auth/me", nil)
+	if status != 401 {
+		t.Fatalf("old session %d", status)
+	}
+}
+func TestCatalogMigrationConcurrencyAndInternalIsolation(t *testing.T) {
+	f := setup(t)
+	d, e := f.c.Get("default")
+	must(t, e)
+	must(t, os.WriteFile(filepath.Join(f.dir, "databases", "business.yml"), []byte("invalid YAML"), 0600))
+	if _, e = f.c.List(); e != nil {
+		t.Fatal("SQLite still reads YAML", e)
+	}
+	for _, path := range []string{f.m.Path, f.a.Path} {
+		e = f.c.Add(f.ctx, catalog.Database{ID: "internal", Name: "internal", Driver: "sqlite", Path: path})
+		if e == nil {
+			t.Fatal("registered internal db")
+		}
+	}
+	link := filepath.Join(f.dir, "disguised.sqlite")
+	must(t, os.Symlink(f.m.Path, link))
+	if e = f.m.ValidatePath(link); e == nil {
+		t.Fatal("registered management symlink")
+	}
+	c2 := &catalog.Catalog{Path: f.c.Path, Timeout: f.c.Timeout, AsOf: f.c.AsOf, Management: f.m, Audit: f.a} // independent process configuration
+	one, two := *d, *d
+	one.Name = "one"
+	two.Name = "two"
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+	go func() { defer wg.Done(); errs <- f.c.Save(f.ctx, one) }()
+	go func() { defer wg.Done(); errs <- c2.Save(f.ctx, two) }()
+	wg.Wait()
+	close(errs)
+	success := 0
+	for e := range errs {
+		if e == nil {
+			success++
+		}
+	}
+	if success != 1 {
+		t.Fatalf("concurrent writes success=%d", success)
+	}
+	must(t, f.m.Flush(f.ctx))
+	var count int
+	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM outbox_events").Scan(&count))
+	if count != 0 {
+		t.Fatal("outbox not drained")
+	}
+	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM record_versions WHERE bucket='databases'").Scan(&count))
+	if count < 2 {
+		t.Fatal("missing versions")
+	}
+}
+
+type bearer struct{ token string }
+
+func (b bearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+b.token)
+	return http.DefaultTransport.RoundTrip(r)
+}
+func connectMCP(t *testing.T, endpoint, token string) *mcp.ClientSession {
+	t.Helper()
+	c := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	s, e := c.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: &http.Client{Transport: bearer{token}}}, nil)
+	must(t, e)
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+func callMCP(t *testing.T, s *mcp.ClientSession, name string, args any) (*mcp.CallToolResult, error) {
+	t.Helper()
+	return s.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+}
+func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	asHTTP := httptest.NewUnstartedServer(http.NotFoundHandler())
+	dbHTTP := httptest.NewUnstartedServer(http.NotFoundHandler())
+	issuer := "http://" + asHTTP.Listener.Addr().String()
+	base := "http://" + dbHTTP.Listener.Addr().String() + "/mcp"
+	adminResource := issuer + "/mcp/admin"
+	as, e := oauth.New(oauth.Config{Issuer: issuer, Resource: base, Management: f.m, KeyPath: filepath.Join(f.dir, "signing.pem"), StatePath: f.m.Path, ResourceAllowed: func(r string) bool { return r == adminResource || f.c.AllowsMCPResource(base, r) }, DatabaseForResource: func(r string) (string, error) {
+		if r == adminResource {
+			return "", nil
+		}
+		if r == base || r == base+"/default" {
+			return "default", nil
+		}
+		return "", fmt.Errorf("unknown")
+	}}, nil)
+	must(t, e)
+	t.Cleanup(func() { as.Close() })
+	managementHandler, e := mcpserver.HTTPHandlerWithManagement(managementmcp.New(f.app), nil, "oauth", issuer, adminResource, "/mcp/admin", true, f.m, "")
+	must(t, e)
+	asHTTP.Config.Handler = as.Handler(managementHandler)
+	asHTTP.Start()
+	t.Cleanup(asHTTP.Close)
+	d, e := f.c.Get("default")
+	must(t, e)
+	d.Tools = []string{"list_tables", "describe_table", "query", "raw_query", "search_knowledge", "read_knowledge"}
+	d.BusinessTools = []catalog.BusinessTool{{Name: "find_items", Description: "Find by name", SQL: "SELECT id,name FROM items WHERE name=:arg_name", Parameters: map[string]catalog.ToolParameter{"name": {Type: "string", Description: "Exact name"}}}}
+	must(t, f.c.Save(f.ctx, *d))
+	h, e := mcpserver.ManagedHTTPHandler(f.c, nil, mcpserver.Options{AuthMode: "oauth", Management: f.m, Application: f.app}, "oauth", issuer, base, "/mcp")
+	must(t, e)
+	dbHTTP.Config.Handler = h
+	dbHTTP.Start()
+	t.Cleanup(dbHTTP.Close)
+	token, e := as.SignEmployeeForResource(ctx, f.reader.ID, base+"/default")
+	must(t, e)
+	session := connectMCP(t, base+"/default", token)
+	list, e := session.ListTools(ctx, nil)
+	must(t, e)
+	names := []string{}
+	for _, tool := range list.Tools {
+		names = append(names, tool.Name)
+	}
+	if slices.Contains(names, "raw_query") || !slices.Contains(names, "find_items") {
+		t.Fatalf("tools %v", names)
+	}
+	out, e := callMCP(t, session, "query", map[string]any{"sql": "SELECT * FROM items"})
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("query %+v", out)
+	}
+	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one' OR 1=1 --"})
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("safe parameter query %+v", out)
+	}
+	raw, _ := json.Marshal(out.StructuredContent)
+	if !bytes.Contains(raw, []byte(`"row_count":0`)) {
+		t.Fatalf("parameter injection %s", raw)
+	}
+	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one", "extra": 1})
+	if e == nil && !out.IsError {
+		t.Fatal("accepted unknown parameter")
+	}
+	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Summary: "Ownership rules", Content: "Query items by owner_id; never sum duplicated joins.", Tables: []string{"items"}, Published: true})
+	must(t, e)
+	out, e = callMCP(t, session, "search_knowledge", map[string]any{"query": "Ownership"})
+	must(t, e)
+	raw, _ = json.Marshal(out.StructuredContent)
+	if out.IsError || bytes.Contains(raw, []byte("never sum")) {
+		t.Fatalf("summary disclosure %+v", out)
+	}
+	out, e = callMCP(t, session, "read_knowledge", map[string]any{"id": "items"})
+	must(t, e)
+	raw, _ = json.Marshal(out.StructuredContent)
+	if out.IsError || !bytes.Contains(raw, []byte("never sum")) {
+		t.Fatalf("knowledge detail %+v", out)
+	}
+	adminToken, e := as.SignEmployeeForResource(ctx, f.admin.ID, adminResource)
+	must(t, e)
+	mgmt := connectMCP(t, adminResource, adminToken)
+	out, e = callMCP(t, mgmt, "create_user", map[string]any{"username": "created-by-mcp", "name": "Created", "password": "created-test-password"})
+	must(t, e)
+	if out.IsError {
+		t.Fatalf("management create %+v", out)
+	}
+	_, e = f.m.ByUsername(ctx, "created-by-mcp")
+	must(t, e)
+	// A database token must never be accepted by the management resource.
+	req, _ := http.NewRequest("POST", adminResource, strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, e := http.DefaultClient.Do(req)
+	must(t, e)
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Fatalf("audience cross-use %d", res.StatusCode)
+	}
+	must(t, f.m.SaveGrant(f.ctx, f.admin.ID, management.Grant{UserID: f.reader.ID, DatabaseID: "default", BusinessUserID: 10, Permissions: []string{}}))
+	out, e = callMCP(t, session, "query", map[string]any{"sql": "SELECT * FROM items"})
+	if e == nil && !out.IsError {
+		t.Fatal("revoked token still queries")
+	}
+	// Resetting a password also invalidates an already issued JWT.
+	verifier := &oauth.Verifier{Issuer: issuer, Resource: adminResource, Management: f.m}
+	_, e = verifier.Verify(ctx, adminToken, nil)
+	must(t, e)
+	must(t, f.m.ResetPassword(f.ctx, f.admin.ID, "admin-new-password"))
+	_, e = verifier.Verify(ctx, adminToken, nil)
+	if e == nil {
+		t.Fatal("old JWT valid after reset")
+	}
+}
+func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
+	f := setup(t)
+	_, e := f.app.Call(f.readerContext(), "grant_database_permissions", application.Input{DatabaseID: "default", UserID: f.reader.ID, Permissions: []string{"raw_query"}})
+	if !errors.Is(e, management.ErrDenied) {
+		t.Fatalf("escalation %v", e)
+	}
+	must(t, f.m.SaveGrant(f.ctx, f.admin.ID, management.Grant{UserID: f.reader.ID, DatabaseID: "default", BusinessUserID: 10, Permissions: []string{"query", "grant"}}))
+	e = f.m.SaveGrant(f.readerContext(), f.reader.ID, management.Grant{UserID: f.admin.ID, DatabaseID: "default", BusinessUserID: 20, Permissions: []string{"query", "raw_query"}})
+	if !errors.Is(e, management.ErrDenied) {
+		t.Fatalf("delegation escalation %v", e)
+	}
+	d, e := f.c.Get("default")
+	must(t, e)
+	svc, e := f.c.Open(f.readerContext(), d)
+	must(t, e)
+	defer svc.Store.Close()
+	for _, q := range []string{"ATTACH DATABASE '" + f.m.Path + "' AS management", "PRAGMA query_only=0", "PRAGMA writable_schema=ON"} {
+		if _, e := svc.Store.RawQuery(f.ctx, q, 20); e == nil {
+			t.Fatalf("unsafe raw SQL accepted: %s", q)
+		}
+	}
+	must(t, f.a.Close())
+	_, e = svc.Query(f.readerContext(), "SELECT * FROM items", 10, 200)
+	if e == nil {
+		t.Fatal("query executed with unavailable audit")
+	}
+}
+
+func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	d, e := f.c.Get("default")
+	must(t, e)
+	svc, e := f.c.Open(ctx, d)
+	must(t, e)
+	defer svc.Store.Close()
+	server := mcpserver.ManagedServer(f.c, "default", svc, mcpserver.Options{AuthMode: "none", DefaultUserID: f.reader.ID, Management: f.m, Application: f.app})
+	left, right := mcp.NewInMemoryTransports()
+	ss, e := server.Connect(ctx, left, nil)
+	must(t, e)
+	defer ss.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "live", Version: "1"}, nil)
+	session, e := client.Connect(ctx, right, nil)
+	must(t, e)
+	defer session.Close()
+	d.BusinessTools = []catalog.BusinessTool{{Name: "find_items", Description: "Find item", SQL: "SELECT id FROM items WHERE name=:arg_name", Parameters: map[string]catalog.ToolParameter{"name": {Type: "string"}}}}
+	must(t, f.c.Save(f.ctx, *d))
+	list, e := session.ListTools(ctx, nil)
+	must(t, e)
+	if !slices.ContainsFunc(list.Tools, func(t *mcp.Tool) bool { return t.Name == "find_items" }) {
+		t.Fatal("new configured tool not published")
+	}
+	var wg sync.WaitGroup
+	failures := make(chan string, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, e := session.CallTool(ctx, &mcp.CallToolParams{Name: "find_items", Arguments: map[string]any{"name": "one"}})
+			if e != nil {
+				failures <- e.Error()
+				return
+			}
+			raw, _ := json.Marshal(out.StructuredContent)
+			if out.IsError || !bytes.Contains(raw, []byte(`"row_count":1`)) {
+				failures <- string(raw)
+			}
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for e := range failures {
+		t.Fatal(e)
+	}
+	d, e = f.c.Get("default")
+	must(t, e)
+	d.BusinessTools[0].SQL = "SELECT id FROM items WHERE name=:arg_name AND id=3"
+	must(t, f.c.Save(f.ctx, *d))
+	out, e := callMCP(t, session, "find_items", map[string]any{"name": "one"})
+	must(t, e)
+	raw, _ := json.Marshal(out.StructuredContent)
+	if out.IsError || !bytes.Contains(raw, []byte(`"row_count":0`)) {
+		t.Fatalf("old SQL retained: %s", raw)
+	}
+	d, e = f.c.Get("default")
+	must(t, e)
+	d.BusinessTools = nil
+	must(t, f.c.Save(f.ctx, *d))
+	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one"})
+	if e == nil && !out.IsError {
+		t.Fatal("removed business tool still callable")
+	}
+}
+func TestKnowledgeVisibilityAndConflict(t *testing.T) {
+	f := setup(t)
+	in := application.Input{DatabaseID: "default", ID: "owner-guide", Name: "Owner guide", Summary: "Only owned items", Content: "Query owner_id in items", Tables: []string{"items"}}
+	_, e := f.app.Call(f.ctx, "save_knowledge", in)
+	must(t, e)
+	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})
+	if e == nil {
+		t.Fatal("draft knowledge visible")
+	}
+	in.Published = true
+	in.Revision = 1
+	_, e = f.app.Call(f.ctx, "save_knowledge", in)
+	must(t, e)
+	_, e = f.app.Call(f.ctx, "save_knowledge", in)
+	if e == nil {
+		t.Fatal("stale knowledge overwritten")
+	}
+	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})
+	must(t, e)
+	d, e := f.c.Get("default")
+	must(t, e)
+	d.Config.Tables[0].Columns = []string{"id", "name"}
+	must(t, f.c.Save(f.ctx, *d))
+	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})
+	if e == nil {
+		t.Fatal("knowledge exposing restricted fields still visible")
+	}
+}

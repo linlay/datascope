@@ -24,14 +24,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
-	"sql-rewrite-server/internal/adminapi"
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/oauth"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
-	"sql-rewrite-server/internal/testutil"
+	"datascope-server/internal/adminapi"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/oauth"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
+	"datascope-server/internal/testutil"
 )
 
 type env struct {

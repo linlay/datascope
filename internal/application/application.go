@@ -1,0 +1,427 @@
+// Package application exposes the same authorized domain actions to HTTP and MCP.
+package application
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/guard"
+	"datascope-server/internal/management"
+	"strings"
+)
+
+type Service struct {
+	Management    *management.Store
+	Catalog       *catalog.Catalog
+	MCPBase       string
+	SecureCookies bool
+}
+type Input struct {
+	DatabaseID     string            `json:"database_id,omitempty"`
+	UserID         int64             `json:"user_id,omitempty"`
+	Username       string            `json:"username,omitempty"`
+	Name           string            `json:"name,omitempty"`
+	Password       string            `json:"password,omitempty"`
+	Database       *catalog.Database `json:"database,omitempty"`
+	Permissions    []string          `json:"permissions,omitempty"`
+	BusinessUserID int64             `json:"business_user_id,omitempty"`
+	SQL            string            `json:"sql,omitempty"`
+	Query          string            `json:"query,omitempty"`
+	ID             string            `json:"id,omitempty"`
+	Summary        string            `json:"summary,omitempty"`
+	Content        string            `json:"content,omitempty"`
+	Tables         []string          `json:"tables,omitempty"`
+	Published      bool              `json:"published,omitempty"`
+	Revision       int               `json:"revision,omitempty"`
+	Limit          int               `json:"limit,omitempty"`
+	Offset         int               `json:"offset,omitempty"`
+	RequestID      string            `json:"request_id,omitempty"`
+}
+type Knowledge struct {
+	ID         string   `json:"id"`
+	DatabaseID string   `json:"database_id"`
+	Name       string   `json:"name"`
+	Summary    string   `json:"summary"`
+	Content    string   `json:"content,omitempty"`
+	Tables     []string `json:"tables"`
+	Published  bool     `json:"published"`
+	Revision   int      `json:"revision"`
+}
+
+func (s *Service) Call(ctx context.Context, action string, in Input) (out any, err error) {
+	m := audit.From(ctx)
+	m.Tool = action
+	m.DatabaseID = in.DatabaseID
+	ctx = audit.With(ctx, m)
+	ev, e := s.Management.Audit.Start(ctx, "action."+action, "")
+	if e != nil {
+		return nil, e
+	}
+	defer func() { err = audit.Join(err, s.Management.Audit.Finish(ev, err)) }()
+	u, ok := guard.User(ctx)
+	if !ok {
+		return nil, management.ErrDenied
+	}
+	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
+	switch action {
+	case "list_users", "create_user", "disable_user", "enable_user", "reset_password":
+		if e := guard.Require(ctx, s.Management, "", "users.manage"); e != nil {
+			return nil, e
+		}
+		switch action {
+		case "list_users":
+			return s.Management.Users(ctx)
+		case "create_user":
+			return s.Management.CreateUser(ctx, in.Username, in.Name, in.Password)
+		case "disable_user":
+			return nil, s.Management.DisableUser(ctx, in.UserID)
+		case "enable_user":
+			return nil, s.Management.EnableUser(ctx, in.UserID)
+		default:
+			return nil, s.Management.ResetPassword(ctx, in.UserID, in.Password)
+		}
+	case "list_databases":
+		ds, e := s.Catalog.List()
+		if e != nil {
+			return nil, e
+		}
+		out := []DatabaseView{}
+		for _, d := range ds {
+			v := s.DatabaseView(ctx, d)
+			if len(v.Permissions) > 0 {
+				out = append(out, v)
+			}
+		}
+		return out, nil
+	case "create_database":
+		if e := guard.Require(ctx, s.Management, "", "databases.create"); e != nil {
+			return nil, e
+		}
+		if in.Database == nil {
+			return nil, errors.New("需要 database 参数")
+		}
+		e := s.Catalog.Add(ctx, *in.Database)
+		if e != nil {
+			return nil, e
+		}
+
+		d, e := s.Catalog.Get(in.Database.ID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *d), nil
+	case "get_database", "get_policy":
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *d), nil
+	case "update_database", "save_policy", "validate_policy", "configure_mcp":
+		p := "config.write"
+		if action == "save_policy" || action == "validate_policy" {
+			p = "policy.write"
+		}
+		if action == "configure_mcp" {
+			p = "mcp.write"
+		}
+		if e := require(p); e != nil {
+			return nil, e
+		}
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("需要标识一致的 database 参数")
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Revision != in.Database.Revision {
+			return nil, errors.New("配置已变更，请刷新后重试")
+		}
+		switch action {
+		case "update_database":
+			d.Name = in.Database.Name
+		case "save_policy", "validate_policy":
+			d.Config = in.Database.Config
+		case "configure_mcp":
+			d.MCPEnabled = in.Database.MCPEnabled
+			d.MCPPath = in.Database.MCPPath
+			d.Tools = in.Database.Tools
+			d.BusinessTools = in.Database.BusinessTools
+		}
+		if action == "validate_policy" {
+			svc, e := s.Catalog.Open(ctx, d)
+			if e != nil {
+				return nil, e
+			}
+			svc.Store.Close()
+			return map[string]bool{"valid": true}, nil
+		}
+		if e := s.Catalog.Save(ctx, *d); e != nil {
+			return nil, e
+		}
+		saved, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *saved), nil
+	case "test_connection":
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		svc, e := s.Catalog.Open(ctx, d)
+		if e != nil {
+			return nil, e
+		}
+		svc.Store.Close()
+		return map[string]bool{"connected": true}, nil
+	case "save_database":
+
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("数据库标识不匹配")
+		}
+		old, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if old.Name != in.Database.Name {
+			if e := require("config.write"); e != nil {
+				return nil, e
+			}
+		}
+		if !reflect.DeepEqual(old.Config, in.Database.Config) {
+			if e := require("policy.write"); e != nil {
+				return nil, e
+			}
+		}
+		if old.MCPEnabled != in.Database.MCPEnabled || old.MCPPath != in.Database.MCPPath || !reflect.DeepEqual(old.Tools, in.Database.Tools) || !reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+			if e := require("mcp.write"); e != nil {
+				return nil, e
+			}
+		}
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+			return s.DatabaseView(ctx, *old), nil
+		}
+		if e := s.Catalog.Save(ctx, *in.Database); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *d), nil
+	case "list_database_grants":
+		if e := require("grant"); e != nil {
+			return nil, e
+		}
+		return s.Management.Grants(ctx, in.DatabaseID)
+	case "grant_database_permissions", "revoke_database_permissions":
+		if _, e := s.Catalog.Get(in.DatabaseID); e != nil {
+			return nil, e
+		}
+		if action == "revoke_database_permissions" {
+			in.Permissions = []string{}
+			g, _ := s.Management.Grant(ctx, in.UserID, in.DatabaseID)
+			in.BusinessUserID = g.BusinessUserID
+		}
+		return nil, s.Management.SaveGrant(ctx, u.ID, management.Grant{UserID: in.UserID, DatabaseID: in.DatabaseID, Permissions: in.Permissions, BusinessUserID: in.BusinessUserID})
+	case "preview_rewrite":
+		if e := require("query"); e != nil {
+			return nil, e
+		}
+		bid, e := s.Management.BusinessID(ctx, u.ID, in.DatabaseID)
+		if in.BusinessUserID != 0 {
+			if e := require("impersonate"); e != nil {
+				return nil, e
+			}
+			bid = in.BusinessUserID
+			e = nil
+		}
+		if e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		svc, e := s.Catalog.Open(ctx, d)
+		if e != nil {
+			return nil, e
+		}
+		defer svc.Store.Close()
+		return svc.Rewrite(ctx, in.SQL, bid)
+	case "search_audit_events":
+		if in.DatabaseID == "" && !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.DatabaseID != "" {
+			if e := require("audit.read"); e != nil {
+				return nil, e
+			}
+		}
+		return s.Management.Audit.List(ctx, in.DatabaseID, in.RequestID, in.Limit, in.Offset)
+	case "search_knowledge", "read_knowledge":
+		return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
+	case "list_knowledge", "get_knowledge":
+		if e := require("knowledge.write"); e != nil {
+			return nil, e
+		}
+		return s.ReadKnowledge(ctx, in, action == "get_knowledge", true)
+	case "save_knowledge":
+		if e := require("knowledge.write"); e != nil {
+			return nil, e
+		}
+		if in.ID == "" || strings.Contains(in.ID, "/") || in.Name == "" || len(in.Content) > 200000 {
+			return nil, errors.New("需要合法知识 ID、名称，正文最多 200000 字节")
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Config == nil {
+			return nil, errors.New("缺少数据库策略")
+		}
+		if e := d.Config.Validate(); e != nil {
+			return nil, e
+		}
+		for _, t := range in.Tables {
+			if _, ok := d.Config.Lookup(t); !ok {
+				return nil, fmt.Errorf("未知表 %s", t)
+			}
+		}
+		var saved Knowledge
+		e = s.Management.UpdateRecords(ctx, "knowledge", "knowledge.save", in.DatabaseID, func(records []management.Record) ([]management.Record, error) {
+			key := in.DatabaseID + "/" + in.ID
+			old := Knowledge{}
+			for _, r := range records {
+				if r.Key == key {
+					if e := json.Unmarshal([]byte(r.Data), &old); e != nil {
+						return nil, e
+					}
+				}
+			}
+			if old.Revision != in.Revision {
+				return nil, errors.New("知识已更新，请刷新后重试")
+			}
+			saved = Knowledge{ID: in.ID, DatabaseID: in.DatabaseID, Name: in.Name, Summary: in.Summary, Content: in.Content, Tables: in.Tables, Published: in.Published, Revision: old.Revision + 1}
+			raw, e := json.Marshal(saved)
+			return []management.Record{{Key: key, Data: string(raw)}}, e
+		})
+		return saved, e
+	default:
+		return nil, fmt.Errorf("未知管理动作 %s", action)
+	}
+}
+func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool) (any, error) {
+	if full && in.ID == "" {
+		return nil, errors.New("需要知识 ID")
+	}
+	if !drafts {
+		if e := guard.Require(ctx, s.Management, in.DatabaseID, "knowledge.read"); e != nil {
+			return nil, e
+		}
+		if e := guard.Require(ctx, s.Management, in.DatabaseID, "query"); e != nil {
+			return nil, e
+		}
+	}
+	d, e := s.Catalog.Get(in.DatabaseID)
+	if e != nil {
+		return nil, e
+	}
+	if d.Config == nil {
+		return nil, errors.New("缺少数据库策略")
+	}
+	if e := d.Config.Validate(); e != nil {
+		return nil, e
+	}
+	matches, e := s.Management.SearchKnowledge(ctx, in.Query)
+	if e != nil {
+		return nil, e
+	}
+	records, e := s.Management.Records(ctx, "knowledge")
+	if e != nil {
+		return nil, e
+	}
+	out := []Knowledge{}
+	for _, r := range records {
+		var k Knowledge
+		if e = json.Unmarshal([]byte(r.Data), &k); e != nil {
+			return nil, e
+		}
+		if k.DatabaseID != in.DatabaseID || (!drafts && !k.Published) {
+			continue
+		}
+		if in.ID != "" && k.ID != in.ID {
+			continue
+		}
+		visible := true
+		for _, t := range k.Tables {
+			p, ok := d.Config.Lookup(t)
+			if !ok || (p.Enabled != nil && !*p.Enabled) || p.Columns != nil {
+				visible = false
+				break
+			}
+		}
+		if !drafts && !visible {
+			continue
+		}
+		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Summary+" "+k.Content), strings.ToLower(in.Query)) {
+			continue
+		}
+		if !full {
+			k.Content = ""
+		}
+		out = append(out, k)
+		if len(out) >= 50 {
+			break
+		}
+	}
+	if full {
+		if len(out) == 0 {
+			return nil, errors.New("知识不存在或不可访问")
+		}
+		return out[0], nil
+	}
+	return out, nil
+}
+
+type DatabaseView struct {
+	MCPEndpoint string `json:"mcp_endpoint"`
+	catalog.Database
+	Permissions    []string `json:"permissions"`
+	BusinessUserID int64    `json:"business_user_id"`
+}
+
+func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) DatabaseView {
+	u, _ := guard.User(ctx)
+	p := []string{}
+	for _, permission := range management.Permissions {
+		if s.Management.Can(ctx, u.ID, d.ID, permission) {
+			p = append(p, permission)
+		}
+	}
+	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
+	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		d.Path = ""
+		d.Config = nil
+		d.BusinessTools = nil
+		d.Tools = nil
+	}
+	return DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+}

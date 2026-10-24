@@ -186,11 +186,14 @@ export class ApiError extends Error {
   }
 }
 
-export let selectedDatabase = localStorage.getItem('sql-rewrite-database') || 'default';
+export let selectedDatabase = localStorage.getItem('datascope-database') || localStorage.getItem('sql-rewrite-database') || 'default';
 export function selectDatabase(id: string) {
- selectedDatabase = id; localStorage.setItem('sql-rewrite-database', id); usersPromise = undefined;
+ selectedDatabase = id; localStorage.setItem('datascope-database', id); usersPromise = undefined;
 }
+export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
 export interface Database {
+ business_tools?:BusinessTool[];
+ permissions?: string[]; business_user_id?: number;
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
  config: { version: number; schemes: SchemeInfo[]; fragments: Record<string,string>; tables: PolicyView[] };
 }
@@ -203,11 +206,13 @@ export const databases = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;
   const response = await fetch(path, {
+ credentials: "same-origin",
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+ if(response.status===401)window.dispatchEvent(new Event("platform-session-expired"));
     const message = typeof body.error === 'string' ? body.error : `${response.status} ${response.statusText}`;
     throw new ApiError(message, response.status, body);
   }
@@ -253,7 +258,16 @@ export const api = {
   previewRewrite: (sql: string, userId: number) =>
     post<RewritePreview>('/api/rewrite', { sql, user_id: userId, preview_only: true }),
   mcpInfo: () => request<ServerInfo>('/api/mcp/info'),
-  mcpCall: (name: string, args: Record<string, unknown>, userId: number) =>
-    post<CallResult>('/api/mcp/call', { name, arguments: args, user_id: userId }),
+  mcpCall: (name: string, args: Record<string, unknown>, _userId: number) =>
+    post<CallResult>('/api/mcp/call', { name, arguments: args }),
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
+
+// Global platform endpoints must never be rewritten into a selected database path.
+export async function platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
+ const response=await fetch(path,{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok){if(response.status===401&&!path.endsWith('/login'))window.dispatchEvent(new Event('platform-session-expired'));throw new ApiError(data.error||String(response.status),response.status,data);}
+ return data as T;
+}
+export const managementCall=<T>(action:string,args:Record<string,unknown>={})=>platformRequest<T>('/api/management/call',{method:'POST',body:JSON.stringify({action,arguments:args})});

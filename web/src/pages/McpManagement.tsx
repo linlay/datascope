@@ -6,11 +6,13 @@ import { HelpTip } from '../components/HelpTip';
 
 const { Text } = Typography;
 const toolOptions = [
-  { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
+  { name:'search_knowledge',label:'检索知识摘要',help:'按业务问题检索知识的名称、摘要和 ID。' },
+ { name:'read_knowledge',label:'按需读取知识',help:'通过 ID 读取业务知识正文，支持渐进式披露。' },
+ { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
   { name: 'describe_table', label: '表结构', help: '查看指定表允许访问的字段、类型和访问方案。' },
   { name: 'query', label: '权限查询', help: '只读查询，应用表、字段、行权限和返回行数限制。规则在“数据库访问策略”中配置。' },
-  { name: 'raw_query', label: '原始查询', admin: true, help: '绕过表、字段和行权限改写，仍保持只读。仅管理员可调用，OAuth 需 sql:debug 权限。' },
-  { name: 'customer_scope', label: '客户范围', admin: true, help: '核对证券样例库的客户可见范围，仅管理员可调用，OAuth 需 sql:debug 权限。' },
+  { name: 'raw_query', label: '原始查询', admin: true, help: '绕过表、字段和行权限改写，仍保持只读。需要当前数据库的全量查询权限。' },
+  { name: 'customer_scope', label: '客户范围', admin: true, help: '核对证券样例库的客户可见范围，需要当前数据库的全量查询权限。' },
 ];
 
 export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void }) {
@@ -18,6 +20,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   const [enabled, setEnabled] = useState(false);
   const [tools, setTools] = useState<string[]>([]);
   const [mcpPath, setMcpPath] = useState('');
+ const [businessText,setBusinessText]=useState('[]');
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
 
@@ -29,6 +32,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
       setEnabled(item.mcp_enabled);
       setTools(item.tools);
       setMcpPath(item.mcp_path || item.id);
+ setBusinessText(JSON.stringify(item.business_tools||[],null,2));
     }).catch((e: Error) => { if (live) setError(e.message); });
     return () => { live = false; };
   }, [id]);
@@ -39,16 +43,18 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   const endpoint = new URL(db.mcp_endpoint || `/mcp/${db.mcp_path || db.id}`, window.location.origin);
   const prefix = endpoint.pathname.slice(0, endpoint.pathname.lastIndexOf('/') + 1);
   const previewEndpoint = `${endpoint.origin}${prefix}${mcpPath}`;
-  const dirty = mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== db.tools.length || tools.some((tool) => !db.tools.includes(tool));
+  const dirty = businessText!==JSON.stringify(db.business_tools||[],null,2) || mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== db.tools.length || tools.some((tool) => !db.tools.includes(tool));
   const save = async () => {
     setSaving(true);
     setError(undefined);
     try {
-      const saved = await databases.save({ ...db, mcp_enabled: enabled, mcp_path: mcpPath, tools });
+      const business_tools:unknown=JSON.parse(businessText);if(!Array.isArray(business_tools))throw new Error("业务工具配置必须是 JSON 数组");
+ const saved = await databases.save({ ...db, mcp_enabled: enabled, mcp_path: mcpPath, tools, business_tools });
       setDB(saved);
       setEnabled(saved.mcp_enabled);
       setTools(saved.tools);
       setMcpPath(saved.mcp_path || saved.id);
+ setBusinessText(JSON.stringify(saved.business_tools||[],null,2));
       message.success('MCP 配置已保存');
       onSaved();
     } catch (e) {
@@ -88,10 +94,11 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
                 </div>
               ))}
             </Checkbox.Group>
-            {tools.includes('raw_query') && <Alert type="warning" showIcon title="原始查询绕过访问策略，仅管理员可用。" />}
+            {tools.includes('raw_query') && <Alert type="warning" showIcon title="原始查询绕过访问策略，需要单独授予全量查询权限。" />}
           </Space>
         </Space>
       </Card>
+      <Card title="配置生成业务工具"><Typography.Paragraph>每个工具包含名称、说明、SQL 模板和参数定义。SQL 使用 <Typography.Text code>:arg_参数名</Typography.Text>；参数独立绑定，查询仍经过权限改写与审计。</Typography.Paragraph><Input.TextArea aria-label="业务工具 JSON 配置" className="mono" rows={12} value={businessText} onChange={e=>setBusinessText(e.target.value)}/><Typography.Paragraph type="secondary" style={{marginTop:8}}>示例：{`[{"name":"find_customer","description":"按客户编号查询","sql":"SELECT * FROM customers WHERE customer_no=:arg_customer_no","parameters":{"customer_no":{"type":"string","description":"客户编号"}}}]`}</Typography.Paragraph></Card>
       {error && <Alert type="error" showIcon title="MCP 配置保存失败" description={error} closable onClose={() => setError(undefined)} />}
       {db.mcp_enabled ? (
         <McpInspector key={db.revision} />

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sql-rewrite-server/internal/gendata"
+	"datascope-server/internal/gendata"
 	"sync"
 	"testing"
 )

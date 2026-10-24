@@ -15,12 +15,16 @@ import (
 	"syscall"
 	"time"
 
-	"sql-rewrite-server/internal/adminapi"
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/envflag"
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/oauth"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/adminapi"
+	"datascope-server/internal/application"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/envflag"
+	"datascope-server/internal/managementmcp"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/oauth"
+	"datascope-server/internal/platform"
+	"datascope-server/internal/store"
 )
 
 func main() {
@@ -53,7 +57,13 @@ func run() error {
 		return err
 	}
 	defer st.Close()
-	catalogue, err := catalog.Bootstrap(envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
+	manager, err := platform.Open(context.Background())
+	if err != nil {
+		return err
+	}
+	defer manager.Close()
+	defer manager.Audit.Close()
+	catalogue, err := catalog.BootstrapManaged(context.Background(), manager, envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
 		return err
 	}
@@ -75,18 +85,36 @@ func run() error {
 		HTTPClient:  &http.Client{Timeout: 60 * time.Second},
 	}
 
-	handler := adminapi.ManagedHandler(catalogue, inspector)
+	app := &application.Service{Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp"), SecureCookies: envflag.Bool("SESSION_COOKIE_SECURE", strings.HasPrefix(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "https://"))}
+	handler := adminapi.PlatformHandler(app, adminapi.ManagedHandler(catalogue, inspector))
 	mode := envflag.String("MCP_AUTH_MODE", "oauth")
+	inspector.AuthMode = mode
 	if mode != "oauth" && mode != "header" && mode != "none" {
 		return fmt.Errorf("invalid MCP_AUTH_MODE %q", mode)
 	}
 	if mode == "oauth" {
 		resourceBase := envflag.String("MCP_RESOURCE_URL", *mcpURL)
 		as, err := oauth.New(oauth.Config{
-			Issuer:   envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"),
-			Resource: resourceBase,
+			Issuer:     envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"),
+			Resource:   resourceBase,
+			Management: manager,
 			ResourceAllowed: func(resource string) bool {
-				return catalogue.AllowsMCPResource(resourceBase, resource)
+				return resource == strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/")+"/mcp/admin" || catalogue.AllowsMCPResource(resourceBase, resource)
+			},
+			DatabaseForResource: func(resource string) (string, error) {
+				if resource == strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/")+"/mcp/admin" {
+					return "", nil
+				}
+				items, e := catalogue.List()
+				if e != nil {
+					return "", e
+				}
+				for _, d := range items {
+					if d.MCPEnabled && (resource == strings.TrimRight(resourceBase, "/")+"/"+d.MCPRoute() || (d.ID == "default" && resource == resourceBase)) {
+						return d.ID, nil
+					}
+				}
+				return "", fmt.Errorf("未知资源")
 			},
 			KeyPath:    envflag.String("OAUTH_KEY_PATH", "data/oauth/signing.pem"),
 			StatePath:  envflag.String("OAUTH_STATE_PATH", "data/oauth/state.sqlite3"),
@@ -105,7 +133,16 @@ func run() error {
 			}
 			return as.SignEmployeeForResource(ctx, userID, strings.TrimRight(resourceBase, "/")+"/"+d.MCPRoute())
 		}
-		handler = as.Handler(handler)
+		adminResource := strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin"
+		adminMCP, e := mcpserver.HTTPHandlerWithManagement(managementmcp.New(app), nil, "oauth", envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), adminResource, "/mcp/admin", true, manager, "")
+		if e != nil {
+			return e
+		}
+		routes := http.NewServeMux()
+		routes.Handle("/mcp/admin", audit.HTTPHandler(manager.Audit, "management-mcp", adminMCP))
+		routes.Handle("/.well-known/oauth-protected-resource/mcp/admin", adminMCP)
+		routes.Handle("/", handler)
+		handler = as.Handler(routes)
 	}
 	srv := &http.Server{
 		Addr:              *addr,
@@ -115,6 +152,9 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	outboxDone := make(chan struct{})
+	go func() { defer close(outboxDone); platform.RunOutbox(ctx, manager) }()
+	defer func() { stop(); <-outboxDone }()
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("serving admin API", "url", "http://"+*addr+"/api", "db", st.Path(), "mcp", *mcpURL)

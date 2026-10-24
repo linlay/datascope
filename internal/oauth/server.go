@@ -31,7 +31,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"golang.org/x/time/rate"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/management"
+	"datascope-server/internal/store"
 )
 
 var b64 = base64.RawURLEncoding
@@ -46,6 +48,8 @@ func random() string {
 func hash(s string) string { v := sha256.Sum256([]byte(s)); return b64.EncodeToString(v[:]) }
 
 type Config struct {
+	Management                                     *management.Store
+	DatabaseForResource                            func(string) (string, error)
 	Issuer, Resource, KeyPath, StatePath, Password string
 	DebugLogin                                     bool
 	// ResourceAllowed validates exact configured endpoint URLs. Without it,
@@ -60,6 +64,7 @@ type Server struct {
 	loginLimit, registerLimit *rate.Limiter
 }
 type grant struct {
+	Version                                                       int64
 	Client, Redirect, Resource, Challenge, Subject, Scope, Family string
 	Expires                                                       int64
 	Used                                                          bool
@@ -85,13 +90,16 @@ func New(cfg Config, st *store.Store) (*Server, error) {
 	if !ValidURL(cfg.Issuer, false) || !ValidURL(cfg.Resource, false) {
 		return nil, errors.New("OAuth issuer/resource must be HTTPS or loopback HTTP")
 	}
-	if len(cfg.Password) < 12 {
+	if cfg.Management == nil && len(cfg.Password) < 12 {
 		return nil, errors.New("OAUTH_DEMO_PASSWORD must contain at least 12 characters")
 	}
 	cfg.Issuer = strings.TrimRight(cfg.Issuer, "/")
 	key, e := loadKey(cfg.KeyPath)
 	if e != nil {
 		return nil, e
+	}
+	if cfg.Management != nil {
+		cfg.StatePath = cfg.Management.Path
 	}
 	if e = os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); e != nil {
 		return nil, e
@@ -101,7 +109,7 @@ func New(cfg Config, st *store.Store) (*Server, error) {
 		return nil, e
 	}
 	f.Close()
-	db, e := sql.Open("sqlite", cfg.StatePath)
+	db, e := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: cfg.StatePath, RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"}).String())
 	if e != nil {
 		return nil, e
 	}
@@ -273,15 +281,15 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+callbackOrigin+"; frame-ancestors 'none'; base-uri 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	users := []store.UserSummary{}
-	if s.cfg.DebugLogin {
+	if s.cfg.DebugLogin && s.cfg.Management == nil {
 		users, _ = s.store.Users(r.Context())
 	}
-	loginPage.Execute(w, map[string]any{"Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": g.Resource, "Debug": s.cfg.DebugLogin, "Users": users})
+	loginPage.Execute(w, map[string]any{"Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": g.Resource, "Debug": s.cfg.DebugLogin && s.cfg.Management == nil, "Users": users})
 }
 
 func loginCookieName(nonce string) string { return "oauth_login_" + hash(nonce)[:16] }
 
-var loginProblemPage = template.Must(template.New("loginProblem").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>请重新打开授权页</title><body><h1>请重新打开授权页</h1><p>{{.Message}}</p>{{if .Retry}}<p><a href="{{.Retry}}">重新打开授权页</a></p>{{end}}<p>也可以回到 agent-platform，再次点击“账号授权”。</p></body></html>`))
+var loginProblemPage = template.Must(template.New("loginProblem").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>请重新打开授权页</title><body><h1>请重新打开授权页</h1><p>{{.Message}}</p>{{if .Retry}}<p><a href="{{.Retry}}">重新打开授权页</a></p>{{end}}<p>也可以回到发起连接的客户端，重新发起账号授权。</p></body></html>`))
 
 func loginProblem(w http.ResponseWriter, r *http.Request, message string) {
 	retry := ""
@@ -296,9 +304,20 @@ func loginProblem(w http.ResponseWriter, r *http.Request, message string) {
 	loginProblemPage.Execute(w, map[string]string{"Message": message, "Retry": retry})
 }
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>星澜证券 · 员工授权</title><style>body{font:16px system-ui;background:#eef2f7;margin:8vh auto;max-width:460px;padding:24px}form{background:white;padding:28px;border-radius:14px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px}button{background:#1763ba;color:white;border:0;border-radius:6px}small{color:#526070;overflow-wrap:anywhere}</style><form method="post"><h1>员工账号授权</h1><p>向 {{.Client}} 授权证券查询</p><small>资源：{{.Resource}}<br>请求权限：{{.Scope}}</small><input type="hidden" name="nonce" value="{{.Nonce}}"><label>工号<input name="emp_no" placeholder="E0001" autocomplete="username"></label><label>演示密码<input type="password" name="password" autocomplete="current-password"></label>{{if .Debug}}<label>调试：模拟员工<select name="debug_employee"><option value="">使用工号密码登录</option>{{range .Users}}{{if eq .Status "active"}}<option value="{{.EmpNo}}">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}<button type="submit">登录并同意授权</button><small>合成演示数据。切换身份请重新发起账号授权。</small></form></html>`))
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DataScope · 账号授权</title><style>body{font:16px system-ui;background:#eef2f7;margin:8vh auto;max-width:460px;padding:24px}form{background:white;padding:28px;border-radius:14px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px}button{background:#1763ba;color:white;border:0;border-radius:6px}small{color:#526070;overflow-wrap:anywhere}</style><form method="post"><h1>DataScope 账号授权</h1><p>向 {{.Client}} 授权数据库代理访问</p><small>资源：{{.Resource}}<br>请求权限：{{.Scope}}</small><input type="hidden" name="nonce" value="{{.Nonce}}"><label>用户名<input name="emp_no" placeholder="用户名" autocomplete="username"></label><label>密码<input type="password" name="password" autocomplete="current-password"></label>{{if .Debug}}<label>调试：模拟员工<select name="debug_employee"><option value="">使用工号密码登录</option>{{range .Users}}{{if eq .Status "active"}}<option value="{{.EmpNo}}">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}<button type="submit">登录并同意授权</button><small>切换账号请重新发起授权。</small></form></html>`))
 
 func (s *Server) employee(ctx context.Context, emp string) (store.UserSummary, error) {
+	if s.cfg.Management != nil {
+		u, e := s.cfg.Management.ByUsername(ctx, emp)
+		if e != nil || !u.Active {
+			return store.UserSummary{}, errors.New("inactive or unknown user")
+		}
+		role := ""
+		if u.SystemAdmin {
+			role = "ADMIN"
+		}
+		return store.UserSummary{ID: u.ID, EmpNo: u.Username, Name: u.Name, Status: "active", RoleCode: role, AuthVersion: u.AuthVersion}, nil
+	}
 	us, e := s.store.Users(ctx)
 	if e != nil {
 		return store.UserSummary{}, e
@@ -336,15 +355,38 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if debug {
 		emp = r.PostForm.Get("debug_employee")
 	}
-	a := sha256.Sum256([]byte(r.PostForm.Get("password")))
-	b := sha256.Sum256([]byte(s.cfg.Password))
-	if !debug && subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
-		http.Error(w, "工号或密码错误", 401)
-		return
+	var u store.UserSummary
+	if s.cfg.Management != nil {
+		debug = false
+		ev, ae := s.cfg.Management.Audit.Start(ctxWithOAuth(r.Context()), "auth.oauth.login", "")
+		if ae != nil {
+			http.Error(w, "audit unavailable", 503)
+			return
+		}
+		account, err := s.cfg.Management.Authenticate(r.Context(), emp, r.PostForm.Get("password"))
+		if ev != nil {
+			ev.ActorID = account.ID
+		}
+		if ae = s.cfg.Management.Audit.Finish(ev, err); ae != nil {
+			http.Error(w, "audit unavailable", 503)
+			return
+		}
+		if err != nil {
+			http.Error(w, "用户名或密码错误", 401)
+			return
+		}
+		u, e = s.employee(r.Context(), emp)
+	} else {
+		a := sha256.Sum256([]byte(r.PostForm.Get("password")))
+		b := sha256.Sum256([]byte(s.cfg.Password))
+		if !debug && subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
+			http.Error(w, "工号或密码错误", 401)
+			return
+		}
+		u, e = s.employee(r.Context(), emp)
 	}
-	u, e := s.employee(r.Context(), emp)
 	if e != nil {
-		http.Error(w, "工号或密码错误", 401)
+		http.Error(w, "用户名或密码错误", 401)
 		return
 	}
 	tx, e := s.db.BeginTx(r.Context(), nil)
@@ -359,8 +401,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		loginProblem(w, r, "授权页面已过期或已经提交过，请重新发起账号授权。")
 		return
 	}
+	if !s.userResourceAllowed(r.Context(), u.ID, g.Resource) {
+		http.Error(w, "无权访问此资源", 403)
+		return
+	}
 	state := g.Family
 	g.Subject = u.EmpNo
+	g.Version = u.AuthVersion
 	g.Family = ""
 	g.Expires = time.Now().Add(2 * time.Minute).Unix()
 	if u.RoleCode != "ADMIN" {
@@ -395,6 +442,17 @@ func (s *Server) SignEmployeeForResource(ctx context.Context, id int64, resource
 	if !s.allowsResource(resource) {
 		return "", errors.New("unknown or disabled OAuth resource")
 	}
+	if s.cfg.Management != nil {
+		u, e := s.cfg.Management.User(ctx, id)
+		if e != nil || !u.Active || !s.userResourceAllowed(ctx, id, resource) {
+			return "", errors.New("无权访问此资源")
+		}
+		scope := "sql:query"
+		if u.SystemAdmin {
+			scope += " sql:debug"
+		}
+		return s.signVersion(u.Username, scope, resource, u.AuthVersion)
+	}
 	us, e := s.store.Users(ctx)
 	if e != nil {
 		return "", e
@@ -411,8 +469,16 @@ func (s *Server) SignEmployeeForResource(ctx context.Context, id int64, resource
 	return "", errors.New("inactive or unknown employee")
 }
 func (s *Server) sign(sub, scope, resource string) (string, error) {
+	return s.signVersion(sub, scope, resource, 0)
+}
+func (s *Server) signVersion(sub, scope, resource string, version int64) (string, error) {
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "at+jwt", "kid": "demo-rsa-1"})
-	claims, _ := json.Marshal(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random()})
+	claims, _ := json.Marshal(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random(), "version": version, "identity": func() string {
+		if s.cfg.Management != nil {
+			return "platform"
+		}
+		return "employee"
+	}()})
 	body := b64.EncodeToString(header) + "." + b64.EncodeToString(claims)
 	h := sha256.Sum256([]byte(body))
 	sig, e := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, h[:])
@@ -473,6 +539,10 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, "invalid_grant")
 		return
 	}
+	if (s.cfg.Management != nil && g.Version != u.AuthVersion) || !s.userResourceAllowed(r.Context(), u.ID, g.Resource) {
+		oauthError(w, "invalid_grant")
+		return
+	}
 	if u.RoleCode != "ADMIN" {
 		g.Scope = "sql:query"
 	}
@@ -485,7 +555,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		}
 		g.Scope = want
 	}
-	access, e := s.sign(g.Subject, g.Scope, g.Resource)
+	access, e := s.signVersion(g.Subject, g.Scope, g.Resource, g.Version)
 	if e != nil {
 		http.Error(w, "signing failed", 500)
 		return
@@ -516,6 +586,8 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 
 // Verifier uses only the remote JWKS public key; no signing key is shared with MCP.
 type Verifier struct {
+	Management       *management.Store
+	DatabaseID       string
 	Issuer, Resource string
 	Store            *store.Store
 	Client           *http.Client
@@ -547,10 +619,27 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 	var c struct {
 		Iss, Aud, Sub, Scope string
 		Exp, Iat             int64
+		Version              int64
+		Identity             string
 	}
 	raw, e := b64.DecodeString(parts[1])
 	if e != nil || json.Unmarshal(raw, &c) != nil || c.Iss != v.Issuer || c.Aud != v.Resource || c.Exp <= time.Now().Unix() || c.Iat > time.Now().Add(30*time.Second).Unix() {
 		return nil, bad
+	}
+	if v.Management != nil {
+		u, e := v.Management.ByUsername(ctx, c.Sub)
+		if e != nil || !u.Active || u.AuthVersion != c.Version || c.Identity != "platform" {
+			return nil, bad
+		}
+		audit.UpdateRequest(ctx, v.DatabaseID, u.ID)
+		if v.DatabaseID != "" && !v.Management.Can(ctx, u.ID, v.DatabaseID, "query") {
+			return nil, bad
+		}
+		scopes := strings.Fields(c.Scope)
+		if slices.Contains(scopes, "sql:debug") && !u.SystemAdmin {
+			return nil, bad
+		}
+		return &auth.TokenInfo{UserID: strconv.FormatInt(u.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes}, nil
 	}
 	us, e := v.Store.Users(ctx)
 	if e != nil {
@@ -617,4 +706,25 @@ func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) 
 		return k, nil
 	}
 	return nil, errors.New("unknown kid")
+}
+
+func ctxWithOAuth(ctx context.Context) context.Context {
+	return audit.With(ctx, audit.Metadata{Source: "oauth", Tool: "login"})
+}
+func (s *Server) userResourceAllowed(ctx context.Context, id int64, resource string) bool {
+	if s.cfg.Management == nil {
+		return true
+	}
+	if s.cfg.DatabaseForResource == nil {
+		return false
+	}
+	db, e := s.cfg.DatabaseForResource(resource)
+	if e != nil {
+		return false
+	}
+	if db == "" {
+		u, e := s.cfg.Management.User(ctx, id)
+		return e == nil && u.Active
+	}
+	return s.cfg.Management.Can(ctx, id, db, "query")
 }

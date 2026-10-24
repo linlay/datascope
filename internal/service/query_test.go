@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/store"
-	"sql-rewrite-server/internal/testutil"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/store"
+	"datascope-server/internal/testutil"
 	"testing"
 	"time"
 )

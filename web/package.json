@@ -1,9 +1,9 @@
 {
-  "name": "sql-rewrite-web",
+  "name": "datascope-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "SQL Rewrite 超级管理员数据控制台（前端）",
+  "description": "DataScope 超级管理员数据控制台（前端）",
   "engines": {
     "node": ">=22.0.0"
   },

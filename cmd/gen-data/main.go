@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"log"
-	"sql-rewrite-server/internal/gendata"
+	"datascope-server/internal/gendata"
 )
 
 func main() {

@@ -35,13 +35,14 @@ function ResultSummary({ outcome }: { outcome?: Outcome<QueryResult> }) {
   </div> : null;
 }
 
-export function SqlWorkbench() {
+export function SqlWorkbench({permissions,businessUserID}:{permissions:string[];businessUserID:number}) {
+ const canRaw=permissions.includes("raw_query");const canImpersonate=permissions.includes("impersonate");
   const [sql, setSql] = useState(examples[1].sql);
   const editor = useRef<TextAreaRef>(null);
   // Execution and formatting always read the live editor; never fall back to
   // a cached state value or a previous rewrite when the editor is unavailable.
   const readSql = () => editor.current?.resizableTextArea?.textArea?.value ?? '';
-  const [userId, setUserId] = useState(1);
+  const [userId, setUserId] = useState(businessUserID);
   const [maxRows, setMaxRows] = useState(200);
   const [action, setAction] = useState<'raw' | 'preview' | 'execute'>();
   const busy = useRef(false);
@@ -94,13 +95,13 @@ export function SqlWorkbench() {
             <Select size="small" aria-label="SQL 示例" placeholder="选择 SQL 示例" className="sql-example-picker" disabled={disabled} value={selectedExample < 0 ? undefined : selectedExample} options={examples.map((example, index) => ({ value: index, label: example.label }))} onChange={(index) => changeSql(examples[index].sql)} />
           </div>} extra={<Space size={6}>
             <Button size="small" icon={<FormatPainterOutlined />} disabled={disabled || !sql.trim()} onClick={() => changeSql(formatSQL(readSql()))}>一键美化</Button>
-            <Button size="small" type="primary" icon={<PlayCircleOutlined />} disabled={disabled || !sql.trim()} loading={action === 'raw'} onClick={() => void run('raw')}>原始 SQL 执行</Button>
+            <Button size="small" type="primary" icon={<PlayCircleOutlined />} disabled={disabled || !sql.trim() || !canRaw} loading={action === 'raw'} onClick={() => void run('raw')}>原始 SQL 执行</Button>
           </Space>}>
-            <div className="sql-context sql-original-context"><Tag>超级管理员 · 全量数据</Tag><Text type="secondary">⌘ / Ctrl + Enter 执行原始 SQL</Text>
+            <div className="sql-context sql-original-context"><Tag>{canRaw?"全量只读查询":"未授权全量查询"}</Tag><Text type="secondary">⌘ / Ctrl + Enter 执行原始 SQL</Text>
               <Select size="small" aria-label="最大返回行数" className="sql-row-limit" disabled={disabled} value={maxRows} onChange={(value) => { setMaxRows(value); setRaw(undefined); setResult(undefined); }} options={[50, 200, 1000].map((n) => ({ value: n, label: `最多 ${n} 行` }))} />
             </div>
             <Input.TextArea ref={editor} aria-label="原始 SQL" className="mono sql-editor" value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ height: 320, resize: 'vertical' }} onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void run('raw'); }
+              if (canRaw && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void run('raw'); }
             }} />
           </Card>
           <Card size="small" title="原始结果" extra={<ResultSummary outcome={raw} />}><QueryOutput outcome={raw} loading={action === 'raw'} /></Card>
@@ -113,7 +114,7 @@ export function SqlWorkbench() {
             <div className="sql-context">
               <Text type="secondary">权限身份</Text>
               <div className="sql-user-picker">
-                <UserPicker size="small" disabled={disabled} value={userId} onChange={(id) => { if (busy.current) return; setUserId(id); setRewritten(undefined); setResult(undefined); }} style={{ minWidth: 0, width: '100%' }} />
+                <UserPicker size="small" disabled={disabled||!canImpersonate} value={userId} onChange={(id) => { if (busy.current) return; setUserId(id); setRewritten(undefined); setResult(undefined); }} style={{ minWidth: 0, width: '100%' }} />
               </div>
               <Segmented size="small" value={view} onChange={setView} options={[{ value: 'diff', label: 'Git diff' }, { value: 'sql', label: '完整 SQL' }]} />
             </div>

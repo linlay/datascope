@@ -19,32 +19,37 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/management"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 var DefaultTools = []string{"list_tables", "describe_table", "query"}
-var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope"}
+var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge"}
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
-	ID         string          `json:"id" yaml:"id"`
-	Name       string          `json:"name" yaml:"name"`
-	Driver     string          `json:"driver" yaml:"driver"`
-	Path       string          `json:"path" yaml:"path"`
-	MCPEnabled bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
-	MCPPath    string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
-	Tools      []string        `json:"tools" yaml:"tools"`
-	Config     *rewrite.Config `json:"config" yaml:"config"`
-	Revision   int             `json:"revision" yaml:"revision"`
-	ETag       string          `json:"etag,omitempty" yaml:"-"`
+	BusinessTools []BusinessTool  `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
+	ID            string          `json:"id" yaml:"id"`
+	Name          string          `json:"name" yaml:"name"`
+	Driver        string          `json:"driver" yaml:"driver"`
+	Path          string          `json:"path" yaml:"path"`
+	MCPEnabled    bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
+	MCPPath       string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
+	Tools         []string        `json:"tools" yaml:"tools"`
+	Config        *rewrite.Config `json:"config" yaml:"config"`
+	Revision      int             `json:"revision" yaml:"revision"`
+	ETag          string          `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
-	Path    string
-	Timeout time.Duration
-	AsOf    time.Time
-	mu      sync.Mutex
+	Management *management.Store
+	Audit      *audit.Store
+	Path       string
+	Timeout    time.Duration
+	AsOf       time.Time
+	mu         sync.Mutex
 }
 
 // Bootstrap imports legacy JSON or the initial rewrite rules only once.
@@ -123,6 +128,9 @@ func migrateDatabaseNames(items *[]Database) error {
 
 // Each database is stored in its own YAML file. Invalid files fail closed.
 func (c *Catalog) List() ([]Database, error) {
+	if c.Management != nil {
+		return c.listSQLite(context.Background())
+	}
 	entries, err := os.ReadDir(c.Path)
 	if err != nil {
 		return nil, err
@@ -232,6 +240,11 @@ func (c *Catalog) Get(id string) (*Database, error) {
 	return nil, fmt.Errorf("数据库不存在: %s", id)
 }
 func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService, error) {
+	if c.Management != nil {
+		if err := c.Management.ValidatePath(d.Path); err != nil {
+			return nil, err
+		}
+	}
 	if d.Driver != "sqlite" {
 		return nil, fmt.Errorf("暂不支持数据库驱动 %s", d.Driver)
 	}
@@ -258,9 +271,23 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 		st.Close()
 		return nil, err
 	}
+	if err := validateBusinessTools(*d, svc.Rewriter); err != nil {
+		st.Close()
+		return nil, err
+	}
+	svc.Management = c.Management
+	svc.Audit = c.Audit
+	svc.DatabaseID = d.ID
+	svc.PolicyVersion = d.Revision
+	st.Audit = c.Audit
 	return svc, nil
 }
 func (c *Catalog) Add(ctx context.Context, d Database) error {
+	if c.Management != nil {
+		if err := c.Management.ValidatePath(d.Path); err != nil {
+			return err
+		}
+	}
 	if !validID.MatchString(d.ID) || d.Name == "" {
 		return fmt.Errorf("需要名称和合法 ID（字母、数字、下划线或连字符，最多 64 位）")
 	}
@@ -292,7 +319,7 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	d.MCPEnabled = false
 	d.Tools = []string{}
 	d.Revision = 1
-	return c.update(func(items *[]Database) error {
+	return c.updateContext(ctx, "database.create", d.ID, func(items *[]Database) error {
 		for _, item := range *items {
 			if item.ID == d.ID {
 				return fmt.Errorf("数据库 ID 已存在")
@@ -320,7 +347,7 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 			return fmt.Errorf("不支持的 MCP 接口 %s", tool)
 		}
 	}
-	return c.update(func(items *[]Database) error {
+	return c.updateContext(ctx, "database.update", d.ID, func(items *[]Database) error {
 		for i, old := range *items {
 			if old.ID == d.ID {
 				if old.Revision != d.Revision || old.ETag != d.ETag {
@@ -342,6 +369,12 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 	})
 }
 func (c *Catalog) update(fn func(*[]Database) error) error {
+	return c.updateContext(context.Background(), "database.import", "", fn)
+}
+func (c *Catalog) updateContext(ctx context.Context, action, database string, fn func(*[]Database) error) error {
+	if c.Management != nil {
+		return c.updateSQLite(ctx, action, database, fn)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(c.Path), 0700); err != nil {

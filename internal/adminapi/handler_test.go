@@ -7,15 +7,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"sql-rewrite-server/internal/testutil"
+	"datascope-server/internal/testutil"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 func newAPI(t *testing.T, opts mcpserver.Options) *httptest.Server {

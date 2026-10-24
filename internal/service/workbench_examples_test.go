@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"sql-rewrite-server/internal/rewrite"
+	"datascope-server/internal/rewrite"
 )
 
 // Use the same examples as the UI, so schema changes cannot silently break them.

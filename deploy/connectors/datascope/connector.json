@@ -1,6 +1,6 @@
 {
-  "id": "sql-rewrite",
-  "name": "SQL Rewrite 金融样例库",
+  "id": "datascope",
+  "name": "DataScope 金融样例库",
   "version": "2.0.0",
   "type": "mcp",
   "authMode": "mcp",

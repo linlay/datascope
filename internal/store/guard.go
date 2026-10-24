@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -106,3 +107,24 @@ func leadingKeyword(sql string) string {
 	}
 	return strings.ToUpper(s)
 }
+
+// NormalizeRawReadOnlySQL permits SELECTs and a small set of read-only schema
+// PRAGMAs. ATTACH and connection-changing PRAGMAs must never reach a pooled connection.
+func NormalizeRawReadOnlySQL(query string) (string, error) {
+	body, rest, err := splitFirstStatement(query)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(stripComments(rest)) != "" {
+		return "", errors.New("不支持多条语句")
+	}
+	if stmt, e := NormalizeReadOnlySQL(body); e == nil {
+		return stmt, nil
+	}
+	if readOnlyPragma.MatchString(strings.TrimSpace(body)) {
+		return body, nil
+	}
+	return "", ErrStatementNotAllowed
+}
+
+var readOnlyPragma = regexp.MustCompile(`(?i)^PRAGMA\s+(?:main\.)?(?:table_info|table_xinfo|index_list|index_info|index_xinfo|foreign_key_list)\s*\(\s*(?:'[^']*'|"[^"]*"|[A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$`)

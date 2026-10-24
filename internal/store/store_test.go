@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sql-rewrite-server/internal/testutil"
+	"datascope-server/internal/testutil"
 	"testing"
 )
 

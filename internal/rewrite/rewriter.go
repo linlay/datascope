@@ -105,7 +105,17 @@ type Result struct {
 // subqueries, CTE bodies, compound selects) with the table's configured
 // subquery, and returns the result. The input text is kept as written, with
 // each table reference replaced in place by a one-line subquery.
-func (r *Rewriter) Rewrite(query string) (*Result, error) {
+func (r *Rewriter) Rewrite(query string) (*Result, error) { return r.RewriteWithParameters(query, nil) }
+
+// RewriteWithParameters permits only server-declared arg_ bindings for configured tools.
+func (r *Rewriter) RewriteWithParameters(query string, parameters []string) (*Result, error) {
+	allowed := map[string]bool{}
+	for _, name := range parameters {
+		if !strings.HasPrefix(name, "arg_") {
+			return nil, deny("业务参数必须使用 arg_ 前缀")
+		}
+		allowed[":"+name] = true
+	}
 	if err := r.checkNoSchemaQualifiedTables(query); err != nil {
 		return nil, err
 	}
@@ -123,7 +133,7 @@ func (r *Rewriter) Rewrite(query string) (*Result, error) {
 	}
 
 	src := []rune(query)
-	v := &visitor{rewriter: r, ctes: map[string]bool{}, src: src}
+	v := &visitor{rewriter: r, ctes: map[string]bool{}, src: src, allowedParams: allowed, usedParams: map[string]bool{}}
 	// CTE names must not shadow real tables; otherwise whether a reference
 	// means the CTE or the table would depend on SQLite's scoping rules.
 	if _, err := sql.Walk(sql.VisitFunc(func(n sql.Node) (sql.Node, error) {
@@ -165,16 +175,21 @@ func (r *Rewriter) Rewrite(query string) (*Result, error) {
 			res.Guards = append(res.Guards, Guard{Table: name, SQL: pol.CompiledGuard, Params: pol.GuardParams, Message: pol.DenyMessage})
 		}
 	}
+	for name := range v.usedParams {
+		res.Params = append(res.Params, name)
+	}
 	slices.Sort(res.Params)
 	return res, nil
 }
 
 type visitor struct {
-	rewriter *Rewriter
-	ctes     map[string]bool
-	refs     []TableRef
-	src      []rune   // the input, for splicing
-	splices  []splice // in input order
+	allowedParams map[string]bool
+	usedParams    map[string]bool
+	rewriter      *Rewriter
+	ctes          map[string]bool
+	refs          []TableRef
+	src           []rune   // the input, for splicing
+	splices       []splice // in input order
 }
 
 func (v *visitor) Visit(n sql.Node) (sql.Visitor, sql.Node, error) {
@@ -186,6 +201,10 @@ func (v *visitor) Visit(n sql.Node) (sql.Visitor, sql.Node, error) {
 	case *sql.QualifiedTableFunctionName:
 		return nil, nil, deny("不支持表值函数 %s", sql.IdentName(x.Name))
 	case *sql.BindExpr:
+		if v.allowedParams[x.Name] {
+			v.usedParams[strings.TrimPrefix(x.Name, ":")] = true
+			return nil, x, nil
+		}
 		// Bind parameters are reserved for trusted context variables.
 		return nil, nil, deny("不支持绑定参数 %s", x.Name)
 	case *sql.BinaryExpr:

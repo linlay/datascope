@@ -1,4 +1,4 @@
-module sql-rewrite-server
+module datascope-server
 
 go 1.26
 

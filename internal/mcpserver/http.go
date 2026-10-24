@@ -7,13 +7,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"net/http"
 	"net/url"
-	"sql-rewrite-server/internal/oauth"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/management"
+	"datascope-server/internal/oauth"
+	"datascope-server/internal/store"
 	"strings"
 )
 
 // HTTPHandler serves the same protection for initialization, tools and every HTTP method.
 func HTTPHandler(server *mcp.Server, st *store.Store, mode, issuer, resource, path string, stateless bool) (http.Handler, error) {
+	return HTTPHandlerWithManagement(server, st, mode, issuer, resource, path, stateless, nil, "")
+}
+func HTTPHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer, resource, path string, stateless bool, manager *management.Store, database string) (http.Handler, error) {
 	if mode != "oauth" && mode != "header" && mode != "none" {
 		return nil, fmt.Errorf("unknown MCP_AUTH_MODE %q", mode)
 	}
@@ -32,7 +36,7 @@ func HTTPHandler(server *mcp.Server, st *store.Store, mode, issuer, resource, pa
 		if metaPath != "/.well-known/oauth-protected-resource" {
 			mux.Handle("/.well-known/oauth-protected-resource", metadata)
 		}
-		verifier := &oauth.Verifier{Issuer: issuer, Resource: resource, Store: st}
+		verifier := &oauth.Verifier{Issuer: issuer, Resource: resource, Store: st, Management: manager, DatabaseID: database}
 		h = auth.RequireBearerToken(verifier.Verify, &auth.RequireBearerTokenOptions{ResourceMetadataURL: base + metaPath, Scopes: []string{"sql:query"}})(h)
 	}
 	mux.Handle(path, h)

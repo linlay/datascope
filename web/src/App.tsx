@@ -6,8 +6,10 @@ import { McpManagement } from './pages/McpManagement';
 import { DatabaseManager } from './pages/DatabaseManager';
 import { databases, selectDatabase, selectedDatabase, type Database } from './api';
 import { SqlWorkbench } from './pages/SqlWorkbench';
+import { AccessPage, AuditPage, KnowledgePage } from './pages/PlatformPages';
+import { useAuth } from './Auth';
 
-type Page = 'table' | 'sql' | 'policies' | 'mcp';
+type Page = 'table' | 'sql' | 'policies' | 'mcp' | 'access' | 'audit' | 'knowledge';
 
 interface Route {
   page: Page;
@@ -17,7 +19,7 @@ interface Route {
 function parseHash(): Route {
   const [path] = window.location.hash.replace(/^#\/?/, '').split('?');
   const [page, table] = path.split('/');
-  if (page === 'sql' || page === 'policies' || page === 'mcp') return { page };
+  if (page === 'sql' || page === 'policies' || page === 'mcp' || page === 'access' || page === 'audit' || page === 'knowledge') return { page };
   return { page: page === 'table' || table ? 'table' : 'policies', table: table ? decodeURIComponent(table) : undefined };
 }
 
@@ -72,6 +74,7 @@ function buildTheme(dark: boolean): ThemeConfig {
 }
 
 const titles: Record<Page, string> = {
+ access:'用户与授权',audit:'日志审计',knowledge:'业务知识',
   sql: 'SQL控制台',
   table: '表数据',
   policies: '数据库访问策略',
@@ -79,6 +82,7 @@ const titles: Record<Page, string> = {
 };
 
 export function App() {
+ const {user,logout}=useAuth();
   const [route, setRoute] = useState(parseHash);
   const dark = useDarkMode();
  const [items,setItems]=useState<Database[]>([]);
@@ -112,7 +116,11 @@ export function App() {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   }, [dark]);
 
-  const openTable = (table: string, filter?: { col: string; val: string }) => {
+  const current=items.find(d=>d.id===dbID);
+ const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='access'?(user.system_admin||can('grant')):p==='audit'?can('audit.read'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):p==='mcp'?can('mcp.write'):can('config.read'));
+ const activePage=visiblePages.includes(route.page)?route.page:visiblePages[0];
+ const openTable = (table: string, filter?: { col: string; val: string }) => {
     const qs = filter ? `?${new URLSearchParams({ col: filter.col, val: filter.val })}` : '';
     window.location.hash = `#/table/${encodeURIComponent(table)}${qs}`;
   };
@@ -121,23 +129,27 @@ export function App() {
     <ConfigProvider locale={zhCN} theme={buildTheme(dark)}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
-          <Space><span className="app-title">SQL Rewrite</span><Select aria-label="切换数据库" value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/><Button onClick={()=>setAdding(true)}>＋ 数据库</Button></Space>
-          <Tag color="blue">数据库代理管理平台</Tag>
+          <Space><span className="app-title">DataScope</span><Select aria-label="切换数据库" value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/>{user.system_admin&&<Button onClick={()=>setAdding(true)}>＋ 数据库</Button>}</Space>
+          <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>退出</Button></Space>
           <Menu
             mode="horizontal"
             theme={dark ? 'dark' : 'light'}
-            selectedKeys={[route.page]}
+            selectedKeys={[activePage]}
             style={{ flex: 1, minWidth: 0, background: 'transparent', borderBottom: 'none' }}
-            items={(Object.keys(titles) as Page[]).map((key) => ({ key, label: titles[key] }))}
+            items={visiblePages.map((key) => ({ key, label: titles[key] }))}
             onClick={({ key }) => (window.location.hash = `#/${key}`)}
           />
         </Layout.Header>
         <Layout.Content className="app-content" key={dbID}>
+ {activePage==='access'&&<AccessPage db={current} onSaved={()=>void refresh()}/>}
+ {activePage==='audit'&&current&&<AuditPage databaseID={dbID}/>}
+ {activePage==='knowledge'&&current&&<KnowledgePage databaseID={dbID}/>}
+ {!activePage&&<Alert type="info" title="当前账号尚未获得数据库权限，请联系系统管理员。"/>}
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
-          {route.page === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
-          {route.page === 'sql' && <SqlWorkbench />}
-          {route.page === 'policies' && <DatabaseManager id={dbID} onSaved={()=>{void refresh();}} />}
-          {route.page === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
+          {activePage === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
+          {activePage === 'sql' && <SqlWorkbench permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
+          {activePage === 'policies' && <DatabaseManager id={dbID} onSaved={()=>{void refresh();}} />}
+          {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
       </Layout>
       <Modal title="添加数据库" open={adding} onCancel={()=>setAdding(false)} onOk={add} confirmLoading={creating} okText="添加数据库" destroyOnHidden>

@@ -7,18 +7,22 @@ package adminapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
 
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/guard"
+	"datascope-server/internal/management"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 // Handler returns the JSON API under /api/ plus GET /healthz.
 func Handler(svc *service.QueryService, inspector *Inspector) http.Handler {
-	api := apiHandlers{svc: svc, store: svc.Store, inspector: inspector}
+	api := apiHandlers{svc: svc, store: svc.Store, inspector: inspector, management: svc.Management}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -64,9 +68,10 @@ func isLoopback(hostport string) bool {
 }
 
 type apiHandlers struct {
-	svc       *service.QueryService
-	store     *store.Store
-	inspector *Inspector
+	svc        *service.QueryService
+	management *management.Store
+	store      *store.Store
+	inspector  *Inspector
 }
 
 // tableInfo is a table plus its rewrite scheme.
@@ -168,7 +173,35 @@ func (a apiHandlers) rewrite(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	res, err := a.svc.Rewrite(r.Context(), in.SQL, in.UserID)
+	ctx := r.Context()
+	if a.management != nil {
+		u, ok := guard.User(ctx)
+		if !ok {
+			platformError(w, management.ErrDenied)
+			return
+		}
+		bid, e := a.management.BusinessID(ctx, u.ID, a.svc.DatabaseID)
+		if e != nil && !a.management.Can(ctx, u.ID, a.svc.DatabaseID, "impersonate") {
+			platformError(w, e)
+			return
+		}
+		if in.UserID != 0 && in.UserID != bid {
+			if e := guard.Require(ctx, a.management, a.svc.DatabaseID, "impersonate"); e != nil {
+				platformError(w, e)
+				return
+			}
+		} else {
+			in.UserID = bid
+		}
+		if in.UserID <= 0 {
+			platformError(w, fmt.Errorf("请选择或绑定业务身份"))
+			return
+		}
+	}
+	meta := audit.From(ctx)
+	meta.SubjectID = in.UserID
+	ctx = audit.With(ctx, meta)
+	res, err := a.svc.Rewrite(ctx, in.SQL, in.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "denied": rewrite.IsDenied(err)})
 		return
@@ -177,7 +210,7 @@ func (a apiHandlers) rewrite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, res)
 		return
 	}
-	rows, err := a.svc.Execute(r.Context(), res, in.MaxRows)
+	rows, err := a.svc.Execute(ctx, res, in.MaxRows)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error(), "rewrite": res})
 		return
@@ -191,6 +224,10 @@ func (a apiHandlers) mcpInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a apiHandlers) mcpCall(w http.ResponseWriter, r *http.Request) {
+	if a.management != nil && a.inspector.AuthMode == "none" {
+		platformError(w, fmt.Errorf("none 模式固定使用本地默认身份，请使用 OAuth 或可信网关模式进行控制台 MCP 测试"))
+		return
+	}
 	var in struct {
 		Name      string         `json:"name"`
 		Arguments map[string]any `json:"arguments"`
@@ -198,6 +235,18 @@ func (a apiHandlers) mcpCall(w http.ResponseWriter, r *http.Request) {
 	}
 	if !decode(w, r, &in) {
 		return
+	}
+	if a.management != nil {
+		u, ok := guard.User(r.Context())
+		if !ok {
+			platformError(w, management.ErrDenied)
+			return
+		}
+		if in.UserID != 0 && in.UserID != u.ID {
+			platformError(w, fmt.Errorf("MCP 测试使用当前平台用户，请勿传入业务身份"))
+			return
+		}
+		in.UserID = u.ID
 	}
 	result, err := a.inspector.Call(r.Context(), in.UserID, in.Name, in.Arguments)
 	respondUpstream(w, result, err)

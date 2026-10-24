@@ -15,10 +15,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/envflag"
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/application"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/envflag"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/platform"
+	"datascope-server/internal/store"
 )
 
 func main() {
@@ -49,7 +51,7 @@ func run() error {
 		return fmt.Errorf("invalid MCP_AUTH_MODE %q", authMode)
 	}
 	if *transport == "stdio" && authMode != "none" {
-		return fmt.Errorf("stdio requires MCP_AUTH_MODE=none and an explicit default employee")
+		return fmt.Errorf("stdio requires MCP_AUTH_MODE=none and an explicit default platform user")
 	}
 	if authMode == "none" && *defaultUserID <= 0 {
 		return fmt.Errorf("none mode requires MCP_DEFAULT_USER_ID")
@@ -69,7 +71,13 @@ func run() error {
 		return err
 	}
 	defer st.Close()
-	catalogue, err := catalog.Bootstrap(envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
+	manager, err := platform.Open(context.Background())
+	if err != nil {
+		return err
+	}
+	defer manager.Close()
+	defer manager.Audit.Close()
+	catalogue, err := catalog.BootstrapManaged(context.Background(), manager, envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
 		return err
 	}
@@ -83,13 +91,17 @@ func run() error {
 	}
 	defer svc.Store.Close()
 
-	opts := mcpserver.Options{AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}
+	app := &application.Service{Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}
+	opts := mcpserver.Options{Management: manager, Application: app, AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}
 	if !*stateless {
 		logger.Warn("managed HTTP uses stateless requests so policy changes apply immediately")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	outboxDone := make(chan struct{})
+	go func() { defer close(outboxDone); platform.RunOutbox(ctx, manager) }()
+	defer func() { stop(); <-outboxDone }()
 
 	switch *transport {
 	case "stdio":

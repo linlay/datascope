@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Empty, Input, Select, Space, Tag, Typography } from 'antd';
 import { api, type CallResult, type McpTool, type ServerInfo } from '../api';
-import { ResultTable, SqlBlock, UserPicker } from '../components/shared';
+import { ResultTable, SqlBlock } from '../components/shared';
 import { HelpTip } from '../components/HelpTip';
 
 const { Paragraph, Text } = Typography;
@@ -92,7 +92,7 @@ function defaultArguments(tool?: McpTool): string {
 
 function ToolPlayground({ tools }: { tools: McpTool[] }) {
   const [name, setName] = useState<string>();
-  const [userId, setUserId] = useState(1);
+  const userId=0;
   const [argsText, setArgsText] = useState('{}');
   const [result, setResult] = useState<CallResult>();
   const [error, setError] = useState<string>();
@@ -128,7 +128,7 @@ function ToolPlayground({ tools }: { tools: McpTool[] }) {
     | undefined;
 
   return (
-    <Card size="small" title={<Space size={4}>工具测试<HelpTip label="工具测试">以所选员工身份调用真实 MCP 接口，服务端验证身份和权限。</HelpTip></Space>}>
+    <Card size="small" title={<Space size={4}>工具测试<HelpTip label="工具测试">以当前平台账号调用真实 MCP 接口，服务端验证身份和权限。</HelpTip></Space>}>
       {tools.length === 0 ? (
         <Empty description="未获取到工具列表" />
       ) : (
@@ -137,7 +137,7 @@ function ToolPlayground({ tools }: { tools: McpTool[] }) {
             <Select aria-label="测试工具" value={name} onChange={setName} style={{ width: 200 }} options={tools.map((t) => ({ value: t.name, label: t.name }))} />
             {tool?.description && <HelpTip label="当前工具">{tool.description}</HelpTip>}
             <Text type="secondary">身份</Text>
-            <UserPicker value={userId} onChange={setUserId} />
+            <Tag>使用当前平台账号与已绑定的业务身份</Tag>
             <Button type="primary" onClick={call} loading={calling}>
               调用
             </Button>

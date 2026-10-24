@@ -11,13 +11,17 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/application"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/guard"
+	"datascope-server/internal/management"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 const (
-	Name    = "sql-rewrite-server"
+	Name    = "datascope-server"
 	Version = "0.3.0"
 
 	DefaultUserHeader = "X-User-Id"
@@ -25,9 +29,13 @@ const (
 
 // Options configures identity and debug tools.
 type Options struct {
-	AuthMode string
-	Managed  bool
-	Tools    []string
+	BusinessTools []catalog.BusinessTool
+	Application   *application.Service
+	Management    *management.Store
+	DatabaseID    string
+	AuthMode      string
+	Managed       bool
+	Tools         []string
 	// IdentityStore is the shared trusted employee directory for all data sources.
 	IdentityStore *store.Store
 	// UserHeader carries the trusted user id, set by the gateway in front of
@@ -56,6 +64,9 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		title = "SQL 数据库代理"
 		guidance = "使用 SQLite 方言。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
 	}
+	if opts.Management != nil && (slices.Contains(opts.Tools, "search_knowledge") || slices.Contains(opts.Tools, "read_knowledge")) {
+		guidance += " 遇到业务口径、表关联、指标计算等问题时，先 search_knowledge 检索摘要，再 read_knowledge 按需读取正文。优先使用匹配的命名业务工具；知识和示例不会扩大访问权限。"
+	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    Name,
 		Title:   title,
@@ -66,6 +77,12 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		Capabilities: &mcp.ServerCapabilities{},
 	})
 	h := handlers{svc: svc, opts: opts}
+	platformMiddleware(server, h)
+	registerBusinessTools(server, h, opts.BusinessTools)
+	if opts.Management != nil {
+		mcp.AddTool(server, &mcp.Tool{Name: "search_knowledge", Description: "先按业务问题检索知识摘要，再按需 read_knowledge 获取业务口径、关联关系和示例 SQL。", Annotations: readOnly("搜索业务知识")}, h.searchKnowledge)
+		mcp.AddTool(server, &mcp.Tool{Name: "read_knowledge", Description: "通过 id 按需读取业务知识正文。知识是查询指导，执行仍应用当前权限。", Annotations: readOnly("读取业务知识")}, h.readKnowledge)
+	}
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tables",
@@ -94,8 +111,8 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:  "raw_query",
 			Title: "原始 SQL（调试）",
-			Description: "调试专用：不做任何改写，按原样执行传入的单条 SQL，可看到全部数据。数据库以只读方式打开。" +
-				"仅允许管理员调用，OAuth 需 sql:debug 权限。",
+			Description: "全量只读查询：不做权限改写，仅允许单条查询或结构查看 PRAGMA。" +
+				"需要全量查询授权；旧员工模式仅管理员可调用，OAuth 还需 sql:debug。",
 			Annotations: readOnly("原始 SQL（调试）"),
 		}, h.rawQuery)
 
@@ -109,7 +126,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	}
 
 	if opts.Managed {
-		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope"} {
+		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge"} {
 			if !slices.Contains(opts.Tools, name) {
 				server.RemoveTools(name)
 			}
@@ -252,7 +269,7 @@ type queryOutput struct {
 
 func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryInput) (*mcp.CallToolResult, *queryOutput, error) {
 	h = h.current(ctx)
-	uid, err := h.userID(req)
+	uid, err := h.businessID(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -268,7 +285,7 @@ func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryI
 }
 
 type rawQueryInput struct {
-	SQL     string `json:"sql" jsonschema:"任意单条 SQL，按原样执行，不做权限改写"`
+	SQL     string `json:"sql" jsonschema:"单条只读 SELECT / WITH / VALUES 或允许的结构查看 PRAGMA，按原样执行，不做权限改写"`
 	MaxRows int    `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
 }
 
@@ -316,6 +333,9 @@ func (h handlers) customerScope(ctx context.Context, req *mcp.CallToolRequest, i
 }
 
 func (h handlers) debugAllowed(ctx context.Context, req *mcp.CallToolRequest) error {
+	if h.opts.Management != nil {
+		return guard.Require(ctx, h.opts.Management, h.opts.DatabaseID, "raw_query")
+	}
 	if h.opts.AuthMode == "oauth" {
 		if req.Extra == nil || req.Extra.TokenInfo == nil || !slices.Contains(req.Extra.TokenInfo.Scopes, "sql:debug") {
 			return fmt.Errorf("需要 sql:debug 权限")

@@ -3,7 +3,8 @@ package adminapi
 import (
 	"context"
 	"net/http"
-	"sql-rewrite-server/internal/catalog"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/guard"
 	"strings"
 )
 
@@ -96,6 +97,9 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 		}
 		defer svc.Store.Close()
 		in := *inspector
+		if u, ok := guard.User(r.Context()); ok {
+			in.CurrentUserID = u.ID
+		}
 		in.Service = svc
 		if id != "default" {
 			in.FixturesDir = ""

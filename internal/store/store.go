@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"strings"
+	"datascope-server/internal/audit"
 	"time"
 	"unicode/utf8"
 
@@ -25,6 +25,7 @@ const (
 
 // Store wraps a read-only SQLite connection pool.
 type Store struct {
+	Audit        *audit.Store
 	db           *sql.DB
 	path         string
 	queryTimeout time.Duration
@@ -70,7 +71,10 @@ type QueryResult struct {
 
 // Query runs a single read-only statement and returns at most maxRows rows.
 // args are bind values (e.g. sql.Named) for trusted, server-built SQL.
-func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...any) (*QueryResult, error) {
+func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...any) (out *QueryResult, err error) {
+	if e := s.validateAudit(ctx, rawSQL, false); e != nil {
+		return nil, e
+	}
 	stmt, err := NormalizeReadOnlySQL(rawSQL)
 	if err != nil {
 		return nil, err
@@ -90,7 +94,16 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 
 // QueryBool runs trusted SQL returning one value and reports whether it is
 // non-zero. Used for configured deny_unless checks.
-func (s *Store) QueryBool(ctx context.Context, query string, args ...any) (bool, error) {
+func (s *Store) QueryBool(ctx context.Context, query string, args ...any) (out bool, err error) {
+	event, err := s.Audit.Start(ctx, "sql.guard", query)
+	if err != nil {
+		return false, err
+	}
+	if event != nil {
+		event.ExecutedSQL = query
+		event.Binds = args
+	}
+	defer func() { err = audit.Join(err, s.Audit.Finish(event, err)) }()
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
 	var v int64
@@ -100,18 +113,14 @@ func (s *Store) QueryBool(ctx context.Context, query string, args ...any) (bool,
 	return v != 0, nil
 }
 
-// RawQuery runs any single statement exactly as given, without rewriting or
-// statement-type checks. The connection is still read-only. Debug use only.
+// RawQuery runs a single read-only query or a whitelisted schema PRAGMA without rewriting. The connection is still read-only. Debug use only.
 func (s *Store) RawQuery(ctx context.Context, rawSQL string, maxRows int) (*QueryResult, error) {
-	body, rest, err := splitFirstStatement(rawSQL)
+	if e := s.validateAudit(ctx, rawSQL, true); e != nil {
+		return nil, e
+	}
+	body, err := NormalizeRawReadOnlySQL(rawSQL)
 	if err != nil {
 		return nil, err
-	}
-	if strings.TrimSpace(stripComments(rest)) != "" {
-		return nil, errors.New("不支持多条语句")
-	}
-	if strings.TrimSpace(stripComments(body)) == "" {
-		return nil, errors.New("SQL 为空")
 	}
 	if maxRows <= 0 {
 		maxRows = DefaultMaxRows
@@ -146,7 +155,27 @@ func (s *Store) TableNames(ctx context.Context) ([]string, error) {
 
 // read executes trusted SQL with bound args. Callers outside this package must
 // go through Query.
-func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any) (*QueryResult, error) {
+func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any) (out *QueryResult, err error) {
+	original, rewritten := audit.SQL(ctx)
+	if original == "" {
+		original = query
+	}
+	event, err := s.Audit.Start(ctx, "sql.execute", original)
+	if err != nil {
+		return nil, err
+	}
+	if event != nil {
+		event.RewrittenSQL = rewritten
+		event.ExecutedSQL = query
+		event.Binds = args
+	}
+	defer func() {
+		if event != nil && out != nil {
+			event.Rows = out.RowCount
+			event.Truncated = out.Truncated
+		}
+		err = audit.Join(err, s.Audit.Finish(event, err))
+	}()
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

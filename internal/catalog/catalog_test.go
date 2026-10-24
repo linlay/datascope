@@ -14,11 +14,11 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"sql-rewrite-server/internal/adminapi"
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/adminapi"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/store"
 )
 
 func setup(t *testing.T) (*catalog.Catalog, string) {

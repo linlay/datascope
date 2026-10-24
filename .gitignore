@@ -9,7 +9,7 @@ __pycache__/
 coverage.out
 /data/*.sqlite3-*
 /bin/
-/deploy/agent-platform/*.zip
+/deploy/connectors/*.zip
 
 /data/*.sqlite3
 /data/legacy/
@@ -21,3 +21,7 @@ coverage.out
 /config/databases/
 /config/databases.lock
 /data/databases.json.bak
+
+/data/*.sqlite
+/data/*.sqlite-*
+.upload-tmp/

@@ -78,8 +78,14 @@ func (s *Store) Browse(ctx context.Context, opts BrowseOptions) (*BrowseResult, 
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
 	result := &BrowseResult{Table: schema.Name, Columns: columns, Limit: opts.Limit, Offset: opts.Offset}
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*)"+from, args...).Scan(&result.Total); err != nil {
+	count, err := s.read(ctx, 1, "SELECT COUNT(*) AS total"+from, args...)
+	if err != nil {
 		return nil, err
+	}
+	if len(count.Rows) > 0 {
+		if n, ok := count.Rows[0]["total"].(int64); ok {
+			result.Total = n
+		}
 	}
 
 	order := quoteIdent(columns[0])
@@ -103,6 +109,7 @@ func (s *Store) Browse(ctx context.Context, opts BrowseOptions) (*BrowseResult, 
 
 // UserSummary is one system user with role names, for identity pickers.
 type UserSummary struct {
+	AuthVersion    int64   `json:"-"`
 	ID             int64   `json:"id"`
 	EmpNo          string  `json:"emp_no"`
 	Name           string  `json:"name"`

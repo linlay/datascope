@@ -9,16 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/testutil"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/testutil"
 	"strconv"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"sql-rewrite-server/internal/rewrite"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 // userTransport plays the gateway: it stamps the trusted user header.

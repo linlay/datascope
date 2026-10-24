@@ -16,17 +16,19 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"sql-rewrite-server/internal/mcpserver"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/mcpserver"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 )
 
 // Inspector talks to the MCP server as a real MCP client and compares what it
 // returns against direct reads of the same database.
 type Inspector struct {
-	Endpoint    string
-	Service     *service.QueryService
-	FixturesDir string // permission_cases.json and rewrite_cases.json; optional
+	CurrentUserID int64
+	AuthMode      string
+	Endpoint      string
+	Service       *service.QueryService
+	FixturesDir   string // permission_cases.json and rewrite_cases.json; optional
 	// UserHeader is the header the MCP server trusts for identity; the
 	// inspector sets it the way a gateway would.
 	UserHeader       string
@@ -59,8 +61,14 @@ func (in *Inspector) connect(ctx context.Context, userID int64) (*mcp.ClientSess
 	if in.HTTPClient != nil {
 		*client = *in.HTTPClient
 	}
+	if userID == 0 && in.CurrentUserID > 0 {
+		userID = in.CurrentUserID
+	}
 	if in.Token != nil && userID == 0 {
-		userID = superAdminID
+		userID = in.CurrentUserID
+		if userID == 0 {
+			userID = superAdminID
+		}
 	}
 	if userID != 0 {
 		base := client.Transport
@@ -77,7 +85,7 @@ func (in *Inspector) connect(ctx context.Context, userID int64) (*mcp.ClientSess
 		}
 		client.Transport = userHeaderTransport{token: token, base: base, header: cmpOr(in.UserHeader, mcpserver.DefaultUserHeader), userID: userID}
 	}
-	session, err := mcp.NewClient(&mcp.Implementation{Name: "sql-rewrite-admin-api", Version: mcpserver.Version}, nil).
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "datascope-admin-api", Version: mcpserver.Version}, nil).
 		Connect(ctx, &mcp.StreamableClientTransport{Endpoint: in.Endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 	if err != nil {
 		return nil, fmt.Errorf("无法连接 MCP server %s: %w", in.Endpoint, err)

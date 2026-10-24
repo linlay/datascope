@@ -1,0 +1,239 @@
+package adminapi
+
+import (
+	"encoding/json"
+	"errors"
+	"golang.org/x/time/rate"
+	"net/http"
+	"datascope-server/internal/application"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/guard"
+	"datascope-server/internal/management"
+	"strings"
+	"time"
+)
+
+// PlatformHandler protects every legacy and new API. There is no unauthenticated API fallback.
+func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
+	m := app.Management
+	limiter := rate.NewLimiter(2, 10)
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		ctx := audit.With(r.Context(), audit.Metadata{RequestID: audit.From(r.Context()).RequestID, Source: "web", Tool: r.URL.Path})
+		r = r.WithContext(ctx)
+		if r.URL.Path == "/api/auth/login" && r.Method == "POST" {
+			if !limiter.Allow() {
+				writeJSON(w, 429, map[string]string{"error": "登录过于频繁，请稍后重试"})
+				return
+			}
+			var in struct {
+				Username string `json:"username"`
+				Password string `json:"password"`
+			}
+			if !decode(w, r, &in) {
+				return
+			}
+			ev, e := m.Audit.Start(ctx, "auth.login", "")
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			u, e := m.Authenticate(ctx, in.Username, in.Password)
+			if ev != nil {
+				ev.ActorID = u.ID
+			}
+			if done := m.Audit.Finish(ev, e); done != nil {
+				platformError(w, done)
+				return
+			}
+			if e != nil {
+				writeJSON(w, 401, map[string]string{"error": e.Error()})
+				return
+			}
+			token, e := m.NewSession(ctx, u, "web", 12*time.Hour)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "platform_session", Value: token, Path: "/", HttpOnly: true, Secure: app.SecureCookies || r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 43200})
+			writeJSON(w, 200, u)
+			return
+		}
+		token := ""
+		if c, e := r.Cookie("platform_session"); e == nil {
+			token = c.Value
+		}
+		u, e := m.Session(ctx, token, "web")
+		if e != nil {
+			writeJSON(w, 401, map[string]string{"error": "请先登录"})
+			return
+		}
+		meta := audit.From(ctx)
+		meta.ActorID = u.ID
+		audit.UpdateRequest(ctx, "", u.ID)
+		ctx = guard.WithUser(audit.With(ctx, meta), u)
+		r = r.WithContext(ctx)
+		if r.URL.Path == "/api/auth/me" && r.Method == "GET" {
+			writeJSON(w, 200, u)
+			return
+		}
+		if r.URL.Path == "/api/auth/logout" && r.Method == "POST" {
+			e := m.Logout(ctx, token)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "platform_session", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+			writeJSON(w, 200, map[string]bool{"ok": true})
+			return
+		}
+		if r.URL.Path == "/api/management/call" && r.Method == "POST" {
+			var in struct {
+				Action    string            `json:"action"`
+				Arguments application.Input `json:"arguments"`
+			}
+			if !decode(w, r, &in) {
+				return
+			}
+			out, e := app.Call(ctx, in.Action, in.Arguments)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		if r.URL.Path == "/api/databases" {
+			action := "list_databases"
+			in := application.Input{}
+			if r.Method == "POST" {
+				action = "create_database"
+				var raw json.RawMessage
+				if !decode(w, r, &raw) {
+					return
+				}
+				in.Database = newDatabase()
+				if e = json.Unmarshal(raw, in.Database); e != nil {
+					platformError(w, e)
+					return
+				}
+			} else if r.Method != "GET" {
+				http.NotFound(w, r)
+				return
+			}
+			out, e := app.Call(ctx, action, in)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		id := "default"
+		rest := strings.TrimPrefix(r.URL.Path, "/api/")
+		if strings.HasPrefix(rest, "databases/") {
+			parts := strings.SplitN(strings.TrimPrefix(rest, "databases/"), "/", 2)
+			id = parts[0]
+			rest = ""
+			if len(parts) > 1 {
+				rest = parts[1]
+			}
+		}
+		meta = audit.From(ctx)
+		meta.DatabaseID = id
+		audit.UpdateRequest(ctx, id, 0)
+		ctx = audit.With(ctx, meta)
+		r = r.WithContext(ctx)
+		if rest == "" {
+			in := application.Input{DatabaseID: id}
+			action := "get_database"
+			if r.Method == "PUT" {
+				in.Database = newDatabase()
+				if !decode(w, r, in.Database) {
+					return
+				}
+				in.Database.ID = id
+				action = "save_database"
+			} else if r.Method != "GET" {
+				http.NotFound(w, r)
+				return
+			}
+			out, e := app.Call(ctx, action, in)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		permission := "config.read"
+		switch {
+		case rest == "query" || strings.HasSuffix(rest, "/rows"):
+			permission = "raw_query"
+		case rest == "rewrite":
+			permission = "query"
+		case rest == "mcp/call":
+			permission = "query"
+		case rest == "mcp/verify":
+			permission = "impersonate"
+		case rest == "employees" || rest == "users":
+			permission = "query"
+		}
+		if e := guard.Require(ctx, m, id, permission); e != nil {
+			original := ""
+			if r.Method == "POST" && (rest == "query" || rest == "rewrite") {
+				var in struct {
+					SQL string `json:"sql"`
+				}
+				_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in)
+				original = in.SQL
+			}
+			ev, ae := m.Audit.Start(ctx, "access.denied", original)
+			if ae == nil {
+				ae = m.Audit.Finish(ev, e)
+			}
+			platformError(w, audit.Join(e, ae))
+			return
+		}
+		// Production verification relies on demo-specific direct reads and is not a public API.
+		if rest == "mcp/verify" {
+			writeJSON(w, 403, map[string]string{"error": "请通过独立测试运行演示验收"})
+			return
+		}
+		if rest == "employees" || rest == "users" {
+			users, e := m.Users(ctx)
+			if e != nil {
+				platformError(w, e)
+				return
+			}
+			out := []map[string]any{}
+			for _, target := range users {
+				if !m.Can(ctx, u.ID, id, "impersonate") && target.ID != u.ID {
+					continue
+				}
+				g, e := m.Grant(ctx, target.ID, id)
+				if e != nil || g.BusinessUserID <= 0 {
+					continue
+				}
+				out = append(out, map[string]any{"id": g.BusinessUserID, "emp_no": target.Username, "name": target.Name, "status": "active", "role_code": "", "roles": "平台用户"})
+			}
+			writeJSON(w, 200, out)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+	return localhostOnlyHost(http.NewCrossOriginProtection().Handler(audit.HTTPHandler(m.Audit, "web", h)))
+}
+func platformError(w http.ResponseWriter, e error) {
+	code := 400
+	if errors.Is(e, management.ErrDenied) {
+		code = 403
+	}
+	writeJSON(w, code, map[string]string{"error": e.Error()})
+}
+func newDatabase() *catalog.Database { return &catalog.Database{} }

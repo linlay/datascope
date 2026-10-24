@@ -2,14 +2,17 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"slices"
-	"sql-rewrite-server/internal/catalog"
-	"sql-rewrite-server/internal/service"
-	"sql-rewrite-server/internal/store"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/service"
+	"datascope-server/internal/store"
 	"strings"
+	"sync"
 )
 
 // ManagedHTTPHandler resolves current configuration on every request. Stateless
@@ -20,7 +23,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 	if _, err := HTTPHandler(nil, identity, mode, issuer, resource, path, true); err != nil {
 		return nil, err
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"status":"ok"}`))
@@ -51,6 +54,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			http.Error(w, "数据库不存在", 404)
 			return
 		}
+		audit.UpdateRequest(r.Context(), d.ID, 0)
 		if !d.MCPEnabled {
 			http.Error(w, "该数据库未开启 MCP", 403)
 			return
@@ -64,6 +68,8 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		selected := opts
 		selected.IdentityStore = identity
 		selected.Tools = d.Tools
+		selected.DatabaseID = d.ID
+		selected.BusinessTools = d.BusinessTools
 		selected.Managed = true
 		endpoint := path
 		if segment != "" {
@@ -75,21 +81,25 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		if segment != "" {
 			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
 		}
-		h, err := HTTPHandler(New(svc, selected), identity, mode, issuer, endpointResource, endpoint, true)
+		h, err := HTTPHandlerWithManagement(New(svc, selected), identity, mode, issuer, endpointResource, endpoint, true, opts.Management, d.ID)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
 		h.ServeHTTP(w, r)
-	}), nil
+	})
+	return audit.HTTPHandler(c.Audit, "database-mcp", handler), nil
 }
 
 // ManagedServer applies the same live catalog rules to long-lived transports
 // such as stdio. Request-local services avoid races between concurrent calls.
 func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opts Options) *mcp.Server {
 	opts.Managed = true
+	opts.DatabaseID = id
 	opts.Tools = catalog.Tools
 	server := New(svc, opts)
+	var toolsMu sync.Mutex
+	var toolsFingerprint string
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			d, err := c.Get(id)
@@ -98,6 +108,22 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 			}
 			if !d.MCPEnabled {
 				return nil, fmt.Errorf("该数据库未开启 MCP")
+			}
+			ctx = context.WithValue(ctx, businessContextKey{}, d.BusinessTools)
+			if method == "tools/list" || method == "tools/call" {
+				raw, _ := json.Marshal(d.BusinessTools)
+				toolsMu.Lock()
+				if string(raw) != toolsFingerprint {
+					registerBusinessTools(server, handlers{svc: svc, opts: opts}, d.BusinessTools)
+					toolsFingerprint = string(raw)
+				}
+				toolsMu.Unlock()
+			}
+			enabled := func(name string) bool {
+				if slices.Contains(d.Tools, name) {
+					return true
+				}
+				return slices.ContainsFunc(d.BusinessTools, func(t catalog.BusinessTool) bool { return t.Name == name })
 			}
 			switch method {
 			case "tools/list":
@@ -108,7 +134,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				list := res.(*mcp.ListToolsResult)
 				allowed := []*mcp.Tool{}
 				for _, tool := range list.Tools {
-					if slices.Contains(d.Tools, tool.Name) {
+					if enabled(tool.Name) {
 						allowed = append(allowed, tool)
 					}
 				}
@@ -116,7 +142,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				return list, nil
 			case "tools/call":
 				call := req.(*mcp.CallToolRequest)
-				if !slices.Contains(d.Tools, call.Params.Name) {
+				if !enabled(call.Params.Name) {
 					return nil, fmt.Errorf("该数据库未开启接口 %s", call.Params.Name)
 				}
 				current, err := c.Open(ctx, d)
@@ -133,6 +159,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 }
 
 type serviceContextKey struct{}
+type businessContextKey struct{}
 
 func (h handlers) current(ctx context.Context) handlers {
 	if svc, ok := ctx.Value(serviceContextKey{}).(*service.QueryService); ok {
