@@ -115,14 +115,20 @@
     connector_auth_required: '请先在连接器页面完成 DataScope 授权。',
     connector_auth_expired: 'DataScope 授权已变化，请在连接器页面重新检查授权。',
     connector_configuration_required: '请先完成 DataScope 连接器配置。',
+    connector_busy: 'DataScope 连接器正忙，请稍后重试。',
     connector_unavailable: 'DataScope 连接器不可用，请确认数据库 MCP 已启动并开放 query 工具。',
     invocation_timeout: '查询超时，请缩小查询范围后重试。',
     view_query_unavailable: '当前视图不可查询，请在在线 Chat 中打开。',
     view_query_run_not_found: '找不到该视图所属的运行，请在当前 Chat 中重新生成视图。',
     view_query_params_invalid: '查询参数无效，SQL 可能过长。',
   };
-  const state = { doc: null, key: '', queryable: false, values: {}, maxRows: 200, busy: false, stamp: 0, result: null, error: '', fieldErrors: {}, sent: '', executedAt: 0 };
-  let form, results, toolbar;
+  // The platform serializes calls per connector and rejects overlapping ones,
+  // so several views auto-running together collide. The host may hand over the
+  // raw code or its localized text.
+  const BUSY = /connector_busy|正在初始化、授权或更新|being prepared, authorized, or updated/;
+  const RETRIES = 4;
+  const state = { doc: null, key: '', queryable: false, values: {}, maxRows: 200, busy: false, stamp: 0, result: null, error: '', fieldErrors: {}, sent: '', executedAt: 0, showSql: false };
+  let form, results, sqlToggle, sqlPane;
 
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
   function button(text, fn, cls = '') { const b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; }
@@ -130,6 +136,18 @@
   function message(e) { const text = typeof e === 'string' ? e : e?.message || ''; return known[text] || text || '查询失败，请重试。'; }
   function vars() { return state.doc?.variables && typeof state.doc.variables === 'object' ? state.doc.variables : {}; }
   function usedNames() { try { return fill(state.doc.sql, vars()).used; } catch { return new Set(Object.keys(vars())); } }
+  function pause(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  async function query(stamp, params) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await window.viewHost.query('run', params); }
+      catch (e) {
+        if (attempt >= RETRIES || stamp !== state.stamp || !BUSY.test(e?.message || '')) throw e;
+        await pause(250 * (attempt + 1) + Math.random() * 250);
+        if (stamp !== state.stamp) throw e;
+      }
+    }
+  }
 
   async function run() {
     if (!state.queryable || !state.doc) return;
@@ -143,7 +161,7 @@
     state.busy = true; state.error = ''; state.sent = filled.sql;
     renderForm(); renderResults();
     try {
-      const reply = await window.viewHost.query('run', { sql: filled.sql, max_rows: state.maxRows });
+      const reply = await query(stamp, { sql: filled.sql, max_rows: state.maxRows });
       if (stamp !== state.stamp) return;
       state.result = reply.data; state.executedAt = reply.executedAt || Date.now();
     } catch (e) {
@@ -172,17 +190,22 @@
     const input = el('input');
     input.type = def.type === 'date' ? 'date' : 'text';
     if (def.type === 'integer' || def.type === 'number') input.inputMode = 'decimal';
-    input.value = raw === undefined ? '' : String(raw);
+    // Show the value the query used: date inputs never display a placeholder.
+    input.value = String(raw === undefined ? def.default : raw);
     input.placeholder = String(def.default);
     input.addEventListener('input', () => { state.values[name] = input.value; });
+    // The host sandbox has no allow-forms, so Enter is wired directly.
+    input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); run(); } });
     return input;
   }
 
+  // Controls live in a plain container: the host frame is sandboxed without
+  // allow-forms, so a <form> submit would be dropped before any listener runs.
   function renderForm() {
     form.replaceChildren();
-    const grid = el('div', 'vars'), used = usedNames();
+    const used = usedNames();
     for (const [name, def] of Object.entries(vars())) {
-      const label = el('label', def.type === 'boolean' ? 'check' : '');
+      const label = el('label', def.type === 'boolean' ? 'var check' : 'var');
       if (!used.has(name)) { label.classList.add('unused'); label.title = 'SQL 中未使用该变量'; }
       const caption = el('span', '', def.label || name);
       if (def.description) caption.title = def.description;
@@ -190,11 +213,11 @@
       field.name = name;
       if (state.fieldErrors[name]) { field.setAttribute('aria-invalid', 'true'); caption.textContent += `（${state.fieldErrors[name]}）`; caption.classList.add('error'); }
       if (def.type === 'boolean') label.append(field, caption); else label.append(caption, field);
-      grid.append(label);
+      form.append(label);
     }
-    if (grid.childElementCount) form.append(grid);
-    toolbar = el('div', 'toolbar');
-    const submit = el('button', 'primary', state.busy ? '查询中…' : '查询'); submit.type = 'submit'; submit.disabled = !state.queryable || state.busy;
+    const actions = el('div', 'actions');
+    const submit = button(state.busy ? '查询中…' : '查询', () => run(), 'primary');
+    submit.disabled = !state.queryable || state.busy;
     const reset = button('恢复默认', () => { state.values = {}; state.fieldErrors = {}; run(); });
     reset.disabled = !state.queryable || !Object.keys(state.values).length;
     const size = el('select'); size.setAttribute('aria-label', '最多返回行数');
@@ -202,8 +225,16 @@
     size.disabled = !state.queryable;
     // Row limit applies at once, like any other select.
     size.addEventListener('change', () => { state.maxRows = Number(size.value); run(); });
-    toolbar.append(submit, reset, el('span', 'spacer'), size);
-    form.append(toolbar);
+    actions.append(submit, reset, size);
+    form.append(actions);
+  }
+
+  function renderSql() {
+    sqlToggle.textContent = state.sent ? '执行的 SQL' : 'SQL 模板';
+    sqlToggle.setAttribute('aria-expanded', String(state.showSql));
+    sqlToggle.className = 'ghost' + (state.showSql ? ' on' : '');
+    sqlPane.hidden = !state.showSql;
+    sqlPane.textContent = state.sent || state.doc.sql;
   }
 
   function cell(value) {
@@ -216,12 +247,10 @@
   }
 
   function renderResults() {
+    renderSql();
     results.replaceChildren();
     if (!state.queryable) notice(results, '该视图需要在在线 Chat 中查询，当前仅显示 SQL 与变量。');
     if (state.error) notice(results, state.error, true);
-    const sql = el('details'), summary = el('summary', '', state.sent ? '执行的 SQL' : 'SQL 模板');
-    sql.append(summary, el('pre', '', state.sent || state.doc.sql));
-    results.append(sql);
     const data = state.result;
     if (!data) { if (state.busy) notice(results, '查询中…'); return; }
     if (typeof data.text === 'string' && !Array.isArray(data.rows)) { notice(results, data.text); return; }
@@ -244,12 +273,16 @@
     app.replaceChildren();
     const problem = validate(state.doc);
     const header = el('div', 'header');
-    header.append(el('h1', '', state.doc?.title || 'SQL 查询'));
+    const title = el('h1', '', state.doc?.title || 'SQL 查询'); title.title = title.textContent;
+    header.append(title);
     app.append(header);
     if (problem) { notice(app, problem, true); return; }
-    form = el('form'); form.addEventListener('submit', e => { e.preventDefault(); run(); });
+    sqlToggle = button('', () => { state.showSql = !state.showSql; renderSql(); });
+    header.append(sqlToggle);
+    sqlPane = el('pre', 'sql');
+    form = el('div', 'controls');
     results = el('section'); results.setAttribute('aria-live', 'polite');
-    app.append(form, results);
+    app.append(sqlPane, form, results);
     renderForm(); renderResults();
   }
 
@@ -263,7 +296,7 @@
     state.busy = false;
     state.queryable = queryable;
     if (fresh) {
-      state.key = key; state.doc = payload; state.values = {}; state.result = null; state.error = ''; state.sent = ''; state.fieldErrors = {};
+      state.key = key; state.doc = payload; state.values = {}; state.showSql = false; state.result = null; state.error = ''; state.sent = ''; state.fieldErrors = {};
       const rows = Number(payload?.maxRows);
       state.maxRows = Number.isInteger(rows) && rows >= 1 && rows <= 1000 ? rows : 200;
     }
