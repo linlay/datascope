@@ -1,4 +1,4 @@
-GOPROXY ?= https://goproxy.cn,direct
+GOPROXY ?= https://mirrors.gtjaqh.cloud/goproxy
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 

@@ -4,7 +4,7 @@ Go + React 实现的 SQLite 数据库访问平台，内置平台用户、数据�
 
 ## 启动
 
-需要 Go 1.26、Node 22+。
+需要 Go 1.25、Node 22+。
 
 ```sh
 cp .env.example .env

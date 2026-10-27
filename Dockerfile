@@ -1,18 +1,20 @@
-# syntax=docker/dockerfile:1.7
-
-ARG GO_VERSION=1.26
-ARG NODE_VERSION=22
-
-FROM node:${NODE_VERSION}-alpine AS web-build
+FROM harbor.gtjaqh.io/library/node:22.9.0 AS web-build
 WORKDIR /src/web
+ARG NPM_REGISTRY=http://nexus.gtjaqh.net/repository/npm-group/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:${GO_VERSION}-alpine AS go-build
+FROM harbor.gtjaqh.io/library/golang:1.25-alpine AS go-build
 WORKDIR /src
-ENV CGO_ENABLED=0
+ARG GOPROXY=https://mirrors.gtjaqh.cloud/goproxy
+ENV CGO_ENABLED=0 \
+    GOPROXY=${GOPROXY} \
+    GOSUMDB=off \
+    GOTOOLCHAIN=local
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
@@ -20,9 +22,8 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/mcp-server ./cmd/mcp-server \
     && go build -trimpath -ldflags="-s -w" -o /out/admin-api ./cmd/admin-api \
     && go build -trimpath -ldflags="-s -w" -o /out/gen-data ./cmd/gen-data
 
-FROM alpine:3.23 AS runtime
-RUN apk add --no-cache ca-certificates nginx tini tzdata \
-    && rm -f /etc/nginx/http.d/default.conf
+FROM harbor.gtjaqh.io/library/nginx:1.28.0-alpine AS runtime
+RUN rm -f /etc/nginx/conf.d/default.conf
 
 WORKDIR /app
 COPY --from=go-build /out/ /usr/local/bin/
@@ -32,9 +33,9 @@ COPY deploy/connectors/ ./deploy/connectors/
 COPY docs/ ./docs/
 COPY fixtures/ ./fixtures/
 COPY sql/ ./sql/
-COPY deploy/nginx.docker.conf /etc/nginx/http.d/datascope.conf
+COPY deploy/nginx.docker.conf /etc/nginx/conf.d/datascope.conf
 COPY deploy/nginx.proxy_params /etc/nginx/proxy_params
-COPY --chmod=0755 deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENV MANAGEMENT_DB_PATH=/app/data/management.sqlite \
     AUDIT_DB_PATH=/app/data/audit.sqlite \
@@ -59,4 +60,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
 
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/docker-entrypoint.sh"]
