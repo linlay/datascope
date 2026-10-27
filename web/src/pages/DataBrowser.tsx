@@ -48,7 +48,7 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
                 onClick={() => onOpenTable(t.name)}
               >
                 <span className="table-item-name mono">{t.name}</span>
-                <span className="table-item-count mono">{t.row_count}</span>
+                <span className="table-item-count mono">{t.row_count_estimated?'约 ':''}{t.row_count}</span>
                 <span className="table-item-comment">{t.comment}</span>
               </button>
             ))}

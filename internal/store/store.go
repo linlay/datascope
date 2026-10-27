@@ -1,16 +1,20 @@
-// Package store provides read-only access to the finance demo SQLite database.
+// Package store provides bounded, audited read-only access to business databases.
 package store
 
 import (
 	"cmp"
 	"context"
 	"database/sql"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/dialect"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	dm "gitee.com/chunanyong/dm"
+	ora "github.com/sijms/go-ora/v2"
 	"net/url"
 	"path/filepath"
-	"datascope-server/internal/audit"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -23,8 +27,9 @@ const (
 	DefaultQueryTimeout = 10 * time.Second
 )
 
-// Store wraps a read-only SQLite connection pool.
+// Store is the shared execution facade; engine selects the network SQL adapter.
 type Store struct {
+	engine       *dialect.Engine
 	Audit        *audit.Store
 	db           *sql.DB
 	path         string
@@ -59,7 +64,12 @@ func Open(path string, queryTimeout time.Duration) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
-func (s *Store) Path() string { return s.path }
+func (s *Store) Path() string {
+	if s == nil {
+		return ""
+	}
+	return s.path
+}
 
 // QueryResult is a bounded result set.
 type QueryResult struct {
@@ -106,8 +116,27 @@ func (s *Store) QueryBool(ctx context.Context, query string, args ...any) (out b
 	defer func() { err = audit.Join(err, s.Audit.Finish(event, err)) }()
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
+	query, args, err = s.Prepare(query, args...)
+	if err != nil {
+		return false, err
+	}
+	if event != nil {
+		event.ExecutedSQL = query
+		event.Binds = args
+	}
 	var v int64
-	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&v); err != nil {
+	var tx *sql.Tx
+	if s.engine != nil {
+		tx, err = s.beginReadOnly(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+		err = tx.QueryRowContext(ctx, query, args...).Scan(&v)
+	} else {
+		err = s.db.QueryRowContext(ctx, query, args...).Scan(&v)
+	}
+	if err != nil {
 		return false, err
 	}
 	return v != 0, nil
@@ -137,6 +166,24 @@ func (s *Store) RawQuery(ctx context.Context, rawSQL string, maxRows int) (*Quer
 
 // TableNames lists user tables in name order.
 func (s *Store) TableNames(ctx context.Context) ([]string, error) {
+	if s.engine != nil {
+		tables, err := s.remoteTables(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := []string{}
+		mapping := map[string]string{}
+		for _, t := range tables {
+			key := strings.ToLower(t.Name)
+			if old, ok := mapping[key]; ok && old != t.Name {
+				return nil, fmt.Errorf("schema 中存在大小写冲突的表 %s 与 %s，无法安全配置权限", old, t.Name)
+			}
+			mapping[key] = t.Name
+			names = append(names, t.Name)
+		}
+		s.engine.Tables = mapping
+		return names, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -155,7 +202,12 @@ func (s *Store) TableNames(ctx context.Context) ([]string, error) {
 
 // read executes trusted SQL with bound args. Callers outside this package must
 // go through Query.
-func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any) (out *QueryResult, err error) {
+func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any) (*QueryResult, error) {
+	return s.readQuery(ctx, maxRows, query, false, args...)
+}
+
+// native is reserved for server-generated browsing SQL with validated identifiers.
+func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native bool, args ...any) (out *QueryResult, err error) {
 	original, rewritten := audit.SQL(ctx)
 	if original == "" {
 		original = query
@@ -176,7 +228,30 @@ func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any
 		}
 		err = audit.Join(err, s.Audit.Finish(event, err))
 	}()
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	var tx *sql.Tx
+	if s.engine != nil {
+		if !native {
+			query, args, err = s.Prepare(query, args...)
+			if err != nil {
+				return nil, err
+			}
+		}
+		tx, err = s.beginReadOnly(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+	}
+	if event != nil {
+		event.ExecutedSQL = query
+		event.Binds = args
+	}
+	var rows *sql.Rows
+	if tx != nil {
+		rows, err = tx.QueryContext(ctx, query, args...)
+	} else {
+		rows, err = s.db.QueryContext(ctx, query, args...)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +276,11 @@ func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any
 		}
 		row := make(map[string]any, len(columns))
 		for i, name := range columns {
-			row[name] = jsonValue(values[i])
+			value, err := jsonValue(values[i])
+			if err != nil {
+				return nil, fmt.Errorf("字段 %s: %w", name, err)
+			}
+			row[name] = value
 		}
 		result.Rows = append(result.Rows, row)
 	}
@@ -212,29 +291,77 @@ func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any
 	return result, nil
 }
 
-func jsonValue(v any) any {
+func jsonValue(v any) (any, error) {
 	switch x := v.(type) {
 	case []byte:
 		if utf8.Valid(x) {
-			return string(x)
+			return string(x), nil
 		}
-		return "base64:" + base64.StdEncoding.EncodeToString(x)
+		return "base64:" + base64.StdEncoding.EncodeToString(x), nil
 	case time.Time:
-		return x.UTC().Format(time.RFC3339Nano)
+		return x.UTC().Format(time.RFC3339Nano), nil
+	case dm.DmClob:
+		return jsonValue(&x)
+	case *dm.DmClob:
+		if x == nil || !x.Valid {
+			return nil, nil
+		}
+		length, err := x.GetLength()
+		if err != nil {
+			return nil, err
+		}
+		if length > 1024*1024 {
+			return nil, fmt.Errorf("CLOB 超过单字段 1048576 字符限制")
+		}
+		return x.ReadString(1, int(length))
+	case dm.DmBlob:
+		return jsonValue(&x)
+	case *dm.DmBlob:
+		if x == nil || !x.Valid {
+			return nil, nil
+		}
+		length, err := x.GetLength()
+		if err != nil {
+			return nil, err
+		}
+		if length > 1024*1024 {
+			return nil, fmt.Errorf("BLOB 超过单字段 1 MiB 限制")
+		}
+		data := make([]byte, int(length))
+		if _, err = x.Read(data); err != nil {
+			return nil, err
+		}
+		return jsonValue(data)
+	case ora.Clob:
+		if !x.Valid {
+			return nil, nil
+		}
+		return x.String, nil
+	case ora.NClob:
+		if !x.Valid {
+			return nil, nil
+		}
+		return x.String, nil
+	case ora.Blob:
+		return jsonValue(x.Data)
 	default:
-		return x
+		return x, nil
 	}
 }
 
 // Table describes one user table.
 type Table struct {
-	Name     string `json:"name"`
-	Comment  string `json:"comment"`
-	RowCount int64  `json:"row_count"`
+	Name              string `json:"name"`
+	Comment           string `json:"comment"`
+	RowCount          int64  `json:"row_count"`
+	RowCountEstimated bool   `json:"row_count_estimated,omitempty"`
 }
 
 // Tables lists user tables with their Chinese comments and row counts.
 func (s *Store) Tables(ctx context.Context) ([]Table, error) {
+	if s.engine != nil {
+		return s.remoteTables(ctx)
+	}
 	query := `
 		SELECT m.name, COALESCE(c.comment_zh, '')
 		FROM sqlite_schema m
@@ -299,6 +426,9 @@ var ErrTableNotFound = errors.New("表不存在")
 
 // Describe returns columns, foreign keys, indexes and comments for table.
 func (s *Store) Describe(ctx context.Context, table string) (*TableSchema, error) {
+	if s.engine != nil {
+		return s.remoteDescribe(ctx, table)
+	}
 	out := &TableSchema{Name: table, Columns: []Column{}, Indexes: []string{}}
 	err := s.db.QueryRowContext(ctx,
 		`SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ? AND name NOT LIKE 'sqlite_%'`,

@@ -14,6 +14,14 @@ func String(key, fallback string) string {
 	return fallback
 }
 
+// StringAllowEmpty lets a deployment explicitly disable an optional resource.
+func StringAllowEmpty(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	return fallback
+}
+
 func Bool(key string, fallback bool) bool {
 	if v, err := strconv.ParseBool(os.Getenv(key)); err == nil {
 		return v

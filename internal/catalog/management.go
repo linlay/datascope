@@ -2,10 +2,10 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"datascope-server/internal/management"
 	"datascope-server/internal/store"
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -70,8 +70,13 @@ func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn 
 				return nil, fmt.Errorf("数据库 ID 或 MCP 路径无效、重复或保留")
 			}
 			routes[d.MCPRoute()] = true
-			if e := c.Management.ValidatePath(d.Path); e != nil {
+			if e := store.ValidateConnection(d.Driver, d.Connection); e != nil {
 				return nil, e
+			}
+			if d.Driver == "sqlite" {
+				if e := c.Management.ValidatePath(d.Path); e != nil {
+					return nil, e
+				}
 			}
 			d.ETag = ""
 			raw, e := json.Marshal(d)

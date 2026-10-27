@@ -1,6 +1,6 @@
 # DataScope 数据库访问管理平台
 
-Go + React 实现的 SQLite 数据库访问平台，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
+Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle 和达梦 DM8 业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
 
 ## 启动
 
@@ -22,7 +22,7 @@ make run-web       # 终端三，默认 8082；管理控制台
 
 两个 Go 服务必须使用相同的 `MANAGEMENT_DB_PATH`、`AUDIT_DB_PATH` 和 `DATABASE_ALLOWED_ROOTS`。更改监听端口时同步修改 `MCP_RESOURCE_URL`、`MCP_SERVER_URL`、`OAUTH_ISSUER`、`ADMIN_API_URL`。外部部署使用 HTTPS；HTTPS 反向代理后设置 `SESSION_COOKIE_SECURE=true`，或使用 HTTPS `OAUTH_ISSUER` 的默认推断。
 
-首次启动仍需要 `SQLITE_PATH` 指定的初始业务数据库。可继续使用证券演示库；后续在控制台登记其他普通 SQLite 文件。
+可使用 `SQLITE_PATH` 指定初始 SQLite 业务数据库；仅接入网络数据库时设为显式空值，允许空数据源启动，再从控制台添加。多数据库配置、SQL 子集、达梦平台说明、Linux 构建与真实库验收见 [多数据库接入说明](docs/databases.md)。
 
 ## 模块与持久化
 

@@ -45,6 +45,9 @@ func (d Database) ValidateAuthentication() error {
 	if len(d.Authentication.Label) > 120 {
 		return fmt.Errorf("认证来源名称不能超过 120 字节")
 	}
+	if d.Authentication.EmployeeDirectory && d.Driver != "sqlite" {
+		return fmt.Errorf("员工目录校验仅适用于 SQLite 证券演示库")
+	}
 	if d.Authentication.EmployeeDirectory && !d.LocalAuthentication() {
 		return fmt.Errorf("员工目录校验仅用于 local 认证来源")
 	}

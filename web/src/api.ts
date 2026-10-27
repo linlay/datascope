@@ -7,6 +7,7 @@ export interface TableInfo {
   name: string;
   comment: string;
   row_count: number;
+  row_count_estimated?: boolean;
   scheme: Scheme;
 }
 
@@ -191,7 +192,12 @@ export function selectDatabase(id: string) {
  selectedDatabase = id; localStorage.setItem('datascope-database', id); usersPromise = undefined;
 }
 export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
+export interface DatabaseConnection {
+ host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env:string; tls_mode?:string;
+}
+export interface NewDatabase {id:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
 export interface Database {
+ connection?:DatabaseConnection;
  authentication?: {type:"local"|"platform";label?:string;employee_directory?:boolean};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
@@ -201,7 +207,8 @@ export interface Database {
 export const databases = {
  list: () => request<Database[]>('/api/databases'),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
- add: (body: {id: string; name: string; driver: string; path: string}) => post<Database>('/api/databases', body),
+ test: (body: NewDatabase) => managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database:body}),
+ add: (body: NewDatabase) => post<Database>('/api/databases', body),
  save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

@@ -60,6 +60,7 @@ var operations = map[string][]operation{
 		{"knowledge", "save", "save_knowledge", "database_id id name summary content tables published revision", ""},
 	},
 	"datascope_inspect": {
+		{"connection", "test", "test_database_connection", "database", ""},
 		{"database", "test_connection", "test_connection", "database_id", ""},
 		{"policy", "validate", "validate_policy", "database_id database", ""},
 		{"policy", "preview_rewrite", "preview_rewrite", "database_id sql", "business_user_id"},
@@ -121,7 +122,12 @@ func decode(tool string, in input) (string, application.Input, error) {
 			required := "id revision"
 			switch op.domain {
 			case "create_database":
-				required = "id name driver path"
+				required = "id name driver"
+				if out.Database.Driver == "sqlite" {
+					required += " path"
+				} else {
+					required += " connection"
+				}
 			case "save_database":
 				required += " name driver path config mcp_enabled mcp_path tools"
 			case "update_database":

@@ -24,7 +24,7 @@
 {"action":"get","args":{"resourceType":"database","database_id":"default"}}
 ```
 
-读取结果将数据库字段直接放在返回对象顶层，并附带 mcp_endpoint、permissions、business_user_id。构造 `args.database` 时只复制数据库字段：id、name、driver、path、mcp_enabled、mcp_path、tools、business_tools、config、revision，以及返回时存在的 etag。不要把整份返回对象直接作为 database 传回。
+读取结果将数据库字段直接放在返回对象顶层，并附带 mcp_endpoint、permissions、business_user_id。构造 `args.database` 时只复制数据库字段：id、name、driver、path、connection、mcp_enabled、mcp_path、tools、business_tools、config、revision，以及返回时存在的 etag。不要把整份返回对象直接作为 database 传回。
 
 创建数据库只需传 `database:{id,name,driver:"sqlite",path}`，path 是 DataScope 服务端已有 SQLite 文件的路径，必须在服务端允许的数据根内。客户端本机路径不一定属于服务端。创建后服务端生成策略，默认关闭 MCP、禁用所有表、清空基础工具；回读实际配置再准备策略，不能假设传入策略已生效。
 
@@ -38,3 +38,12 @@
 
 
 数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；或显式选择 `{type:"platform"}` 保留旧平台账号兼容模式。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。local 模式每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。
+
+
+## 网络数据库
+
+支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、port、schema、username、password_env；MySQL/PG 还需 database，Oracle 需 service_name。MySQL schema 与 database 相同。password_env 必须为服务端 DATASCOPE_DB_ 开头的大写环境变量名称，禁止传入密码或 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
+
+未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{id,name,driver,connection}}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。connection 与驱动/目标登记后固定；保存策略需保留读取到的连接配置。
+
+网络查询与模板使用受限 SELECT 子集。策略中的 main.表名映射到配置的 schema；不支持的语法会拒绝，不能绕过改写执行原 SQL。详细范围见仓库 docs/databases.md。

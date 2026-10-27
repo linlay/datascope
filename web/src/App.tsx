@@ -8,6 +8,7 @@ import { databases, selectDatabase, selectedDatabase, type Database } from './ap
 import { SqlWorkbench } from './pages/SqlWorkbench';
 import { AccessPage, AuditPage, KnowledgePage } from './pages/PlatformPages';
 import { useAuth } from './Auth';
+import { ConnectionFields } from './components/ConnectionFields';
 
 type Page = 'table' | 'sql' | 'policies' | 'mcp' | 'access' | 'audit' | 'knowledge';
 
@@ -89,14 +90,26 @@ export function App() {
  const [dbID,setDbID]=useState(selectedDatabase);
  const [adding,setAdding]=useState(false);
  const [creating,setCreating]=useState(false);
+ const [testing,setTesting]=useState(false);
+ const [testResult,setTestResult]=useState<string>();
  const [error,setError]=useState<string>();
  const [form]=Form.useForm();
  const refresh=()=>databases.list().then(setItems).catch(e=>setError(e.message));
  useEffect(()=>{void refresh();},[]);
  const switchDB=(id:string)=>{selectDatabase(id);setDbID(id);if(route.page==='table') window.location.hash='#/table';};
  useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) switchDB(items[0].id);},[items,dbID]);
+ const connectionValues=async()=>{
+ const values=await form.validateFields();
+ if(values.driver==='sqlite') return {id:values.id,name:values.name,driver:values.driver,path:values.path};
+ const connection={...values.connection};if(values.driver==='mysql') connection.schema=connection.database;
+ return {id:values.id,name:values.name,driver:values.driver,connection};
+ };
+ const testConnection=async()=>{
+  try { const values=await connectionValues();setTesting(true);setError(undefined);setTestResult(undefined);const result=await databases.test(values);setTestResult(`连接成功，发现 ${result.table_count} 张表。`); }
+  catch(e) {if(e instanceof Error)setError(e.message);}finally{setTesting(false);}
+ };
  const add=async()=>{
-  try { const values=await form.validateFields();setCreating(true);const d=await databases.add({...values,driver:'sqlite'});await refresh();switchDB(d.id);window.location.hash='#/policies';setAdding(false);form.resetFields();setError(undefined); }
+  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();switchDB(d.id);window.location.hash='#/policies';setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
   catch(e) { if(e instanceof Error) setError(e.message); } finally {setCreating(false);}
  };
 
@@ -119,7 +132,7 @@ export function App() {
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
  const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='access'?(user.system_admin||can('grant')):p==='audit'?can('audit.read'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):p==='mcp'?can('mcp.write'):can('config.read'));
- const activePage=visiblePages.includes(route.page)?route.page:visiblePages[0];
+ const activePage=!current&&user.system_admin?'access':visiblePages.includes(route.page)?route.page:visiblePages[0];
  const openTable = (table: string, filter?: { col: string; val: string }) => {
     const qs = filter ? `?${new URLSearchParams({ col: filter.col, val: filter.val })}` : '';
     window.location.hash = `#/table/${encodeURIComponent(table)}${qs}`;
@@ -129,7 +142,7 @@ export function App() {
     <ConfigProvider locale={zhCN} theme={buildTheme(dark)}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
-          <Space><span className="app-title">DataScope</span><Select aria-label="切换数据库" value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/>{user.system_admin&&<Button onClick={()=>setAdding(true)}>＋ 数据库</Button>}</Space>
+          <Space><span className="app-title">DataScope</span><Select aria-label="切换数据库" value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>＋ 数据库</Button>}</Space>
           <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>退出</Button></Space>
           <Menu
             mode="horizontal"
@@ -152,10 +165,11 @@ export function App() {
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
       </Layout>
-      <Modal title="添加数据库" open={adding} onCancel={()=>setAdding(false)} onOk={add} confirmLoading={creating} okText="添加数据库" destroyOnHidden>
+      <Modal title="添加数据库" centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>setAdding(false)} onOk={add} confirmLoading={creating} okText="添加数据库" footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating}>测试连接</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
        {error && <Alert type="error" title={error}/>}
-       <Form form={form} layout="vertical"><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><Form.Item name="id" label="数据库 ID" rules={[{required:true},{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/,message:'使用字母、数字、下划线或连字符，最多 64 位'}]}><Input placeholder="business"/></Form.Item><Form.Item name="path" label="SQLite 文件路径（服务端）" rules={[{required:true}]}><Input placeholder="/absolute/path/database.sqlite3"/></Form.Item></Form>
-       <p>数据库以只读方式连接。添加后请配置访问策略，再开启 MCP。</p>
+       {testResult&&<Alert type="success" title={testResult}/>}
+       <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><Form.Item name="id" label="数据库 ID" rules={[{required:true},{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/,message:'使用字母、数字、下划线或连字符，最多 64 位'}]}><Input placeholder="business"/></Form.Item><ConnectionFields form={form}/></Form>
+       <p>添加后默认禁止所有表。请配置访问策略，再开启 MCP。</p>
       </Modal>
     </ConfigProvider>
   );

@@ -35,7 +35,7 @@ func main() {
 }
 
 func run() error {
-	dbPath := flag.String("db", envflag.String("SQLITE_PATH", "data/securities_demo.sqlite3"), "SQLite 数据库路径（只读打开）")
+	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", "data/securities_demo.sqlite3"), "可选初始 SQLite 路径；空值禁用演示库导入")
 	addr := flag.String("addr", envflag.String("ADMIN_API_ADDR", "127.0.0.1:8081"), "HTTP 监听地址")
 	mcpURL := flag.String("mcp-url", envflag.String("MCP_SERVER_URL", "http://127.0.0.1:8080/mcp"), "被检查的 MCP server 端点")
 	fixtures := flag.String("fixtures-dir", envflag.String("FIXTURES_DIR", "fixtures"), "权限与改写验收案例目录，用于校验 MCP")
@@ -52,11 +52,14 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	st, err := store.Open(*dbPath, *queryTimeout)
-	if err != nil {
-		return err
+	var st *store.Store
+	if *dbPath != "" {
+		st, err = store.Open(*dbPath, *queryTimeout)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
 	}
-	defer st.Close()
 	manager, err := platform.Open(context.Background())
 	if err != nil {
 		return err
@@ -70,19 +73,10 @@ func run() error {
 	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
 		return err
 	}
-	initial, err := catalogue.Get("default")
-	if err != nil {
-		return err
-	}
-	svc, err := catalogue.Open(context.Background(), initial)
-	if err != nil {
-		return err
-	}
-	defer svc.Store.Close()
 
 	inspector := &adminapi.Inspector{
 		Endpoint:    *mcpURL,
-		Service:     svc,
+		Service:     nil,
 		FixturesDir: *fixtures,
 		UserHeader:  *userHeader,
 		HTTPClient:  &http.Client{Timeout: 60 * time.Second},

@@ -1,4 +1,4 @@
-// Package mcpserver exposes the finance demo SQLite database as MCP tools.
+// Package mcpserver exposes permission-scoped business databases as MCP tools.
 package mcpserver
 
 import (
@@ -61,9 +61,16 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		opts.UserHeader = DefaultUserHeader
 	}
 	title, guidance := "证券业务 SQL 查询（权限改写）", instructions
+	dialectLabel := "SQLite 方言"
+	if svc != nil && svc.Store.Driver() != "sqlite" {
+		dialectLabel = "受限 SELECT 子集，后端 " + svc.Store.Driver()
+	}
 	if opts.Managed {
 		title = "SQL 数据库代理"
-		guidance = "使用 SQLite 方言。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
+		guidance = "使用" + dialectLabel + "。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
+		if svc != nil && svc.Store.Driver() != "sqlite" {
+			guidance += " 支持常用聚合、子查询、非递归 CTE、整数 LIMIT/OFFSET；不支持窗口函数、CAST、自定义函数、原生专有语法或跨 schema 查询。使用结构返回的字段名与显式表别名。"
+		}
 	}
 	if opts.Management != nil && (slices.Contains(opts.Tools, "search_knowledge") || slices.Contains(opts.Tools, "read_knowledge")) {
 		guidance += " 遇到业务口径、表关联、指标计算等问题时，先 search_knowledge 检索摘要，再 read_knowledge 按需读取正文。优先使用匹配的命名业务工具；知识和示例不会扩大访问权限。"
@@ -102,9 +109,9 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:  "query",
 		Title: "执行 SQL（按权限改写）",
-		Description: fmt.Sprintf("执行单条 SELECT（SQLite 方言）。服务端会按当前用户权限把 FROM / JOIN 中的每张表改写为带权限的子查询，"+
+		Description: fmt.Sprintf("执行单条 SELECT（%s）。服务端会按当前用户权限把 FROM / JOIN 中的每张表改写为带权限的子查询，"+
 			"结果只包含该用户可见的数据。不支持写操作、多语句、表值函数、schema 限定表名和 “IN 表名” 写法。默认最多返回 %d 行，上限 %d 行。",
-			store.DefaultMaxRows, store.HardMaxRows),
+			dialectLabel, store.DefaultMaxRows, store.HardMaxRows),
 		Annotations: readOnly("执行 SQL（按权限改写）"),
 	}, h.query)
 
@@ -255,7 +262,7 @@ func (h handlers) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 type queryInput struct {
-	SQL     string `json:"sql" jsonschema:"单条 SELECT 语句（SQLite 方言），直接写标准 SQL，无需添加权限过滤"`
+	SQL     string `json:"sql" jsonschema:"单条 SELECT，使用服务器 Instructions 声明的方言，无需添加权限过滤"`
 	MaxRows int    `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
 }
 

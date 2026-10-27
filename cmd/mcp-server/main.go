@@ -31,7 +31,7 @@ func main() {
 }
 
 func run() error {
-	dbPath := flag.String("db", envflag.String("SQLITE_PATH", "data/securities_demo.sqlite3"), "SQLite 数据库路径（只读打开）")
+	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", "data/securities_demo.sqlite3"), "可选初始 SQLite 路径；空值禁用演示库导入")
 	databaseID := flag.String("database", envflag.String("MCP_DATABASE", "default"), "stdio 连接的数据库 ID")
 	transport := flag.String("transport", envflag.String("MCP_TRANSPORT", "http"), "传输方式：http（Streamable HTTP）或 stdio")
 	addr := flag.String("addr", envflag.String("SERVER_ADDR", "127.0.0.1:8080"), "HTTP 监听地址")
@@ -66,11 +66,14 @@ func run() error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	slog.SetDefault(logger)
 
-	st, err := store.Open(*dbPath, *queryTimeout)
-	if err != nil {
-		return err
+	var st *store.Store
+	if *dbPath != "" {
+		st, err = store.Open(*dbPath, *queryTimeout)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
 	}
-	defer st.Close()
 	manager, err := platform.Open(context.Background())
 	if err != nil {
 		return err
@@ -84,15 +87,6 @@ func run() error {
 	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
 		return err
 	}
-	initial, err := catalogue.Get("default")
-	if err != nil {
-		return err
-	}
-	svc, err := catalogue.Open(context.Background(), initial)
-	if err != nil {
-		return err
-	}
-	defer svc.Store.Close()
 
 	app := &application.Service{Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}
 	opts := mcpserver.Options{Management: manager, Application: app, AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}
@@ -108,6 +102,15 @@ func run() error {
 
 	switch *transport {
 	case "stdio":
+		initial, e := catalogue.Get(*databaseID)
+		if e != nil {
+			return e
+		}
+		svc, e := catalogue.Open(ctx, initial)
+		if e != nil {
+			return e
+		}
+		defer svc.Store.Close()
 		logger.Info("serving MCP over stdio", "db", st.Path(), "default_user_id", *defaultUserID)
 		return mcpserver.ManagedServer(catalogue, *databaseID, svc, opts).Run(ctx, &mcp.StdioTransport{})
 	case "http":

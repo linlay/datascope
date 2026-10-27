@@ -2,7 +2,7 @@ GOPROXY ?= https://goproxy.cn,direct
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 
-.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build test clean init init-shop
+.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build build-linux test test-network clean init init-shop
 
 # 三个服务分别在三个终端启动：MCP server、后台 API、前端。
 run-mcp:
@@ -31,6 +31,16 @@ test:
 	node --test deploy/connectors/tests/*.test.cjs
 	$(GO_ENV) go test ./...
 	cd web && npm run typecheck
+
+# Linux x86_64 release with all five pure Go drivers; no vendor client libraries.
+build-linux:
+	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/mcp-server ./cmd/mcp-server
+	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/admin-api ./cmd/admin-api
+	cd web && npm run build
+
+# Skips any vendor without DATASCOPE_INTEGRATION_<DRIVER> configuration.
+test-network:
+	$(LOAD_ENV) $(GO_ENV) go test ./internal/store -run TestNetworkDatabaseIntegration -v -count=1
 
 clean:
 	rm -rf bin web/dist

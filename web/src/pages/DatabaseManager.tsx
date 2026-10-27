@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Input, InputNumber, Row, Select, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
 import { api, databases, type Database, type PolicyView, type TableSchema } from '../api';
+import { driverLabels } from '../components/ConnectionFields';
 const { Text, Paragraph } = Typography;
 
 export function DatabaseManager({ id, onSaved }: { id: string; onSaved: () => void }) {
@@ -30,7 +31,7 @@ export function DatabaseManager({ id, onSaved }: { id: string; onSaved: () => vo
  const enabled=db.config.tables.filter(p=>p.enabled!==false).length;
  return <Space orientation="vertical" size="middle" style={{width:'100%'}}>
   <Card title="数据库访问策略" extra={<Space>{dirty && <Tag color="orange">有未保存修改</Tag>}<Button type="primary" loading={saving} onClick={save} disabled={!dirty}>保存并生效</Button></Space>}>
-   <Row gutter={[24,16]}><Col xs={24} md={12}><Space orientation="vertical" style={{width:'100%'}}><Text type="secondary">数据库名称</Text><Input value={db.name} onChange={e=>change({name:e.target.value})}/><Text className="mono">SQLite · {db.path}</Text></Space></Col><Col><Statistic title="已开放数据表" value={enabled} suffix={`/ ${db.config.tables.length}`}/></Col></Row>
+   <Row gutter={[24,16]}><Col xs={24} md={12}><Space orientation="vertical" style={{width:'100%'}}><Text type="secondary">数据库名称</Text><Input value={db.name} onChange={e=>change({name:e.target.value})}/><Text className="mono">{driverLabels[db.driver]||db.driver} · {db.connection?`${db.connection.host}:${db.connection.port} / ${db.connection.schema}`:db.path}</Text></Space></Col><Col><Statistic title="已开放数据表" value={enabled} suffix={`/ ${db.config.tables.length}`}/></Col></Row>
   </Card>
   {error && <Alert type="error" showIcon title="保存或加载失败" description={error} closable onClose={()=>setError(undefined)}/>}
   <Row gutter={[16,16]}>
@@ -53,7 +54,7 @@ export function DatabaseManager({ id, onSaved }: { id: string; onSaved: () => vo
      </Space>
      <Space><Text>行权限</Text><Select value={policy.passthrough?'pass':'rewrite'} style={{width:200}} options={[{value:'pass',label:'无需行权限改写'},{value:'rewrite',label:'使用 SQL 模板改写'}]} onChange={v=>edit({passthrough:v==='pass',sql:v==='pass'?'':policy.sql||`SELECT * FROM main."${policy.table.replace(/"/g,'""')}"`})}/></Space>
      <Space><Text>方案标签</Text><Select value={policy.scheme} style={{width:200}} options={db.config.schemes.map(s=>({value:s.scheme,label:s.name}))} onChange={v=>edit({scheme:v})}/></Space>
-     {!policy.passthrough && <><Paragraph type="secondary" style={{margin:0}}>使用 main.表名引用原表；支持 {'${userId}'}、{'${asOf}'} 和 {'{{片段名称}}'}。字段白名单会在行权限过滤后应用。</Paragraph><Input.TextArea className="mono" rows={8} value={policy.sql} onChange={e=>edit({sql:e.target.value})}/></>}
+     {!policy.passthrough && <><Paragraph type="secondary" style={{margin:0}}>使用 main.表名引用当前数据源原表（main 为逻辑命名空间）；支持 {'${userId}'}、{'${asOf}'} 和 {'{{片段名称}}'}。字段白名单会在行权限过滤后应用。</Paragraph><Input.TextArea className="mono" rows={8} value={policy.sql} onChange={e=>edit({sql:e.target.value})}/></>}
      <Text strong>前置权限检查（deny_unless，可选）</Text><Input.TextArea className="mono" rows={3} value={policy.deny_unless} onChange={e=>edit({deny_unless:e.target.value})}/>
      <Input placeholder="拒绝访问提示" value={policy.deny_message} onChange={e=>edit({deny_message:e.target.value})}/>
      <Input.TextArea placeholder="规则说明" value={policy.reason} onChange={e=>edit({reason:e.target.value})}/>

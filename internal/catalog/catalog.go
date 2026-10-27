@@ -32,19 +32,20 @@ var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "cus
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
-	AuthenticationRevision int64           `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
-	Authentication         *Authentication `json:"authentication,omitempty" yaml:"authentication,omitempty"`
-	BusinessTools          []BusinessTool  `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
-	ID                     string          `json:"id" yaml:"id"`
-	Name                   string          `json:"name" yaml:"name"`
-	Driver                 string          `json:"driver" yaml:"driver"`
-	Path                   string          `json:"path" yaml:"path"`
-	MCPEnabled             bool            `json:"mcp_enabled" yaml:"mcp_enabled"`
-	MCPPath                string          `json:"mcp_path" yaml:"mcp_path,omitempty"`
-	Tools                  []string        `json:"tools" yaml:"tools"`
-	Config                 *rewrite.Config `json:"config" yaml:"config"`
-	Revision               int             `json:"revision" yaml:"revision"`
-	ETag                   string          `json:"etag,omitempty" yaml:"-"`
+	AuthenticationRevision int64             `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
+	Authentication         *Authentication   `json:"authentication,omitempty" yaml:"authentication,omitempty"`
+	BusinessTools          []BusinessTool    `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
+	ID                     string            `json:"id" yaml:"id"`
+	Name                   string            `json:"name" yaml:"name"`
+	Driver                 string            `json:"driver" yaml:"driver"`
+	Path                   string            `json:"path" yaml:"path"`
+	Connection             *store.Connection `json:"connection,omitempty" yaml:"connection,omitempty"`
+	MCPEnabled             bool              `json:"mcp_enabled" yaml:"mcp_enabled"`
+	MCPPath                string            `json:"mcp_path" yaml:"mcp_path,omitempty"`
+	Tools                  []string          `json:"tools" yaml:"tools"`
+	Config                 *rewrite.Config   `json:"config" yaml:"config"`
+	Revision               int               `json:"revision" yaml:"revision"`
+	ETag                   string            `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
 	Management *management.Store
@@ -79,12 +80,12 @@ func Bootstrap(path string, st *store.Store, configPath string, asOf time.Time, 
 		if !os.IsNotExist(err) {
 			return err
 		}
+		if st == nil {
+			return nil
+		}
 		cfg, err := rewrite.LoadConfig(configPath)
 		if err != nil {
 			return err
-		}
-		if st == nil {
-			return fmt.Errorf("首次导入需要数据库连接")
 		}
 		*items = []Database{{ID: "default", Name: databaseName(st.Path()), Driver: "sqlite", Path: st.Path(), MCPEnabled: true, MCPPath: "default", Tools: DefaultTools, Config: cfg, Revision: 1}}
 		return nil
@@ -224,7 +225,7 @@ func (c *Catalog) ByMCPPath(segment string) (*Database, error) {
 }
 
 func configFilename(d Database) string {
-	if d.ID == "default" {
+	if d.ID == "default" && d.Driver == "sqlite" {
 		return databaseName(d.Path) + ".yml"
 	}
 	return d.ID + ".yml"
@@ -243,13 +244,13 @@ func (c *Catalog) Get(id string) (*Database, error) {
 	return nil, fmt.Errorf("数据库不存在: %s", id)
 }
 func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService, error) {
-	if c.Management != nil {
+	if c.Management != nil && d.Driver == "sqlite" {
 		if err := c.Management.ValidatePath(d.Path); err != nil {
 			return nil, err
 		}
 	}
-	if d.Driver != "sqlite" {
-		return nil, fmt.Errorf("暂不支持数据库驱动 %s", d.Driver)
+	if err := store.ValidateConnection(d.Driver, d.Connection); err != nil {
+		return nil, err
 	}
 	if d.Config == nil {
 		return nil, fmt.Errorf("缺少规则配置")
@@ -265,7 +266,7 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	if err = cfg.Validate(); err != nil {
 		return nil, err
 	}
-	st, err := store.Open(d.Path, c.Timeout)
+	st, err := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +275,7 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 		st.Close()
 		return nil, err
 	}
-	if err := validateBusinessTools(*d, svc.Rewriter); err != nil {
+	if err := validateBusinessTools(*d, svc.Rewriter, st); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -292,7 +293,7 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	if err := d.ValidateAuthentication(); err != nil {
 		return err
 	}
-	if c.Management != nil {
+	if c.Management != nil && d.Driver == "sqlite" {
 		if err := c.Management.ValidatePath(d.Path); err != nil {
 			return err
 		}
@@ -300,18 +301,22 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	if !validID.MatchString(d.ID) || d.Name == "" {
 		return fmt.Errorf("需要名称和合法 ID（字母、数字、下划线或连字符，最多 64 位）")
 	}
-	if d.Driver != "sqlite" {
-		return fmt.Errorf("目前支持 SQLite 数据源")
+	if err := store.ValidateConnection(d.Driver, d.Connection); err != nil {
+		return err
 	}
 	if d.MCPPath == "" {
 		d.MCPPath = d.ID
 	}
-	path, err := filepath.Abs(d.Path)
-	if err != nil || d.Path == "" {
-		return fmt.Errorf("需要数据库文件路径")
+	if d.Driver == "sqlite" {
+		path, err := filepath.Abs(d.Path)
+		if err != nil || d.Path == "" {
+			return fmt.Errorf("需要数据库文件路径")
+		}
+		d.Path = path
+	} else if d.Path != "" {
+		return fmt.Errorf("网络数据库不能设置 path")
 	}
-	d.Path = path
-	st, err := store.Open(d.Path, c.Timeout)
+	st, err := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
 	if err != nil {
 		return err
 	}
@@ -370,8 +375,9 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 				if !reflect.DeepEqual(d.Authentication, old.Authentication) {
 					d.AuthenticationRevision++
 				}
-				d.Path = old.Path
-				d.Driver = old.Driver
+				if d.Driver != old.Driver || d.Path != old.Path || !reflect.DeepEqual(d.Connection, old.Connection) {
+					return fmt.Errorf("连接信息登记后固定，请新建数据源")
+				}
 				svc, err := c.Open(ctx, &d)
 				if err != nil {
 					return err

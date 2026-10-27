@@ -1,10 +1,11 @@
 package catalog
 
 import (
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/store"
 	"fmt"
 	"regexp"
 	"slices"
-	"datascope-server/internal/rewrite"
 )
 
 type ToolParameter struct {
@@ -20,7 +21,7 @@ type BusinessTool struct {
 
 var parameterName = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
 
-func validateBusinessTools(d Database, rw *rewrite.Rewriter) error {
+func validateBusinessTools(d Database, rw *rewrite.Rewriter, st *store.Store) error {
 	seen := map[string]bool{}
 	for _, t := range d.BusinessTools {
 		if !validID.MatchString(t.Name) || slices.Contains(Tools, t.Name) || seen[t.Name] || t.Description == "" {
@@ -36,6 +37,9 @@ func validateBusinessTools(d Database, rw *rewrite.Rewriter) error {
 		}
 		res, e := rw.RewriteWithParameters(t.SQL, names)
 		if e != nil {
+			return fmt.Errorf("业务工具 %s: %w", t.Name, e)
+		}
+		if e := st.ValidatePortable(res.RewrittenSQL, res.Params); e != nil {
 			return fmt.Errorf("业务工具 %s: %w", t.Name, e)
 		}
 		for _, n := range names {

@@ -7,6 +7,7 @@ import (
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"datascope-server/internal/store"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,6 +226,29 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
+	case "test_database_connection":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.Database == nil {
+			return nil, errors.New("需要 database 参数")
+		}
+		d := in.Database
+		if d.Driver == "sqlite" {
+			if e := s.Management.ValidatePath(d.Path); e != nil {
+				return nil, e
+			}
+		}
+		st, e := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.Timeout)
+		if e != nil {
+			return nil, e
+		}
+		defer st.Close()
+		names, e := st.TableNames(ctx)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"connected": true, "driver": d.Driver, "table_count": len(names)}, nil
 	case "test_connection":
 		if e := require("config.read"); e != nil {
 			return nil, e
@@ -247,6 +271,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		old, e := s.Catalog.Get(in.DatabaseID)
 		if e != nil {
 			return nil, e
+		}
+		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
+			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -474,6 +501,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		d.Authentication = nil
 		d.Path = ""
+		d.Connection = nil
 		d.Config = nil
 		d.BusinessTools = nil
 		d.Tools = nil

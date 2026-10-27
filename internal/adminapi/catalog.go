@@ -26,6 +26,7 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 		respond(w, view(*d), nil)
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /api/databases", func(w http.ResponseWriter, r *http.Request) {
 		items, err := c.List()
 		if err != nil {
@@ -80,11 +81,7 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 			id = parts[0]
 			path = "/api/" + parts[1]
 		}
-		if path == "/api/employees" || path == "/api/users" {
-			users, err := inspector.Service.Store.Users(r.Context())
-			respond(w, users, err)
-			return
-		}
+
 		d, err := c.Get(id)
 		if err != nil {
 			writeJSON(w, 404, map[string]string{"error": err.Error()})

@@ -13,9 +13,19 @@ import (
 // Other databases get empty independent local realms and explicit accounts.
 // It never resets existing business passwords or creates platform users.
 func InitializeDemoRealm(ctx context.Context, c *catalog.Catalog, password string) error {
-	d, e := c.Get("default")
+	items, e := c.List()
 	if e != nil {
 		return e
+	}
+	var d *catalog.Database
+	for i := range items {
+		if items[i].ID == "default" {
+			d = &items[i]
+			break
+		}
+	}
+	if d == nil || d.Driver != "sqlite" {
+		return nil
 	}
 	if d.Authentication != nil {
 		return nil
