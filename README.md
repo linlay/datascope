@@ -18,6 +18,24 @@ make run-mcp       # 终端二，默认 8080；提供数据库 MCP
 make run-web       # 终端三，默认 8082；管理控制台
 ```
 
+### Docker 部署
+
+镜像在一个容器中运行前端、管理 API 和数据库 MCP，并通过容器的 `8080` 端口统一提供服务。`/app/data` 保存管理库、审计库、OAuth 私钥和演示业务库，生产环境必须挂载持久卷。
+
+```sh
+docker build -t datascope:latest .
+docker run -d --name datascope \
+  -p 8080:8080 \
+  -v datascope-data:/app/data \
+  -e ADMIN_PASSWORD='change-this-admin-password' \
+  -e OAUTH_DEMO_PASSWORD='change-this-demo-password' \
+  -e OAUTH_ISSUER='http://localhost:8080' \
+  -e MCP_RESOURCE_URL='http://localhost:8080/mcp' \
+  datascope:latest
+```
+
+`ADMIN_PASSWORD` 和 `OAUTH_DEMO_PASSWORD` 首次初始化时至少 12 个字符。生产环境应把 `OAUTH_ISSUER` 与 `MCP_RESOURCE_URL` 改为实际 HTTPS 地址，并设置 `SESSION_COOKIE_SECURE=true`。若挂载自己的业务库，将文件置于 `/app/data`，设置 `SQLITE_PATH` 指向该文件，并设置 `INITIALIZE_DEMO_DATA=false`，避免自动生成演示库。
+
 首次使用 `ADMIN_USERNAME`（默认 `admin`）与配置的 `ADMIN_PASSWORD` 登录。密码使用带随机盐的 PBKDF2-SHA256 保存。初始化完成后，这两个环境变量不会覆盖已有账号；密码通过用户管理重置。后台会话使用 HttpOnly、SameSite Cookie，密码重置和用户禁用会撤销会话，旧 OAuth JWT 也会失效。
 
 两个 Go 服务必须使用相同的 `MANAGEMENT_DB_PATH`、`AUDIT_DB_PATH` 和 `DATABASE_ALLOWED_ROOTS`。更改监听端口时同步修改 `MCP_RESOURCE_URL`、`MCP_SERVER_URL`、`OAUTH_ISSUER`、`ADMIN_API_URL`。外部部署使用 HTTPS；HTTPS 反向代理后设置 `SESSION_COOKIE_SECURE=true`，或使用 HTTPS `OAUTH_ISSUER` 的默认推断。
