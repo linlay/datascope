@@ -199,9 +199,10 @@ func AccessFor(cfg *rewrite.Config, table string) Access {
 type listTablesInput struct{}
 
 type tableEntry struct {
-	Name    string `json:"name"`
-	Comment string `json:"comment"`
-	Access  Access `json:"access"`
+	DisplayName string `json:"display_name,omitempty"`
+	Name        string `json:"name"`
+	Comment     string `json:"comment"`
+	Access      Access `json:"access"`
 }
 
 type listTablesOutput struct {
@@ -220,7 +221,7 @@ func (h handlers) listTables(ctx context.Context, _ *mcp.CallToolRequest, _ list
 			continue
 		}
 		// Row counts are global, not per user, so they are not exposed here.
-		out.Tables = append(out.Tables, tableEntry{Name: t.Name, Comment: t.Comment, Access: AccessFor(h.svc.Config(), t.Name)})
+		out.Tables = append(out.Tables, tableEntry{Name: t.Name, DisplayName: t.DisplayName, Comment: t.Comment, Access: AccessFor(h.svc.Config(), t.Name)})
 	}
 	return nil, out, nil
 }

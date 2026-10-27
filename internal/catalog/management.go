@@ -40,11 +40,31 @@ func (c *Catalog) listSQLite(ctx context.Context) ([]Database, error) {
 	if e != nil {
 		return nil, e
 	}
+	checks, e := c.Management.Records(ctx, "discovery_checks")
+	if e != nil {
+		return nil, e
+	}
+	statuses := map[string]discoveryCheck{}
+	for _, r := range checks {
+		var check discoveryCheck
+		if e := json.Unmarshal([]byte(r.Data), &check); e != nil {
+			return nil, e
+		}
+		statuses[r.Key] = check
+	}
 	out := []Database{}
 	for _, r := range records {
 		var d Database
 		if e = json.Unmarshal([]byte(r.Data), &d); e != nil {
 			return nil, e
+		}
+		if check, ok := statuses[d.ID]; ok && (d.Discovery == nil || check.AttemptedAt.After(d.Discovery.AttemptedAt)) {
+			if d.Discovery == nil {
+				d.Discovery = &Discovery{}
+			}
+			d.Discovery.CheckedAt = check.CheckedAt
+			d.Discovery.AttemptedAt = check.AttemptedAt
+			d.Discovery.Error = check.Error
 		}
 		out = append(out, d)
 	}

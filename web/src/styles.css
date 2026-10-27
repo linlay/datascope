@@ -288,3 +288,10 @@ details > summary {
 .mcp-connection-details { margin-top: 8px; }
 .mcp-connection-details > summary { width: fit-content; color: var(--muted); }
 .mcp-connection-details .ant-descriptions { margin-top: 12px; }
+
+@media (max-width: 700px) {
+ .discovery-page .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; padding-block: 10px; }
+ .discovery-page .ant-card-extra { margin-inline-start: 0; max-width: 100%; }
+ .discovery-page .ant-card-head-title { flex: 1 0 100%; padding: 0; }
+ .discovery-page .ant-card-extra .ant-select { max-width: 100%; }
+}

@@ -143,15 +143,20 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	if err != nil {
 		return nil, err
 	}
-	tables, err := s.remoteTables(ctx)
-	if err != nil {
+	switch s.Driver() {
+	case "mysql":
+		query = `SELECT COALESCE(TABLE_COMMENT,'') FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME=?`
+	case "postgresql":
+		query = `SELECT COALESCE(pg_catalog.obj_description(c.oid,'pg_class'),'') FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2`
+	default:
+		query = `SELECT COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER=:1 AND TABLE_NAME=:2`
+	}
+	var tableComment sql.NullString
+	if err := s.db.QueryRowContext(ctx, query, s.engine.Schema, physical).Scan(&tableComment); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	for _, t := range tables {
-		if t.Name == physical {
-			out.Comment = t.Comment
-		}
-	}
+	out.Comment = tableComment.String
+
 	// A metadata summary, not a vendor's lossless CREATE TABLE export.
 	var cols []string
 	for _, c := range out.Columns {

@@ -150,6 +150,13 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	scanInterval, err := time.ParseDuration(envflag.String("DISCOVERY_INTERVAL", "5m"))
+	if err != nil || scanInterval < 0 {
+		return fmt.Errorf("DISCOVERY_INTERVAL 必须为非负时长")
+	}
+	discoveryDone := make(chan struct{})
+	go func() { defer close(discoveryDone); catalogue.RunDiscovery(ctx, scanInterval) }()
+	defer func() { stop(); <-discoveryDone }()
 	outboxDone := make(chan struct{})
 	go func() { defer close(outboxDone); platform.RunOutbox(ctx, manager) }()
 	defer func() { stop(); <-outboxDone }()

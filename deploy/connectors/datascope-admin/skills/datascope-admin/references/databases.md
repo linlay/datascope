@@ -47,3 +47,13 @@
 未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{id,name,driver,connection}}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。connection 与驱动/目标登记后固定；保存策略需保留读取到的连接配置。
 
 网络查询与模板使用受限 SELECT 子集。策略中的 main.表名映射到配置的 schema；不支持的语法会拒绝，不能绕过改写执行原 SQL。详细范围见仓库 docs/databases.md。
+
+## 自动侦查与人工映射
+
+新建数据源自动提取全部表和字段并建立快照，全部表默认禁止、字段为当前显式白名单。管理 API 默认每 5 分钟自动检查结构变化；DISCOVERY_INTERVAL=0s 可关闭。扫描只读源库，不复制业务数据。表内容继续使用后台分页浏览。
+
+- 读取：`datascope_query`，action=`get`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。返回数据库配置、discovery.tables 原始结构、annotations 人工覆盖和 reports 最近 20 次结构变化报告。
+- 扫描并采用新结构：`datascope_manage`，action=`refresh`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。需要 config.read + config.write；扫描失败保留旧快照。新增表关闭，字段白名单不自动扩张，显式 wildcard 则保留原选择。
+- 保存映射：`datascope_manage`，action=`save`，args=`{"resourceType":"annotation","database_id":"目标 ID","table":"物理表名","column":"物理字段名","revision":当前数据库版本,"annotation":{"display_name":"展示名称","comment":"人工说明"}}`。column 省略或为空表示表。comment=null 表示跟随源注释，comment="" 表示明确清空说明。需要 config.read + config.write；整项替换当前对象的映射，保留既有值时需带回 display_name 和 comment。
+
+结构快照和人工覆盖不能通过 database.save 修改。扫描会保留人工覆盖，源注释变化导致冲突时展示旧值、新值和人工值；取消该项 comment 覆盖即可采用数据库新说明。扫描不自动修复行过滤 SQL 或业务工具，也不比较业务记录内容。

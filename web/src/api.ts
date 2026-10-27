@@ -4,6 +4,7 @@ export type Scheme = string;
 export type Row = Record<string, unknown>;
 
 export interface TableInfo {
+  display_name?: string;
   name: string;
   comment: string;
   row_count: number;
@@ -12,6 +13,7 @@ export interface TableInfo {
 }
 
 export interface Column {
+  display_name?: string;
   name: string;
   type: string;
   not_null: boolean;
@@ -22,6 +24,7 @@ export interface Column {
 }
 
 export interface TableSchema {
+  display_name?: string;
   name: string;
   comment: string;
   columns: Column[];
@@ -196,7 +199,13 @@ export interface DatabaseConnection {
  host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env:string; tls_mode?:string;
 }
 export interface NewDatabase {id:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
+export interface Annotation { display_name: string; comment: string | null }
+export interface TableAnnotation extends Annotation { columns: Record<string, Annotation> }
+export interface SchemaChange { table:string; column?:string; kind:'added'|'removed'|'modified'; property:string; before:string; after:string; manual?:string; conflict:boolean }
+export interface SchemaReport { version:number; at:string; changes:SchemaChange[] }
+export interface Discovery { version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
 export interface Database {
+ discovery?:Discovery;
  connection?:DatabaseConnection;
  authentication?: {type:"local"|"platform";label?:string;employee_directory?:boolean};
  business_tools?:BusinessTool[];
@@ -206,10 +215,12 @@ export interface Database {
 }
 export const databases = {
  list: () => request<Database[]>('/api/databases'),
+ discover: (id:string) => managementCall<Database>('discover_database',{database_id:id}),
+ annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
  test: (body: NewDatabase) => managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database:body}),
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
- save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
+ save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify({...body,discovery:undefined})}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;

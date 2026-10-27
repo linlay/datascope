@@ -30,7 +30,7 @@ export function DatabaseManager({ id, onSaved }: { id: string; onSaved: () => vo
  };
  const enabled=db.config.tables.filter(p=>p.enabled!==false).length;
  return <Space orientation="vertical" size="middle" style={{width:'100%'}}>
-  <Card title="数据库访问策略" extra={<Space>{dirty && <Tag color="orange">有未保存修改</Tag>}<Button type="primary" loading={saving} onClick={save} disabled={!dirty}>保存并生效</Button></Space>}>
+  <Card title="数据库访问策略" extra={<Space><Button onClick={()=>{window.location.hash='#/discovery'}}>侦查变化与映射</Button>{dirty && <Tag color="orange">有未保存修改</Tag>}<Button type="primary" loading={saving} onClick={save} disabled={!dirty}>保存并生效</Button></Space>}>
    <Row gutter={[24,16]}><Col xs={24} md={12}><Space orientation="vertical" style={{width:'100%'}}><Text type="secondary">数据库名称</Text><Input value={db.name} onChange={e=>change({name:e.target.value})}/><Text className="mono">{driverLabels[db.driver]||db.driver} · {db.connection?`${db.connection.host}:${db.connection.port} / ${db.connection.schema}`:db.path}</Text></Space></Col><Col><Statistic title="已开放数据表" value={enabled} suffix={`/ ${db.config.tables.length}`}/></Col></Row>
   </Card>
   {error && <Alert type="error" showIcon title="保存或加载失败" description={error} closable onClose={()=>setError(undefined)}/>}
@@ -50,7 +50,7 @@ export function DatabaseManager({ id, onSaved }: { id: string; onSaved: () => vo
      <Text type="secondary">关联多张表时采用其中最小上限；限制返回结果行数。</Text>
      <Space orientation="vertical" style={{width:'100%'}}><Text strong>可访问字段</Text>
       <Checkbox checked={policy.columns==null} onChange={e=>edit({columns:e.target.checked?null:[]})}>全部字段（包括未来新增字段）</Checkbox>
-      {schema ? <Checkbox.Group style={{display:'flex',flexWrap:'wrap',gap:12}} value={policy.columns??schema.columns.map(c=>c.name)} onChange={v=>edit({columns:v as string[]})} options={schema.columns.map(c=>({value:c.name,label:`${c.name} · ${c.type}`}))}/> : <Text type="secondary">加载字段中…</Text>}
+      {schema ? <Checkbox.Group style={{display:'flex',flexWrap:'wrap',gap:12}} value={policy.columns??schema.columns.map(c=>c.name)} onChange={v=>edit({columns:v as string[]})} options={schema.columns.map(c=>({value:c.name,label:`${c.display_name||c.name} · ${c.type}${c.comment?` · ${c.comment}`:''}`}))}/> : <Text type="secondary">加载字段中…</Text>}
      </Space>
      <Space><Text>行权限</Text><Select value={policy.passthrough?'pass':'rewrite'} style={{width:200}} options={[{value:'pass',label:'无需行权限改写'},{value:'rewrite',label:'使用 SQL 模板改写'}]} onChange={v=>edit({passthrough:v==='pass',sql:v==='pass'?'':policy.sql||`SELECT * FROM main."${policy.table.replace(/"/g,'""')}"`})}/></Space>
      <Space><Text>方案标签</Text><Select value={policy.scheme} style={{width:200}} options={db.config.schemes.map(s=>({value:s.scheme,label:s.name}))} onChange={v=>edit({scheme:v})}/></Space>

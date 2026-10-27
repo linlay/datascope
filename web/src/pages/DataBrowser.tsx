@@ -22,7 +22,7 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
 
   const groups = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const visible = tables.filter((t) => !term || t.name.includes(term) || t.comment.includes(term));
+    const visible = tables.filter((t) => !term || t.name.toLowerCase().includes(term) || t.comment.toLowerCase().includes(term) || (t.display_name??'').toLowerCase().includes(term));
     return Array.from(new Set(tables.map(t=>t.scheme)))
       .map((scheme) => ({ scheme, tables: visible.filter((t) => t.scheme === scheme) }))
       .filter((g) => g.tables.length > 0);
@@ -49,7 +49,7 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
               >
                 <span className="table-item-name mono">{t.name}</span>
                 <span className="table-item-count mono">{t.row_count_estimated?'约 ':''}{t.row_count}</span>
-                <span className="table-item-comment">{t.comment}</span>
+                <span className="table-item-comment">{t.display_name||t.comment}</span>
               </button>
             ))}
           </div>
@@ -111,7 +111,7 @@ function TableView({
             {c.primary_key && <Tag color="gold" style={{ marginRight: 4 }}>PK</Tag>}
             {c.name}
           </span>
-          <span className="col-comment">{c.comment}</span>
+          <span className="col-comment">{c.display_name?`${c.display_name} · ${c.comment}`:c.comment}</span>
         </div>
       </Tooltip>
     ),
@@ -134,7 +134,7 @@ function TableView({
       title={
         <Space wrap>
           <span className="mono" style={{ fontSize: 16 }}>{table}</span>
-          <Text type="secondary">{schema?.comment}</Text>
+          <Text type="secondary">{schema?.display_name?`${schema.display_name} · ${schema.comment}`:schema?.comment}</Text>
           {info && <SchemeTag scheme={info.scheme} />}
         </Space>
       }

@@ -29,6 +29,7 @@ const (
 
 // Store is the shared execution facade; engine selects the network SQL adapter.
 type Store struct {
+	Annotations  map[string]TableAnnotation
 	engine       *dialect.Engine
 	Audit        *audit.Store
 	db           *sql.DB
@@ -351,6 +352,7 @@ func jsonValue(v any) (any, error) {
 
 // Table describes one user table.
 type Table struct {
+	DisplayName       string `json:"display_name,omitempty"`
 	Name              string `json:"name"`
 	Comment           string `json:"comment"`
 	RowCount          int64  `json:"row_count"`
@@ -359,6 +361,19 @@ type Table struct {
 
 // Tables lists user tables with their Chinese comments and row counts.
 func (s *Store) Tables(ctx context.Context) ([]Table, error) {
+	tables, err := s.sourceTables(ctx)
+	for i := range tables {
+		if a, ok := s.Annotations[tables[i].Name]; ok {
+			tables[i].DisplayName = a.DisplayName
+			if a.Comment != nil {
+				tables[i].Comment = *a.Comment
+			}
+		}
+	}
+	return tables, err
+}
+
+func (s *Store) sourceTables(ctx context.Context) ([]Table, error) {
 	if s.engine != nil {
 		return s.remoteTables(ctx)
 	}
@@ -404,28 +419,38 @@ func (s *Store) Tables(ctx context.Context) ([]Table, error) {
 
 // Column describes one column of a table.
 type Column struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	NotNull    bool    `json:"not_null"`
-	PrimaryKey bool    `json:"primary_key"`
-	Default    *string `json:"default,omitempty"`
-	References string  `json:"references,omitempty"`
-	Comment    string  `json:"comment"`
+	DisplayName string  `json:"display_name,omitempty"`
+	Name        string  `json:"name"`
+	Type        string  `json:"type"`
+	NotNull     bool    `json:"not_null"`
+	PrimaryKey  bool    `json:"primary_key"`
+	Default     *string `json:"default,omitempty"`
+	References  string  `json:"references,omitempty"`
+	Comment     string  `json:"comment"`
 }
 
 // TableSchema is the full description of a table.
 type TableSchema struct {
-	Name    string   `json:"name"`
-	Comment string   `json:"comment"`
-	Columns []Column `json:"columns"`
-	Indexes []string `json:"indexes"`
-	DDL     string   `json:"ddl"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Name        string   `json:"name"`
+	Comment     string   `json:"comment"`
+	Columns     []Column `json:"columns"`
+	Indexes     []string `json:"indexes"`
+	DDL         string   `json:"ddl"`
 }
 
 var ErrTableNotFound = errors.New("表不存在")
 
 // Describe returns columns, foreign keys, indexes and comments for table.
 func (s *Store) Describe(ctx context.Context, table string) (*TableSchema, error) {
+	out, err := s.sourceDescribe(ctx, table)
+	if err == nil {
+		s.applySchema(out)
+	}
+	return out, err
+}
+
+func (s *Store) sourceDescribe(ctx context.Context, table string) (*TableSchema, error) {
 	if s.engine != nil {
 		return s.remoteDescribe(ctx, table)
 	}

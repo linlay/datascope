@@ -4,7 +4,9 @@ import (
 	"context"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
+	"datascope-server/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -89,6 +91,44 @@ func ManagedHandler(c *catalog.Catalog, inspector *Inspector) http.Handler {
 		}
 		if d.LocalAuthentication() && strings.HasPrefix(path, "/api/mcp/") {
 			writeJSON(w, 400, map[string]string{"error": "该数据库使用独立业务认证，请通过业务连接器使用员工工号和密码授权后测试"})
+			return
+		}
+		// Inspection and browsing must survive schema drift and broken custom
+		// policies. PlatformHandler has already checked config.read/raw_query.
+		if r.Method == "GET" && (path == "/api/tables" || strings.HasPrefix(path, "/api/tables/")) {
+			st, err := c.OpenStore(r.Context(), d)
+			if err != nil {
+				respond(w, nil, err)
+				return
+			}
+			defer st.Close()
+			if path == "/api/tables" {
+				tables, err := st.Tables(r.Context())
+				out := make([]tableInfo, len(tables))
+				for i, t := range tables {
+					out[i].Table = t
+					if d.Config != nil {
+						for _, p := range d.Config.Tables {
+							if strings.EqualFold(p.Table, t.Name) {
+								out[i].Scheme = p.Scheme
+							}
+						}
+					}
+				}
+				respond(w, out, err)
+				return
+			}
+			name := strings.TrimPrefix(path, "/api/tables/")
+			if strings.HasSuffix(name, "/rows") {
+				q := r.URL.Query()
+				limit, _ := strconv.Atoi(q.Get("limit"))
+				offset, _ := strconv.Atoi(q.Get("offset"))
+				out, err := st.Browse(r.Context(), store.BrowseOptions{Table: strings.TrimSuffix(name, "/rows"), Limit: limit, Offset: offset, OrderBy: q.Get("order"), Desc: q.Get("desc") == "1", Search: q.Get("q"), FilterColumn: q.Get("col"), FilterValue: q.Get("val")})
+				respond(w, out, err)
+				return
+			}
+			out, err := st.Describe(r.Context(), name)
+			respond(w, out, err)
 			return
 		}
 		svc, err := c.Open(r.Context(), d)

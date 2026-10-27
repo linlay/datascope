@@ -23,6 +23,9 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	Table          string                      `json:"table,omitempty"`
+	Column         string                      `json:"column,omitempty"`
+	Annotation     *store.Annotation           `json:"annotation,omitempty"`
 	Account        *management.BusinessAccount `json:"account,omitempty"`
 	DatabaseID     string                      `json:"database_id,omitempty"`
 	UserID         int64                       `json:"user_id,omitempty"`
@@ -144,6 +147,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		out := []DatabaseView{}
 		for _, d := range ds {
 			v := s.DatabaseView(ctx, d)
+			v.Discovery = nil // Full snapshots are fetched only for the selected database.
 			if len(v.Permissions) > 0 {
 				out = append(out, v)
 			}
@@ -226,6 +230,32 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
+	case "get_discovery", "discover_database", "save_annotation":
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if action != "get_discovery" {
+			if e := require("config.write"); e != nil {
+				return nil, e
+			}
+		}
+		var d *catalog.Database
+		var e error
+		switch action {
+		case "get_discovery":
+			d, e = s.Catalog.Get(in.DatabaseID)
+		case "discover_database":
+			d, e = s.Catalog.Discover(ctx, in.DatabaseID)
+		case "save_annotation":
+			if in.Annotation == nil {
+				return nil, errors.New("需要 annotation 参数")
+			}
+			d, e = s.Catalog.SaveAnnotation(ctx, in.DatabaseID, in.Table, in.Column, in.Revision, *in.Annotation)
+		}
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *d), nil
 	case "test_database_connection":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -499,6 +529,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 	}
 	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		d.Discovery = nil
 		d.Authentication = nil
 		d.Path = ""
 		d.Connection = nil

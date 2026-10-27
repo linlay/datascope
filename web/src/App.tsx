@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, ConfigProvider, Form, Input, Layout, Menu, Modal, Select, Space, Tag, theme, type ThemeConfig } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import { DiscoveryPage } from './pages/Discovery';
 import { DataBrowser } from './pages/DataBrowser';
 import { McpManagement } from './pages/McpManagement';
 import { DatabaseManager } from './pages/DatabaseManager';
@@ -10,7 +11,7 @@ import { AccessPage, AuditPage, KnowledgePage } from './pages/PlatformPages';
 import { useAuth } from './Auth';
 import { ConnectionFields } from './components/ConnectionFields';
 
-type Page = 'table' | 'sql' | 'policies' | 'mcp' | 'access' | 'audit' | 'knowledge';
+type Page = 'discovery' | 'table' | 'sql' | 'policies' | 'mcp' | 'access' | 'audit' | 'knowledge';
 
 interface Route {
   page: Page;
@@ -20,7 +21,7 @@ interface Route {
 function parseHash(): Route {
   const [path] = window.location.hash.replace(/^#\/?/, '').split('?');
   const [page, table] = path.split('/');
-  if (page === 'sql' || page === 'policies' || page === 'mcp' || page === 'access' || page === 'audit' || page === 'knowledge') return { page };
+  if (page === 'discovery' || page === 'sql' || page === 'policies' || page === 'mcp' || page === 'access' || page === 'audit' || page === 'knowledge') return { page };
   return { page: page === 'table' || table ? 'table' : 'policies', table: table ? decodeURIComponent(table) : undefined };
 }
 
@@ -75,7 +76,7 @@ function buildTheme(dark: boolean): ThemeConfig {
 }
 
 const titles: Record<Page, string> = {
- access:'用户与授权',audit:'日志审计',knowledge:'业务知识',
+ discovery:'数据库侦查',access:'用户与授权',audit:'日志审计',knowledge:'业务知识',
   sql: 'SQL控制台',
   table: '表数据',
   policies: '数据库访问策略',
@@ -109,7 +110,7 @@ export function App() {
   catch(e) {if(e instanceof Error)setError(e.message);}finally{setTesting(false);}
  };
  const add=async()=>{
-  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();switchDB(d.id);window.location.hash='#/policies';setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
+  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();switchDB(d.id);window.location.hash='#/discovery';setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
   catch(e) { if(e instanceof Error) setError(e.message); } finally {setCreating(false);}
  };
 
@@ -161,6 +162,7 @@ export function App() {
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
           {activePage === 'sql' && <SqlWorkbench permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
+          {activePage === 'discovery' && <DiscoveryPage id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'policies' && <DatabaseManager id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
@@ -169,7 +171,7 @@ export function App() {
        {error && <Alert type="error" title={error}/>}
        {testResult&&<Alert type="success" title={testResult}/>}
        <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><Form.Item name="id" label="数据库 ID" rules={[{required:true},{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/,message:'使用字母、数字、下划线或连字符，最多 64 位'}]}><Input placeholder="business"/></Form.Item><ConnectionFields form={form}/></Form>
-       <p>添加后默认禁止所有表。请配置访问策略，再开启 MCP。</p>
+       <p>添加后自动侦查全部表、字段与注释，生成映射和结构快照。选择开放范围后，再开启 MCP。</p>
       </Modal>
     </ConfigProvider>
   );

@@ -32,6 +32,7 @@ var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "cus
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
+	Discovery              *Discovery        `json:"discovery,omitempty" yaml:"discovery,omitempty"`
 	AuthenticationRevision int64             `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
 	Authentication         *Authentication   `json:"authentication,omitempty" yaml:"authentication,omitempty"`
 	BusinessTools          []BusinessTool    `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
@@ -266,7 +267,7 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	if err = cfg.Validate(); err != nil {
 		return nil, err
 	}
-	st, err := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+	st, err := c.OpenStore(ctx, d)
 	if err != nil {
 		return nil, err
 	}
@@ -321,15 +322,13 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 		return err
 	}
 	defer st.Close()
-	names, err := st.TableNames(ctx)
+	tables, err := captureSchema(ctx, st)
 	if err != nil {
 		return err
 	}
-	no := false
 	d.Config = &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "NONE", Name: "公共访问", Description: "不进行行权限改写"}, {Scheme: "CUSTOM", Name: "自定义改写", Description: "使用 SQL 模板过滤数据"}}, Fragments: map[string]string{}, Tables: []*rewrite.Policy{}}
-	for _, name := range names {
-		d.Config.Tables = append(d.Config.Tables, &rewrite.Policy{Table: name, Scheme: "NONE", Enabled: &no, Passthrough: true, MaxRows: store.DefaultMaxRows})
-	}
+	d.Discovery = nil
+	applyDiscovery(&d, tables)
 	d.MCPEnabled = false
 	d.Tools = []string{}
 	d.Revision = 1
@@ -371,6 +370,7 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 				if old.Revision != d.Revision || old.ETag != d.ETag {
 					return fmt.Errorf("配置已被其他窗口修改，请刷新后重试")
 				}
+				d.Discovery = old.Discovery
 				d.AuthenticationRevision = old.AuthenticationRevision
 				if !reflect.DeepEqual(d.Authentication, old.Authentication) {
 					d.AuthenticationRevision++
