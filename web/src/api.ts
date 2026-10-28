@@ -1,5 +1,11 @@
 // Typed client for the Go admin API (proxied at /api by the dev server).
 
+const appBase = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+export function appURL(path: string): string {
+  return `${appBase}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 export type Scheme = string;
 export type Row = Record<string, unknown>;
 
@@ -206,7 +212,7 @@ export const databases = {
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;
-  const response = await fetch(path, {
+  const response = await fetch(appURL(path), {
  credentials: "same-origin",
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -266,7 +272,7 @@ export const api = {
 
 // Global platform endpoints must never be rewritten into a selected database path.
 export async function platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
- const response=await fetch(path,{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});
+ const response=await fetch(appURL(path),{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});
  const data=await response.json().catch(()=>({}));
  if(!response.ok){if(response.status===401&&!path.endsWith('/login'))window.dispatchEvent(new Event('platform-session-expired'));throw new ApiError(data.error||String(response.status),response.status,data);}
  return data as T;

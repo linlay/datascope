@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
-import { databases, type Database } from '../api';
+import { appURL, databases, type Database } from '../api';
 import { McpInspector } from './McpInspector';
 import { HelpTip } from '../components/HelpTip';
 
@@ -40,7 +40,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   if (!db) return <Card loading={!error}>{error && <Alert type="error" title={error} />}</Card>;
 
   const pathValid = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(mcpPath);
-  const endpoint = new URL(db.mcp_endpoint || `/mcp/${db.mcp_path || db.id}`, window.location.origin);
+  const endpoint = new URL(db.mcp_endpoint || appURL(`/mcp/${db.mcp_path || db.id}`), window.location.origin);
   const prefix = endpoint.pathname.slice(0, endpoint.pathname.lastIndexOf('/') + 1);
   const previewEndpoint = `${endpoint.origin}${prefix}${mcpPath}`;
   const dirty = businessText!==JSON.stringify(db.business_tools||[],null,2) || mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== db.tools.length || tools.some((tool) => !db.tools.includes(tool));

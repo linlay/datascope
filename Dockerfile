@@ -1,7 +1,9 @@
 FROM harbor.gtjaqh.io/library/node:22.9.0 AS web-build
 WORKDIR /src/web
 ARG NPM_REGISTRY=http://nexus.gtjaqh.net/repository/npm-group/
-ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY}
+ARG VITE_BASE_PATH=/datascope/
+ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+    VITE_BASE_PATH=${VITE_BASE_PATH}
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
