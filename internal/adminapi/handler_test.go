@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"datascope-server/internal/testutil"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,6 +16,7 @@ import (
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
+	"datascope-server/internal/testutil"
 )
 
 func newAPI(t *testing.T, opts mcpserver.Options) *httptest.Server {
@@ -65,6 +66,31 @@ func do(t *testing.T, method, url string, body any, out any) int {
 		}
 	}
 	return resp.StatusCode
+}
+
+func TestLocalhostOnlyHostAllowsOnlyMarkedLoopbackProxy(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	handler := localhostOnlyHost(next)
+
+	test := func(name, remote string, marked bool, want int) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "http://public.example/api/auth/login", nil)
+		req.Host = "public.example"
+		req.RemoteAddr = remote
+		req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 18081}))
+		if marked {
+			req.Header.Set("X-Datascope-Proxy", "1")
+		}
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != want {
+			t.Errorf("%s: status=%d want=%d", name, res.Code, want)
+		}
+	}
+
+	test("direct external host", "127.0.0.1:50000", false, http.StatusForbidden)
+	test("local nginx", "127.0.0.1:50000", true, http.StatusNoContent)
+	test("non-local marked request", "10.0.0.8:50000", true, http.StatusForbidden)
 }
 
 func runVerify(t *testing.T, opts mcpserver.Options) Report {
