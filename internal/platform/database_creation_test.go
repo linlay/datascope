@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,18 @@ func TestDatabaseCreationGeneratesStableIDs(t *testing.T) {
 			t.Fatal("automatic ID is missing or not unique")
 		}
 		ids[d.ID] = true
+		if d.MCPEnabled || !slices.Equal(d.Tools, []string{"list_tables", "describe_table", "query"}) {
+			t.Fatalf("unexpected MCP defaults: enabled=%v tools=%v", d.MCPEnabled, d.Tools)
+		}
+		// Defaults apply on creation only; deliberately clearing tools survives saves.
+		d.Tools = []string{}
+		must(t, f.c.Save(f.ctx, d.Database))
+		cleared, e := f.c.Get(d.ID)
+		must(t, e)
+		d.Database = *cleared
+		if len(d.Tools) != 0 {
+			t.Fatal("saving restored tools explicitly turned off")
+		}
 		d.Name = "改名后"
 		_, err := f.app.Call(f.ctx, "update_database", application.Input{DatabaseID: d.ID, Database: &d.Database})
 		must(t, err)

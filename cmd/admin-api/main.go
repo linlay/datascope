@@ -124,14 +124,6 @@ func run() error {
 			return err
 		}
 		defer as.Close()
-		inspector.Token = as.SignEmployee
-		inspector.TokenForDatabase = func(ctx context.Context, userID int64, databaseID string) (string, error) {
-			d, err := catalogue.Get(databaseID)
-			if err != nil {
-				return "", err
-			}
-			return as.SignEmployeeForResource(ctx, userID, strings.TrimRight(resourceBase, "/")+"/"+d.MCPRoute())
-		}
 		adminMCP, e := mcpserver.HTTPHandlerWithManagement(managementmcp.New(app), nil, "oauth", envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), adminResource, "/mcp/admin", true, manager, "")
 		if e != nil {
 			return e

@@ -69,8 +69,8 @@ func TestPoliciesAndPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := mustGet(t, c, "second")
-	if d.MCPEnabled || len(d.Tools) > 0 {
-		t.Fatal("new database must be closed")
+	if d.MCPEnabled || !slices.Equal(d.Tools, []string{"list_tables", "describe_table", "query"}) {
+		t.Fatal("new database must keep MCP closed with the three basic tools selected")
 	}
 	svc, err := c.Open(ctx, d)
 	if err != nil {

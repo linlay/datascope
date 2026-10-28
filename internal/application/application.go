@@ -127,7 +127,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Account == nil || in.Account.DatabaseID != in.DatabaseID {
 			return nil, errors.New("业务账号的 database_id 必须一致")
 		}
-		if d.Authentication.EmployeeDirectory {
+		if d.Authentication != nil && d.Authentication.EmployeeDirectory {
 			svc, e := s.Catalog.Open(ctx, d)
 			if e != nil {
 				return nil, e

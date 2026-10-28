@@ -95,8 +95,8 @@ func New(cfg Config, st *store.Store) (*Server, error) {
 	if !ValidURL(cfg.Issuer, false) || !ValidURL(cfg.Resource, false) {
 		return nil, errors.New("OAuth issuer/resource must be HTTPS or loopback HTTP")
 	}
-	if cfg.Management == nil && len(cfg.Password) < 12 {
-		return nil, errors.New("OAUTH_DEMO_PASSWORD must contain at least 12 characters")
+	if cfg.Management == nil && len(cfg.Password) < 6 {
+		return nil, errors.New("OAUTH_DEMO_PASSWORD must contain at least 6 characters")
 	}
 	cfg.Issuer = strings.TrimRight(cfg.Issuer, "/")
 	key, e := loadKey(cfg.KeyPath)
@@ -310,7 +310,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	label := "DataScope 管理账号授权"
 	if d, e := s.localDatabase(); e == nil {
 		label = d.Name + " · 员工账号授权"
-		if d.Authentication.Label != "" {
+		if d.Authentication != nil && d.Authentication.Label != "" {
 			label = d.Authentication.Label + " · 授权"
 		}
 	}
@@ -676,20 +676,14 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 	if e != nil || json.Unmarshal(raw, &c) != nil || c.Iss != v.Issuer || c.Aud != v.Resource || c.Exp <= time.Now().Unix() || c.Iat > time.Now().Add(30*time.Second).Unix() {
 		return nil, bad
 	}
-	if v.Catalog != nil && v.DatabaseID != "" {
-		d, err := v.Catalog.Get(v.DatabaseID)
+	if v.DatabaseID != "" && (v.Management != nil || v.Catalog != nil && v.Catalog.Management != nil) {
+		scopes := strings.Fields(c.Scope)
+		a, err := v.businessToken(ctx, c.Sub, c.Identity, c.AuthConfig, c.Version, scopes)
 		if err != nil {
 			return nil, bad
 		}
-		if d.LocalAuthentication() {
-			scopes := strings.Fields(c.Scope)
-			a, err := v.businessToken(ctx, c.Sub, c.Identity, c.AuthConfig, c.Version, scopes)
-			if err != nil {
-				return nil, bad
-			}
-			audit.UpdateRequest(ctx, v.DatabaseID, 0)
-			return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID}}, nil
-		}
+		audit.UpdateRequest(ctx, v.DatabaseID, 0)
+		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID}}, nil
 	}
 	if databaseIdentity(c.Identity) {
 		return nil, bad
@@ -700,9 +694,6 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 			return nil, bad
 		}
 		audit.UpdateRequest(ctx, v.DatabaseID, u.ID)
-		if v.DatabaseID != "" && !v.Management.Can(ctx, u.ID, v.DatabaseID, "query") {
-			return nil, bad
-		}
 		scopes := strings.Fields(c.Scope)
 		if slices.Contains(scopes, "sql:debug") && !u.SystemAdmin {
 			return nil, bad
@@ -807,11 +798,7 @@ func (s *Server) userResourceAllowed(ctx context.Context, id int64, resource str
 		u, e := s.cfg.Management.User(ctx, id)
 		return e == nil && u.Active
 	}
-	if s.cfg.Catalog != nil {
-		d, e := s.cfg.Catalog.Get(db)
-		if e != nil || d.LocalAuthentication() {
-			return false
-		}
-	}
-	return s.cfg.Management.Can(ctx, id, db, "query")
+	// Platform identities only authorize management resources. Business MCP
+	// authorization must be completed in the database's own account realm.
+	return false
 }

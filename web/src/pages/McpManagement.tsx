@@ -2,7 +2,6 @@ import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
 import { databases, type Database } from '../api';
-import { McpInspector } from './McpInspector';
 import { HelpTip } from '../components/HelpTip';
 
 const { Text } = Typography;
@@ -102,9 +101,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
       </Card>
       <Card title={t("配置生成业务工具")}><Typography.Paragraph>{t("每个工具包含名称、说明、SQL 模板和参数定义。SQL 使用")}<Typography.Text code>{t(":arg_参数名")}</Typography.Text>{t("；参数独立绑定，查询仍经过权限改写与审计。")}</Typography.Paragraph><Input.TextArea aria-label={t("业务工具 JSON 配置")} className="mono" rows={12} value={businessText} onChange={e=>setBusinessText(e.target.value)}/><Typography.Paragraph type="secondary" style={{marginTop:8}}>{t("示例：")}{`[{"name":"find_customer","description":"按客户编号查询","sql":"SELECT * FROM customers WHERE customer_no=:arg_customer_no","parameters":{"customer_no":{"type":"string","description":"客户编号"}}}]`}</Typography.Paragraph></Card>
       {error && <Alert type="error" showIcon title={t("MCP 配置保存失败")} description={error} closable onClose={() => setError(undefined)} />}
-      {db.authentication?.type === "local" ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={t("请在业务连接器中使用当前数据库的工号和密码完成 OAuth 授权后测试；平台管理账号不能代替员工登录。")} /> : db.mcp_enabled ? (
-        <McpInspector key={db.revision} />
-      ) : (
+      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={t("请在业务连接器中使用当前数据库的工号和密码完成 OAuth 授权后测试；平台管理账号不能代替员工登录。")} /> : (
         <Alert type="info" showIcon title={t("MCP 已关闭，开启并保存后可测试。")} />
       )}
     </Space>

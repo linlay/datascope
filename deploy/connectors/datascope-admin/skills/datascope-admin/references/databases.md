@@ -26,7 +26,7 @@
 
 读取结果将数据库字段直接放在返回对象顶层，并附带 mcp_endpoint、permissions、business_user_id。构造 `args.database` 时只复制数据库字段：id、name、driver、path、connection、mcp_enabled、mcp_path、tools、business_tools、config、revision，以及返回时存在的 etag。不要把整份返回对象直接作为 database 传回。
 
-创建数据库只需传 `database:{name,driver:"sqlite",path}，id 可省略，由服务端自动生成`，path 是 DataScope 服务端已有 SQLite 文件的路径，必须在服务端允许的数据根内。客户端本机路径不一定属于服务端。创建后服务端生成策略，默认关闭 MCP、禁用所有表、清空基础工具；回读实际配置再准备策略，不能假设传入策略已生效。
+创建数据库只需传 `database:{name,driver:"sqlite",path}，id 可省略，由服务端自动生成`，path 是 DataScope 服务端已有 SQLite 文件的路径，必须在服务端允许的数据根内。客户端本机路径不一定属于服务端。创建后服务端生成策略，默认关闭 MCP、禁用所有表，并预选 list_tables、describe_table、query 三个基础工具；回读实际配置再准备策略，不能假设传入策略已生效。
 
 已有数据库修改时，database.id 必须等于 database_id，database.revision 必须是最近回读的正整数版本。update 只采用 database.name；mcp.save 只采用 database 中的 mcp_enabled、mcp_path、tools、business_tools；policy.save 见策略文档。其他字段不随局部动作修改。使用完整 database.save 时保留当前配置，服务端按名称、策略、MCP 部分的实际差异逐项检查 config.write/policy.write/mcp.write；文件路径与驱动保持原值。
 
@@ -37,7 +37,7 @@
 保存后重新 database.get 核对 revision 和目标字段。test_connection 检查保存配置下的数据库连接，不证明 OAuth 登录、所有业务 SQL 或数据库 MCP 均可用。管理地址的授权不能复用于数据库地址。
 
 
-数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；或显式选择 `{type:"platform"}` 保留旧平台账号兼容模式。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。local 模式每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。
+数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；省略配置时也使用本库独立业务账号，不支持平台账号登录业务 MCP。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。
 
 
 ## 网络数据库

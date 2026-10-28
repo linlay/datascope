@@ -212,8 +212,8 @@ func (s *Store) Bootstrap(ctx context.Context, username, password string) error 
 	if n > 0 {
 		return nil
 	}
-	if username == "" || len(password) < 12 {
-		return errors.New("首次启动需设置 ADMIN_USERNAME 和至少 12 字符的 ADMIN_PASSWORD")
+	if username == "" || len(password) < 6 {
+		return errors.New("首次启动需设置 ADMIN_USERNAME 和至少 6 字符的 ADMIN_PASSWORD")
 	}
 	hash, e := passwordHash(password)
 	if e != nil {
@@ -277,8 +277,8 @@ func (s *Store) Authenticate(ctx context.Context, name, password string) (User, 
 	return u, nil
 }
 func (s *Store) CreateUser(ctx context.Context, name, display, password string) (User, error) {
-	if len(name) == 0 || len(name) > 80 || strings.TrimSpace(name) != name || len(password) < 12 {
-		return User{}, errors.New("需要用户名和至少 12 字符的密码")
+	if len(name) == 0 || len(name) > 80 || strings.TrimSpace(name) != name || len(password) < 6 {
+		return User{}, errors.New("需要用户名和至少 6 字符的密码")
 	}
 	hash, e := passwordHash(password)
 	if e != nil {
@@ -315,8 +315,8 @@ func (s *Store) DisableUser(ctx context.Context, id int64) error {
 	})
 }
 func (s *Store) ResetPassword(ctx context.Context, id int64, password string) error {
-	if len(password) < 12 {
-		return errors.New("密码至少 12 字符")
+	if len(password) < 6 {
+		return errors.New("密码至少 6 字符")
 	}
 	h, e := passwordHash(password)
 	if e != nil {

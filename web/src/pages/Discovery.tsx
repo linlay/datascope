@@ -1,10 +1,11 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Input, Modal, Row, Select, Space, Statistic, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Collapse, Descriptions, Input, Modal, Row, Select, Space, Statistic, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { databases, type Annotation, type Column, type Database, type PolicyView, type SchemaChange, type TableSchema } from '../api';
 import { useAuth } from '../Auth';
 import { TablePolicyEditor } from './DatabaseManager';
+import { setAllTableAccess } from '../tableAccess';
 
 const { Text, Paragraph } = Typography;
 const kinds = { added: '新增', removed: '删除', modified: '修改' };
@@ -59,6 +60,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  const can = (p:string) => user.system_admin || !!db.permissions?.includes(p);
  const state = db.discovery;
  const tables = state?.tables ?? [];
+ const visibleTables=tables.filter(table=>[table.name,table.comment,state?.annotations?.[table.name]?.display_name,state?.annotations?.[table.name]?.comment].join(' ').toLowerCase().includes(search.toLowerCase()));
  const current = tables.find(tableInfo=>tableInfo.name===active);
  const annotation = state?.annotations?.[active??''];
  const policy = db.config.tables.find(p=>p.table.toLowerCase()===active?.toLowerCase());
@@ -69,6 +71,10 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  const setPolicy = (table:string,patch:Partial<PolicyView>) => {
   if(patch.columns?.length===0)patch={...patch,enabled:false};
   setDB({...db,config:{...db.config,tables:db.config.tables.map(p=>p.table.toLowerCase()===table.toLowerCase()?{...p,...patch}:p)}});setDirty(true);
+ };
+ const setAllEnabled=(enabled:boolean)=>{
+  setDB({...db,config:{...db.config,tables:setAllTableAccess(db.config.tables,tables,enabled)}});
+  setDirty(true);
  };
  const editAnnotation = (table:string,column:string,source:string,a?:Annotation) => setEditor({table,column,source,annotation:a?{...a}:{display_name:'',comment:null}});
  const scan=()=>run(async()=>{const next=await databases.discover(id);if(next.discovery?.pending){setChoices({});setComparison('pending')}return next},next=>next.discovery?.pending?t("发现结构变化，请对比并确认"):t("检查完成，数据库结构一致"));
@@ -102,7 +108,12 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
   {error&&<Alert type="error" showIcon title={t("操作失败")} description={error} closable onClose={()=>setError(undefined)}/>}
   <Row gutter={[16,16]}>
    <Col xs={24} xl={8}><Card title={t("数据表")} extra={<Input aria-label={t("搜索数据表")} placeholder={t("表名、名称或说明")} value={search} onChange={e=>setSearch(e.target.value)} allowClear style={{width:170}}/>}>
-    <Table<TableSchema> rowKey="name" size="small" dataSource={tables.filter(tableInfo=>[tableInfo.name,tableInfo.comment,state?.annotations?.[tableInfo.name]?.display_name,state?.annotations?.[tableInfo.name]?.comment].join(' ').toLowerCase().includes(search.toLowerCase()))} pagination={{pageSize:15}} scroll={{x:330}} onRow={tableInfo=>({onClick:()=>setActive(tableInfo.name),style:{cursor:'pointer',background:tableInfo.name===active?'rgba(0,113,227,.08)':undefined}})} columns={[
+    <Space wrap style={{marginBottom:12}}>
+     <Tooltip title={t('作用于当前数据库的全部已登记表，保存后生效。')}><Button disabled={busy||!can('policy.write')||tables.length===0} onClick={()=>setAllEnabled(true)}>{t('全部开放')}</Button></Tooltip>
+     <Tooltip title={t('作用于当前数据库的全部已登记表，保存后生效。')}><Button disabled={busy||!can('policy.write')||tables.length===0} onClick={()=>setAllEnabled(false)}>{t('全部关闭')}</Button></Tooltip>
+     <Text type="secondary">{t('显示 {visible} / {total} 张表',{visible:visibleTables.length,total:tables.length})}</Text>
+    </Space>
+    <Table<TableSchema> rowKey="name" size="small" dataSource={visibleTables} pagination={false} scroll={{x:330,y:'min(60vh, 600px)'}} onRow={tableInfo=>({onClick:()=>setActive(tableInfo.name),style:{cursor:'pointer',background:tableInfo.name===active?'rgba(0,113,227,.08)':undefined}})} columns={[
      {title:t("数据表 / 名称"),render:(_,tableInfo)=><><Text code>{tableInfo.name}</Text><div>{state?.annotations?.[tableInfo.name]?.display_name||tableInfo.comment||<Text type="secondary">{t("待补充说明")}</Text>}</div></>},
      {title:t("字段"),render:(_,tableInfo)=>tableInfo.columns.length,width:55},
      {title:t("开放"),width:70,render:(_,tableInfo)=><Switch size="small" aria-label={t("开放表 {0}", {"0":(tableInfo.name)})} disabled={busy||!can('policy.write')} checked={db.config.tables.find(p=>p.table.toLowerCase()===tableInfo.name.toLowerCase())?.enabled!==false} onClick={(_,e)=>e.stopPropagation()} onChange={enabled=>setPolicy(tableInfo.name,{enabled})}/>},
@@ -116,7 +127,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
       {key:'effective',label:t("当前说明"),children:<Space><Text>{annotation?.comment??current.comment??''}</Text>{annotation?.comment!=null?<Tag color="blue">{t("人工维护")}</Tag>:<Tag>{t("跟随数据库")}</Tag>}</Space>},
      ]}/>
      <Space wrap><Checkbox disabled={busy||!can('policy.write')||!policy} checked={policy?.columns==null} onChange={e=>setPolicy(current.name,{columns:e.target.checked?null:current.columns.map(c=>c.name)})}>{t("包含未来新增字段")}</Checkbox><Button size="small" disabled={busy||!can('policy.write')} onClick={()=>setPolicy(current.name,{columns:current.columns.map(c=>c.name)})}>{t("选择当前全部字段")}</Button></Space>
-     <Table<Column> rowKey="name" size="small" dataSource={current.columns} pagination={{pageSize:10}} scroll={{x:700}} columns={[
+     <Table<Column> key={current.name} rowKey="name" size="small" dataSource={current.columns} pagination={false} scroll={{x:700,y:'min(52vh, 560px)'}} columns={[
       {title:t("开放"),width:60,render:(_,c)=><Checkbox aria-label={t("开放字段 {0}", {"0":(c.name)})} disabled={busy||!can('policy.write')} checked={policy?.columns==null||policy.columns.includes(c.name)} onChange={e=>{const cols=policy?.columns??current.columns.map(col=>col.name);setPolicy(current.name,{columns:e.target.checked?[...cols,c.name]:cols.filter(n=>n!==c.name)})}}/>},
       {title:t("字段 / 类型"),render:(_,c)=><><Text code>{c.name}</Text>{c.primary_key&&<Tag color="gold">{t("主键")}</Tag>}<div><Text type="secondary">{c.type}{c.not_null?t(" · 非空"):''}</Text></div></>},
       {title:t("显示名称"),render:(_,c)=>annotation?.columns?.[c.name]?.display_name||c.name},
@@ -136,7 +147,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
   }} {...(comparison==='history'?{footer:<Button onClick={()=>setComparison(undefined)}>{t("关闭")}</Button>}: {})}>
    {comparison==='pending'?<Alert type="info" showIcon title={t("确认后采用新的表结构，新增表默认关闭，已有字段权限不会自动扩大。人工说明默认保留，也可以逐项选择采用数据库新注释。")} style={{marginBottom:16}}/>:<Select aria-label={t("选择变更版本")} style={{width:300,marginBottom:16}} value={selectedReport?.version} onChange={setReport} options={[...reports].reverse().map(r=>({value:r.version,label:t("版本 {0} · {1}", {"0":(r.version),"1":(date(r.at))})}))}/>}
    {dirty&&comparison==='pending'&&<Alert type="warning" title={t("请先保存或重新读取当前表配置，再确认结构更新。")} style={{marginBottom:16}}/>}
-   <Table<SchemaChange> rowKey={change=>JSON.stringify([change.table,change.column,change.property,change.kind])} size="small" dataSource={changes} pagination={{pageSize:10}} scroll={{x:950}} columns={diffColumns}/>
+   <Table<SchemaChange> rowKey={change=>JSON.stringify([change.table,change.column,change.property,change.kind])} size="small" dataSource={changes} pagination={false} scroll={{x:950,y:'min(56vh, 600px)'}} columns={diffColumns}/>
    {error&&<Alert type="error" title={error}/>}
   </Modal>
   <Modal title={t("编辑名称与说明 · {0}{1}", {"0":(editor?.table??''),"1":(editor?.column?`.${editor.column}`:'')})} open={!!editor} confirmLoading={busy} onCancel={()=>setEditor(undefined)} onOk={async()=>{if(!editor)return;const value=editor;if(await run(()=>databases.annotate(id,value.table,value.column,db.revision,value.annotation),t("名称与说明已保存")))setEditor(undefined)}} okText={t("保存说明")}>

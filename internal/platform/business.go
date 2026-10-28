@@ -40,8 +40,8 @@ func InitializeDemoRealm(ctx context.Context, c *catalog.Catalog, password strin
 	if e != nil {
 		return nil
 	}
-	if len(password) < 12 {
-		return fmt.Errorf("证券 demo 员工认证初始化需要 OAUTH_DEMO_PASSWORD（至少 12 字符）")
+	if len(password) < 6 {
+		return fmt.Errorf("证券 demo 员工认证初始化需要 OAUTH_DEMO_PASSWORD（至少 6 字符）")
 	}
 	for _, u := range users {
 		if _, e = c.Management.BusinessAccount(ctx, d.ID, u.EmpNo); e == nil {

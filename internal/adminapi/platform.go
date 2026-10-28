@@ -228,41 +228,24 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 				platformError(w, e)
 				return
 			}
-			if d.LocalAuthentication() {
-				if e = guard.Require(ctx, m, id, "impersonate"); e != nil {
-					platformError(w, e)
-					return
-				}
-				accounts, e := m.BusinessAccounts(ctx, id)
-				if e != nil {
-					platformError(w, e)
-					return
-				}
-				out := []map[string]any{}
-				for _, a := range accounts {
-					if _, e := app.Catalog.BusinessAccount(ctx, d, a.Username); e == nil {
-						out = append(out, map[string]any{"id": a.BusinessUserID, "emp_no": a.Username, "name": a.Name, "status": "active", "role_code": "", "roles": "业务账号"})
-					}
-				}
-				writeJSON(w, 200, out)
+			if e = d.ValidateAuthentication(); e != nil {
+				platformError(w, e)
 				return
 			}
-
-			users, e := m.Users(ctx)
+			if e = guard.Require(ctx, m, id, "impersonate"); e != nil {
+				platformError(w, e)
+				return
+			}
+			accounts, e := m.BusinessAccounts(ctx, id)
 			if e != nil {
 				platformError(w, e)
 				return
 			}
 			out := []map[string]any{}
-			for _, target := range users {
-				if !m.Can(ctx, u.ID, id, "impersonate") && target.ID != u.ID {
-					continue
+			for _, a := range accounts {
+				if _, e := app.Catalog.BusinessAccount(ctx, d, a.Username); e == nil {
+					out = append(out, map[string]any{"id": a.BusinessUserID, "emp_no": a.Username, "name": a.Name, "status": "active", "role_code": "", "roles": "业务账号"})
 				}
-				g, e := m.Grant(ctx, target.ID, id)
-				if e != nil || g.BusinessUserID <= 0 {
-					continue
-				}
-				out = append(out, map[string]any{"id": g.BusinessUserID, "emp_no": target.Username, "name": target.Name, "status": "active", "role_code": "", "roles": "平台用户"})
 			}
 			writeJSON(w, 200, out)
 			return

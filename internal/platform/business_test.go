@@ -292,13 +292,13 @@ func TestBusinessRealmRevocationAndManagementBoundary(t *testing.T) {
 	}
 }
 
-func TestAuthenticationSwitchDoesNotResurrectBusinessTokens(t *testing.T) {
+func TestAuthenticationSettingsDoNotResurrectBusinessTokens(t *testing.T) {
 	env := setupRealms(t)
 	tokens, _, _ := employeeTokens(t, env, "default", "employee-default-password")
 	d, e := env.f.c.Get("default")
 	must(t, e)
 	original := *d.Authentication
-	d.Authentication = &catalog.Authentication{Type: "platform"}
+	d.Authentication.Label = "Temporary login label"
 	must(t, env.f.c.Save(env.f.ctx, *d))
 	d, e = env.f.c.Get("default")
 	must(t, e)
@@ -307,6 +307,48 @@ func TestAuthenticationSwitchDoesNotResurrectBusinessTokens(t *testing.T) {
 	code, _, _ := formRequest(t, &http.Client{Transport: bearer{token: tokens["access"]}}, "POST", env.resource+"/default", nil)
 	if code != 401 {
 		t.Fatal("switching authentication back resurrected old token")
+	}
+}
+
+func TestBusinessMCPRejectsPlatformAuthentication(t *testing.T) {
+	env := setupRealms(t)
+	f := env.f
+	d, e := f.c.Get("default")
+	must(t, e)
+	d.Authentication = &catalog.Authentication{Type: "platform"}
+	if e = f.c.Save(f.ctx, *d); e == nil {
+		t.Fatal("platform authentication configuration accepted")
+	}
+	if e = f.c.Add(f.ctx, catalog.Database{ID: "legacy", Name: "Legacy", Driver: "sqlite", Path: f.st.Path(), Authentication: d.Authentication}); e == nil {
+		t.Fatal("new database accepted platform authentication")
+	}
+	// Omitting optional settings still uses business accounts and OAuth.
+	d.Authentication = nil
+	must(t, f.c.Save(f.ctx, *d))
+	d, e = f.c.Get("default")
+	must(t, e)
+	if !d.LocalAuthentication() {
+		t.Fatal("absent settings fell back to platform authentication")
+	}
+	tokens, _, _ := employeeTokens(t, env, "default", "employee-default-password")
+	session := connectMCP(t, env.resource+"/default", tokens["access"])
+	if _, e = session.ListTools(f.ctx, nil); e != nil {
+		t.Fatal(e)
+	}
+	// Simulate a previously issued platform JWT with the correct key, issuer
+	// and audience. It must be rejected even when the platform user has grants.
+	issuer := d.AuthorizationIssuer(env.issuer)
+	resource := env.resource + "/default"
+	old, e := oauth.New(oauth.Config{Management: f.m, Issuer: issuer, Resource: resource, KeyPath: filepath.Join(f.dir, "realm-key.pem"), DatabaseForResource: func(string) (string, error) { return "", nil }}, nil)
+	must(t, e)
+	defer old.Close()
+	token, e := old.SignEmployeeForResource(f.ctx, f.admin.ID, resource)
+	must(t, e)
+	for _, c := range []*catalog.Catalog{f.c, nil} {
+		verifier := &oauth.Verifier{Management: f.m, Catalog: c, Issuer: issuer, Resource: resource, DatabaseID: d.ID}
+		if _, e = verifier.Verify(f.ctx, token, nil); e == nil {
+			t.Fatal("platform token accepted by business MCP")
+		}
 	}
 }
 

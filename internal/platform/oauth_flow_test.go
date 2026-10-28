@@ -3,6 +3,7 @@ package platform_test
 import (
 	"context"
 	"crypto/sha256"
+	"datascope-server/internal/oauth"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"datascope-server/internal/oauth"
 	"strings"
 	"testing"
 )
@@ -22,8 +22,8 @@ func TestPlatformOAuthLoginCodeAndRefresh(t *testing.T) {
 	ctx := context.Background()
 	host := httptest.NewUnstartedServer(http.NotFoundHandler())
 	issuer := "http://" + host.Listener.Addr().String()
-	resource := issuer + "/mcp/default"
-	as, e := oauth.New(oauth.Config{Management: f.m, Issuer: issuer, Resource: resource, KeyPath: filepath.Join(f.dir, "signing.pem"), StatePath: f.m.Path, ResourceAllowed: func(r string) bool { return r == resource }, DatabaseForResource: func(string) (string, error) { return "default", nil }}, nil)
+	resource := issuer + "/mcp/admin"
+	as, e := oauth.New(oauth.Config{Management: f.m, Issuer: issuer, Resource: resource, KeyPath: filepath.Join(f.dir, "signing.pem"), StatePath: f.m.Path, ResourceAllowed: func(r string) bool { return r == resource }, DatabaseForResource: func(string) (string, error) { return "", nil }}, nil)
 	must(t, e)
 	defer as.Close()
 	host.Config.Handler = as.Handler(http.NotFoundHandler())
@@ -86,7 +86,7 @@ func TestPlatformOAuthLoginCodeAndRefresh(t *testing.T) {
 		Refresh string `json:"refresh_token"`
 	}
 	must(t, json.Unmarshal(raw, &tokens))
-	v := &oauth.Verifier{Issuer: issuer, Resource: resource, Management: f.m, DatabaseID: "default"}
+	v := &oauth.Verifier{Issuer: issuer, Resource: resource, Management: f.m}
 	_, e = v.Verify(ctx, tokens.Access, nil)
 	must(t, e)
 	status, raw = exchange(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tokens.Refresh}, "client_id": {client.ID}, "resource": {resource}})

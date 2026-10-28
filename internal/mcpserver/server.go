@@ -85,7 +85,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		Capabilities: &mcp.ServerCapabilities{},
 	})
 	h := handlers{svc: svc, opts: opts}
-	platformMiddleware(server, h)
+	businessMiddleware(server, h)
 	registerBusinessTools(server, h, opts.BusinessTools)
 	if opts.Management != nil {
 		mcp.AddTool(server, &mcp.Tool{Name: "search_knowledge", Description: "先按业务问题检索知识摘要，再按需 read_knowledge 获取业务口径、关联关系和示例 SQL。", Annotations: readOnly("搜索业务知识")}, h.searchKnowledge)

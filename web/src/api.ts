@@ -209,7 +209,7 @@ export interface Discovery { pending?:PendingDiscovery;version:number; checked_a
 export interface Database {
  discovery?:Discovery;
  connection?:DatabaseConnection;
- authentication?: {type:"local"|"platform";label?:string;employee_directory?:boolean};
+ authentication?: {type:"local";label?:string;employee_directory?:boolean};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;

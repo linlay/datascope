@@ -372,7 +372,7 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	d.Discovery = nil
 	applyDiscovery(&d, tables)
 	d.MCPEnabled = false
-	d.Tools = []string{}
+	d.Tools = append([]string(nil), DefaultTools...)
 	d.Revision = 1
 	d.AuthenticationRevision = 1
 	if password != "" {
