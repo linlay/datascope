@@ -73,9 +73,21 @@ func TestDiscoveryReconcilesSchemaAndPreservesAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Discovery.Version != 2 {
-		t.Fatal("no new version")
+	if d.Discovery.Version != 1 || d.Discovery.Pending == nil {
+		t.Fatal("scan must propose changes without applying them")
 	}
+	pendingID := d.Discovery.Pending.ID
+	if slices.ContainsFunc(d.Config.Tables, func(p *rewrite.Policy) bool { return p.Table == "fresh" }) {
+		t.Fatal("scan changed access before approval")
+	}
+	d, err = c.ApplyDiscovery(ctx, d.ID, pendingID, d.Revision, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Discovery.Version != 2 || d.Discovery.Pending != nil {
+		t.Fatal("reviewed changes were not applied")
+	}
+
 	conflict := false
 	for _, ch := range d.Discovery.Reports[1].Changes {
 		if ch.Table == "records" && ch.Column == "id" && ch.Property == "comment" {
@@ -185,7 +197,10 @@ func TestAutomaticDiscoveryWithoutBrowser(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		d := mustGet(t, c, "automatic")
-		if d.Discovery.Version == 2 {
+		if d.Discovery.Pending != nil {
+			if d.Discovery.Version != 1 {
+				t.Fatal("automatic scan applied changes without approval")
+			}
 			cancel()
 			<-done
 			return

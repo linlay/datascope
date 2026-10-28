@@ -80,3 +80,27 @@ func TestMissingSecretFailsBeforeNetwork(t *testing.T) {
 		t.Fatalf("missing secret: %v", err)
 	}
 }
+
+func TestDefaultPortsAndCredentialReferences(t *testing.T) {
+	for driver, port := range map[string]int{"mysql": 3306, "postgresql": 5432, "oracle": 1521, "dameng": 5236} {
+		input := validConnection(driver)
+		input.Port = 0
+		input.PasswordEnv = ""
+		input.CredentialID = "db_auto"
+		output := ConnectionDefaults(driver, &input)
+		if output.Port != port || input.Port != 0 {
+			t.Fatalf("%s default port or request immutability failed", driver)
+		}
+		if err := ValidateConnection(driver, output); err != nil {
+			t.Fatal(err)
+		}
+		output.Port = 12345
+		if ConnectionDefaults(driver, output).Port != 12345 {
+			t.Fatal("custom port overwritten")
+		}
+		output.PasswordEnv = "DATASCOPE_DB_PASSWORD"
+		if err := ValidateConnection(driver, output); err == nil {
+			t.Fatal("ambiguous credential sources accepted")
+		}
+	}
+}

@@ -10,7 +10,7 @@ const toolOptions = [
  { name:'read_knowledge',label:'按需读取知识',help:'通过 ID 读取业务知识正文，支持渐进式披露。' },
  { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
   { name: 'describe_table', label: '表结构', help: '查看指定表允许访问的字段、类型和访问方案。' },
-  { name: 'query', label: '权限查询', help: '只读查询，应用表、字段、行权限和返回行数限制。规则在“数据库访问策略”中配置。' },
+  { name: 'query', label: '权限查询', help: '只读查询，应用表、字段、行权限和返回行数限制。规则在“表配置与权限”中配置。' },
   { name: 'raw_query', label: '原始查询', admin: true, help: '绕过表、字段和行权限改写，仍保持只读。需要当前数据库的全量查询权限。' },
   { name: 'customer_scope', label: '客户范围', admin: true, help: '核对证券样例库的客户可见范围，需要当前数据库的全量查询权限。' },
 ];

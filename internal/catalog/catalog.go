@@ -4,6 +4,7 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -288,6 +289,41 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	return svc, nil
 }
 func (c *Catalog) Add(ctx context.Context, d Database) error {
+	_, err := c.Create(ctx, d, "")
+	return err
+}
+
+// Create generates a stable internal identity; callers only need a display name.
+func (c *Catalog) Create(ctx context.Context, d Database, password string) (*Database, error) {
+	if d.ID == "" {
+		raw := make([]byte, 12)
+		if _, err := rand.Read(raw); err != nil {
+			return nil, err
+		}
+		d.ID = fmt.Sprintf("db_%x", raw)
+	}
+	d.Connection = store.ConnectionDefaults(d.Driver, d.Connection)
+	if err := c.addDatabase(ctx, d, password); err != nil {
+		return nil, err
+	}
+	return c.Get(d.ID)
+}
+
+func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) error {
+	var credentials []management.DatabaseCredential
+	if password != "" {
+		if c.Management == nil {
+			return fmt.Errorf("直接输入密码需要使用管理数据库")
+		}
+		if d.Driver == "sqlite" || d.Connection == nil {
+			return fmt.Errorf("仅网络数据库接受连接密码")
+		}
+		if d.Connection.PasswordEnv != "" || d.Connection.CredentialID != "" {
+			return fmt.Errorf("请只提供一种数据库密码来源")
+		}
+		d.Connection.CredentialID = d.ID
+	}
+
 	if d.Authentication == nil && c.Management != nil {
 		d.Authentication = &Authentication{Type: "local", Label: d.Name + "业务账号"}
 	}
@@ -317,7 +353,13 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	} else if d.Path != "" {
 		return fmt.Errorf("网络数据库不能设置 path")
 	}
-	st, err := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+	var st *store.Store
+	var err error
+	if password != "" {
+		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.Timeout)
+	} else {
+		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+	}
 	if err != nil {
 		return err
 	}
@@ -333,6 +375,13 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 	d.Tools = []string{}
 	d.Revision = 1
 	d.AuthenticationRevision = 1
+	if password != "" {
+		sealed, err := c.Management.SealDatabaseCredential(d.ID, password)
+		if err != nil {
+			return err
+		}
+		credentials = append(credentials, sealed)
+	}
 	return c.updateContext(ctx, "database.create", d.ID, func(items *[]Database) error {
 		for _, item := range *items {
 			if item.ID == d.ID {
@@ -341,7 +390,7 @@ func (c *Catalog) Add(ctx context.Context, d Database) error {
 		}
 		*items = append(*items, d)
 		return nil
-	})
+	}, credentials...)
 }
 func (c *Catalog) Save(ctx context.Context, d Database) error {
 	if err := d.ValidateAuthentication(); err != nil {
@@ -394,9 +443,9 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 func (c *Catalog) update(fn func(*[]Database) error) error {
 	return c.updateContext(context.Background(), "database.import", "", fn)
 }
-func (c *Catalog) updateContext(ctx context.Context, action, database string, fn func(*[]Database) error) error {
+func (c *Catalog) updateContext(ctx context.Context, action, database string, fn func(*[]Database) error, credentials ...management.DatabaseCredential) error {
 	if c.Management != nil {
-		return c.updateSQLite(ctx, action, database, fn)
+		return c.updateSQLite(ctx, action, database, fn, credentials...)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

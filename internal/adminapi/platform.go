@@ -130,15 +130,15 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 			in := application.Input{}
 			if r.Method == "POST" {
 				action = "create_database"
-				var raw json.RawMessage
-				if !decode(w, r, &raw) {
+				var create struct {
+					catalog.Database
+					Password string `json:"password"`
+				}
+				if !decode(w, r, &create) {
 					return
 				}
-				in.Database = newDatabase()
-				if e = json.Unmarshal(raw, in.Database); e != nil {
-					platformError(w, e)
-					return
-				}
+				in.Database = &create.Database
+				in.Password = create.Password
 			} else if r.Method != "GET" {
 				http.NotFound(w, r)
 				return

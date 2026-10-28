@@ -4,25 +4,25 @@ import zhCN from 'antd/locale/zh_CN';
 import { DiscoveryPage } from './pages/Discovery';
 import { DataBrowser } from './pages/DataBrowser';
 import { McpManagement } from './pages/McpManagement';
-import { DatabaseManager } from './pages/DatabaseManager';
+import { DatabaseSettings } from './pages/DatabaseSettings';
 import { databases, selectDatabase, selectedDatabase, type Database } from './api';
 import { SqlWorkbench } from './pages/SqlWorkbench';
-import { AccessPage, AuditPage, KnowledgePage } from './pages/PlatformPages';
+import { KnowledgePage } from './pages/PlatformPages';
 import { useAuth } from './Auth';
 import { ConnectionFields } from './components/ConnectionFields';
 
-type Page = 'discovery' | 'table' | 'sql' | 'policies' | 'mcp' | 'access' | 'audit' | 'knowledge';
+type Page = 'database' | 'tables' | 'knowledge' | 'sql' | 'table' | 'mcp';
 
-interface Route {
-  page: Page;
-  table?: string;
-}
-
-function parseHash(): Route {
-  const [path] = window.location.hash.replace(/^#\/?/, '').split('?');
-  const [page, table] = path.split('/');
-  if (page === 'discovery' || page === 'sql' || page === 'policies' || page === 'mcp' || page === 'access' || page === 'audit' || page === 'knowledge') return { page };
-  return { page: page === 'table' || table ? 'table' : 'policies', table: table ? decodeURIComponent(table) : undefined };
+interface Route { page:Page;table?:string;tab?:string }
+function parseHash():Route{
+ const [path,query]=window.location.hash.replace(/^#\/?/,'').split('?');
+ const [page,table]=path.split('/');
+ if(page==='discovery'||page==='policies')return {page:'tables'};
+ if(page==='access'||page==='audit')return {page:'database',tab:page==='access'?'users':'audit'};
+ if(page==='database')return {page,tab:new URLSearchParams(query).get('tab')??undefined};
+ if(page==='tables'||page==='knowledge'||page==='sql'||page==='mcp')return {page};
+ if(page==='table'||table)return {page:'table',table:table?decodeURIComponent(table):undefined};
+ return {page:'database'};
 }
 
 function useDarkMode() {
@@ -75,13 +75,7 @@ function buildTheme(dark: boolean): ThemeConfig {
   };
 }
 
-const titles: Record<Page, string> = {
- discovery:'数据库侦查',access:'用户与授权',audit:'日志审计',knowledge:'业务知识',
-  sql: 'SQL控制台',
-  table: '表数据',
-  policies: '数据库访问策略',
-  mcp: 'MCP 配置与测试',
-};
+const titles:Record<Page,string>={database:'库配置',tables:'表配置与权限',knowledge:'业务知识',sql:'SQL 控制台',table:'表数据',mcp:'MCP 配置'};
 
 export function App() {
  const {user,logout}=useAuth();
@@ -101,16 +95,16 @@ export function App() {
  useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) switchDB(items[0].id);},[items,dbID]);
  const connectionValues=async()=>{
  const values=await form.validateFields();
- if(values.driver==='sqlite') return {id:values.id,name:values.name,driver:values.driver,path:values.path};
+ if(values.driver==='sqlite') return {name:values.name,driver:values.driver,path:values.path};
  const connection={...values.connection};if(values.driver==='mysql') connection.schema=connection.database;
- return {id:values.id,name:values.name,driver:values.driver,connection};
+ return {name:values.name,driver:values.driver,connection,password:values.password};
  };
  const testConnection=async()=>{
   try { const values=await connectionValues();setTesting(true);setError(undefined);setTestResult(undefined);const result=await databases.test(values);setTestResult(`连接成功，发现 ${result.table_count} 张表。`); }
   catch(e) {if(e instanceof Error)setError(e.message);}finally{setTesting(false);}
  };
  const add=async()=>{
-  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();switchDB(d.id);window.location.hash='#/discovery';setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
+  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();switchDB(d.id);window.location.hash='#/tables';setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
   catch(e) { if(e instanceof Error) setError(e.message); } finally {setCreating(false);}
  };
 
@@ -132,8 +126,8 @@ export function App() {
 
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
- const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='access'?(user.system_admin||can('grant')):p==='audit'?can('audit.read'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):p==='mcp'?can('mcp.write'):can('config.read'));
- const activePage=!current&&user.system_admin?'access':visiblePages.includes(route.page)?route.page:visiblePages[0];
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='database'?(user.system_admin||can('config.read')||can('grant')||can('audit.read')):p==='tables'?can('config.read'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):can('mcp.write'));
+ const activePage=!current&&user.system_admin?'database':visiblePages.includes(route.page)?route.page:visiblePages[0];
  const openTable = (table: string, filter?: { col: string; val: string }) => {
     const qs = filter ? `?${new URLSearchParams({ col: filter.col, val: filter.val })}` : '';
     window.location.hash = `#/table/${encodeURIComponent(table)}${qs}`;
@@ -155,22 +149,20 @@ export function App() {
           />
         </Layout.Header>
         <Layout.Content className="app-content" key={dbID}>
- {activePage==='access'&&<AccessPage db={current} onSaved={()=>void refresh()}/>}
- {activePage==='audit'&&current&&<AuditPage databaseID={dbID}/>}
+ {activePage==='database'&&<DatabaseSettings db={current} tab={route.tab} onSaved={()=>void refresh()}/>}
  {activePage==='knowledge'&&current&&<KnowledgePage databaseID={dbID}/>}
  {!activePage&&<Alert type="info" title="当前账号尚未获得数据库权限，请联系系统管理员。"/>}
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
           {activePage === 'sql' && <SqlWorkbench permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
-          {activePage === 'discovery' && <DiscoveryPage id={dbID} onSaved={()=>{void refresh();}} />}
-          {activePage === 'policies' && <DatabaseManager id={dbID} onSaved={()=>{void refresh();}} />}
+          {activePage === 'tables' && <DiscoveryPage id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
       </Layout>
-      <Modal title="添加数据库" centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>setAdding(false)} onOk={add} confirmLoading={creating} okText="添加数据库" footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating}>测试连接</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
+      <Modal title="添加数据库" centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText="添加数据库" footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating}>测试连接</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
        {error && <Alert type="error" title={error}/>}
        {testResult&&<Alert type="success" title={testResult}/>}
-       <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><Form.Item name="id" label="数据库 ID" rules={[{required:true},{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/,message:'使用字母、数字、下划线或连字符，最多 64 位'}]}><Input placeholder="business"/></Form.Item><ConnectionFields form={form}/></Form>
+       <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label="显示名称" rules={[{required:true}]}><Input placeholder="例如：业务数据库"/></Form.Item><ConnectionFields form={form}/></Form>
        <p>添加后自动侦查全部表、字段与注释，生成映射和结构快照。选择开放范围后，再开启 MCP。</p>
       </Modal>
     </ConfigProvider>

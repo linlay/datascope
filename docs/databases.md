@@ -20,7 +20,7 @@
 
 ## 连接配置
 
-在管理界面点击“＋ 数据库”，选择类型，填写地址、端口、schema 和只读账号，再测试连接、添加。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
+在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
 
 每个数据源只登记一个 schema 的基础表；第一版不隐式开放视图、同义词、其他 schema 或跨数据库访问。逻辑表名不区分大小写；同一个 schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
 
@@ -30,15 +30,14 @@ MySQL 的 database 和 schema 填写相同值；PostgreSQL 分别指定 database
 
 ```json
 {
-  "id": "finance_dm",
   "name": "财务达梦库",
   "driver": "dameng",
+  "password": "实际数据库密码",
   "connection": {
     "host": "10.0.0.20",
     "port": 5236,
     "schema": "FINANCE",
-    "username": "DATASCOPE_READER",
-    "password_env": "DATASCOPE_DB_DAMENG_PASSWORD"
+    "username": "DATASCOPE_READER"
   }
 }
 ```
@@ -51,13 +50,15 @@ MySQL 的 database 和 schema 填写相同值；PostgreSQL 分别指定 database
 {"driver":"oracle","connection":{"host":"10.0.0.23","port":1521,"service_name":"FREEPDB1","schema":"BUSINESS","username":"DATASCOPE_READER","password_env":"DATASCOPE_DB_ORACLE_PASSWORD"}}
 ```
 
-密码只在两个服务进程的环境中提供，例如 `.env` 中的 `DATASCOPE_DB_DAMENG_PASSWORD='实际密码'`。配置记录、版本历史和 API 仅保存变量名。变量名必须以 `DATASCOPE_DB_` 开头；不能引用管理员密码等其他环境变量。通过 systemd EnvironmentFile 或容器 secret 注入时，也应在 API 和 MCP 进程设置同名同值。密码轮换后重启两个服务。
+管理端默认直接输入数据库密码。测试连接只在内存中使用密码，不保存；接入成功后以 AES-256-GCM 加密存入管理库的独立凭据表，与数据库配置同一事务提交。配置记录、版本、API/MCP 返回和审计只出现凭据引用，不包含明文密码或密文。API 与 MCP 读取同一管理库和旁边的 `management.sqlite.credentials.key`（实际文件名为 MANAGEMENT_DB_PATH 加 `.credentials.key`）；密钥首次使用时自动生成，文件权限为 0600，无需手工配置密码环境变量。备份与迁移必须同时保存管理库及密钥文件，密钥缺失时禁止重新生成并覆盖旧凭据。
+
+仍兼容已有 `connection.password_env` 方式，例如 `.env` 中的 `DATASCOPE_DB_DAMENG_PASSWORD='实际密码'`，API 和 MCP 注入同名同值后使用；不能引用管理员密码等其他环境变量。直接密码放在创建请求顶层的 `password`，与 `connection.password_env` 二选一，不能把密码放入 connection。客户端可省略 id 和 port，服务端生成 ID 并补齐对应默认端口；已有手工 ID 继续兼容。
 
 连接目标登记后固定，普通策略保存不会改变地址、schema、驱动或密码引用。更换目标或凭据引用时应新建数据源并重新配置权限，避免旧权限静默应用到另一套表。
 
 MySQL、PostgreSQL 默认启用证书与主机名校验；可信开发网络可显式设置 `tls_mode: "disable"`。PostgreSQL 额外允许 `require`（加密但不验证身份）。当前 Oracle/达梦适配器只提供 TCP 连接，尚未接入钱包、厂商加密或客户端证书配置；需要这些能力的环境应先完成对应适配再部署。达梦驱动日志关闭，不保存 DSN。
 
-未保存配置的连接测试使用管理动作 `test_database_connection`，参数为 `{database: {...}}`，仅限系统管理员。管理 MCP 对应 `datascope_inspect` 的 `connection.test`。已有数据源继续使用 `database.test_connection`。
+未保存配置的连接测试使用管理动作 `test_database_connection`，参数为 `{database: {...}, password: "实际密码"}`（使用环境变量方式时不传 password），仅限系统管理员。管理 MCP 对应 `datascope_inspect` 的 `connection.test`。已有数据源继续使用 `database.test_connection`。
 
 ## SQL 与权限改写范围
 

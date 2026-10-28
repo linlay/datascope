@@ -196,14 +196,16 @@ export function selectDatabase(id: string) {
 }
 export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
 export interface DatabaseConnection {
- host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env:string; tls_mode?:string;
+ host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
 }
-export interface NewDatabase {id:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
+export interface NewDatabase {id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
 export interface Annotation { display_name: string; comment: string | null }
 export interface TableAnnotation extends Annotation { columns: Record<string, Annotation> }
 export interface SchemaChange { table:string; column?:string; kind:'added'|'removed'|'modified'; property:string; before:string; after:string; manual?:string; conflict:boolean }
 export interface SchemaReport { version:number; at:string; changes:SchemaChange[] }
-export interface Discovery { version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
+export interface AnnotationResolution {table:string;column?:string;follow_source:boolean}
+export interface PendingDiscovery {id:string;base_version:number;detected_at:string;tables:TableSchema[];changes:SchemaChange[]}
+export interface Discovery { pending?:PendingDiscovery;version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
 export interface Database {
  discovery?:Discovery;
  connection?:DatabaseConnection;
@@ -215,10 +217,11 @@ export interface Database {
 }
 export const databases = {
  list: () => request<Database[]>('/api/databases'),
+ applyDiscovery: (id:string,candidate:string,revision:number,resolutions:AnnotationResolution[]) => managementCall<Database>('apply_discovery',{database_id:id,id:candidate,revision,resolutions}),
  discover: (id:string) => managementCall<Database>('discover_database',{database_id:id}),
  annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
- test: (body: NewDatabase) => managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database:body}),
+ test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database,password});},
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
  save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify({...body,discovery:undefined})}),
 };

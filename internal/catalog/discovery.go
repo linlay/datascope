@@ -34,6 +34,7 @@ type SchemaReport struct {
 }
 
 type Discovery struct {
+	Pending     *PendingDiscovery                `json:"pending,omitempty" yaml:"pending,omitempty"`
 	Version     int                              `json:"version" yaml:"version"`
 	CheckedAt   time.Time                        `json:"checked_at" yaml:"checked_at"`
 	AttemptedAt time.Time                        `json:"attempted_at" yaml:"attempted_at"`
@@ -85,7 +86,20 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 			return nil, err
 		}
 	}
-	st, err := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+	var st *store.Store
+	var err error
+	if d.Connection != nil && d.Connection.CredentialID != "" {
+		if c.Management == nil || d.Connection.CredentialID != d.ID {
+			return nil, errors.New("数据库凭据引用无效")
+		}
+		password, e := c.Management.DatabasePassword(ctx, d.ID)
+		if e != nil {
+			return nil, e
+		}
+		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.Timeout)
+	} else {
+		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +261,9 @@ func (c *Catalog) Discover(ctx context.Context, id string) (*Database, error) {
 	if err != nil {
 		return nil, err
 	} // A partial or failed scan never replaces a good snapshot.
+	if d.Discovery != nil && d.Discovery.Version > 0 {
+		return c.stageDiscovery(ctx, d, tables)
+	}
 	err = c.updateContext(ctx, "database.discover", id, func(items *[]Database) error {
 		for i := range *items {
 			current := &(*items)[i]

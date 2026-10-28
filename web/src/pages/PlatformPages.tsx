@@ -3,7 +3,7 @@ import { Alert, Button, Card, Checkbox, Form, Input, InputNumber, Modal, Select,
 import { managementCall, type Database } from '../api';
 import { useAuth, type PlatformUser } from '../Auth';
 import { BusinessAccounts } from './BusinessAccounts';
-const permissionLabels:Record<string,string>={'config.read':'查看配置','config.write':'修改名称','policy.write':'修改访问策略','mcp.write':'配置 MCP','knowledge.read':'读取业务知识','knowledge.write':'管理业务知识',query:'权限查询',raw_query:'全量只读查询','audit.read':'查看审计',grant:'分配权限',impersonate:'模拟业务身份'};
+const permissionLabels:Record<string,string>={'config.read':'查看配置','config.write':'修改库配置与说明','policy.write':'修改访问策略','mcp.write':'配置 MCP','knowledge.read':'读取业务知识','knowledge.write':'管理业务知识',query:'权限查询',raw_query:'全量只读查询','audit.read':'查看审计',grant:'分配权限',impersonate:'模拟业务身份'};
 interface Grant{user_id:number;database_id:string;permissions:string[];business_user_id:number}
 export function AccessPage({db,onSaved}:{db?:Database;onSaved:()=>void}){
  const {user}=useAuth();const [users,setUsers]=useState<PlatformUser[]>([]);const [grants,setGrants]=useState<Grant[]>([]);const [error,setError]=useState<string>();const [adding,setAdding]=useState(false);const [editing,setEditing]=useState(false);const [busy,setBusy]=useState(false);const [form]=Form.useForm();const [grantForm]=Form.useForm();

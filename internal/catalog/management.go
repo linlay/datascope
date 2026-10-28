@@ -52,6 +52,18 @@ func (c *Catalog) listSQLite(ctx context.Context) ([]Database, error) {
 		}
 		statuses[r.Key] = check
 	}
+	pendingRecords, e := c.Management.Records(ctx, "discovery_pending")
+	if e != nil {
+		return nil, e
+	}
+	pending := map[string]*PendingDiscovery{}
+	for _, r := range pendingRecords {
+		var p *PendingDiscovery
+		if e := json.Unmarshal([]byte(r.Data), &p); e != nil {
+			return nil, e
+		}
+		pending[r.Key] = p
+	}
 	out := []Database{}
 	for _, r := range records {
 		var d Database
@@ -66,11 +78,15 @@ func (c *Catalog) listSQLite(ctx context.Context) ([]Database, error) {
 			d.Discovery.AttemptedAt = check.AttemptedAt
 			d.Discovery.Error = check.Error
 		}
+		if p := pending[d.ID]; p != nil && d.Discovery != nil && p.BaseVersion == d.Discovery.Version {
+			p.Changes = schemaDiff(d.Discovery.Tables, p.Tables, d.Discovery.Annotations)
+			d.Discovery.Pending = p
+		}
 		out = append(out, d)
 	}
 	return out, nil
 }
-func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn func(*[]Database) error) error {
+func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn func(*[]Database) error, credentials ...management.DatabaseCredential) error {
 	return c.Management.UpdateRecords(ctx, "databases", action, database, func(records []management.Record) ([]management.Record, error) {
 		items := []Database{}
 		for _, r := range records {
@@ -106,5 +122,5 @@ func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn 
 			out = append(out, management.Record{Key: d.ID, Data: string(raw)})
 		}
 		return out, nil
-	})
+	}, credentials...)
 }

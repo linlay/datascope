@@ -23,29 +23,30 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
-	Table          string                      `json:"table,omitempty"`
-	Column         string                      `json:"column,omitempty"`
-	Annotation     *store.Annotation           `json:"annotation,omitempty"`
-	Account        *management.BusinessAccount `json:"account,omitempty"`
-	DatabaseID     string                      `json:"database_id,omitempty"`
-	UserID         int64                       `json:"user_id,omitempty"`
-	Username       string                      `json:"username,omitempty"`
-	Name           string                      `json:"name,omitempty"`
-	Password       string                      `json:"password,omitempty"`
-	Database       *catalog.Database           `json:"database,omitempty"`
-	Permissions    []string                    `json:"permissions,omitempty"`
-	BusinessUserID int64                       `json:"business_user_id,omitempty"`
-	SQL            string                      `json:"sql,omitempty"`
-	Query          string                      `json:"query,omitempty"`
-	ID             string                      `json:"id,omitempty"`
-	Summary        string                      `json:"summary,omitempty"`
-	Content        string                      `json:"content,omitempty"`
-	Tables         []string                    `json:"tables,omitempty"`
-	Published      bool                        `json:"published,omitempty"`
-	Revision       int                         `json:"revision,omitempty"`
-	Limit          int                         `json:"limit,omitempty"`
-	Offset         int                         `json:"offset,omitempty"`
-	RequestID      string                      `json:"request_id,omitempty"`
+	Resolutions    []catalog.AnnotationResolution `json:"resolutions,omitempty"`
+	Table          string                         `json:"table,omitempty"`
+	Column         string                         `json:"column,omitempty"`
+	Annotation     *store.Annotation              `json:"annotation,omitempty"`
+	Account        *management.BusinessAccount    `json:"account,omitempty"`
+	DatabaseID     string                         `json:"database_id,omitempty"`
+	UserID         int64                          `json:"user_id,omitempty"`
+	Username       string                         `json:"username,omitempty"`
+	Name           string                         `json:"name,omitempty"`
+	Password       string                         `json:"password,omitempty"`
+	Database       *catalog.Database              `json:"database,omitempty"`
+	Permissions    []string                       `json:"permissions,omitempty"`
+	BusinessUserID int64                          `json:"business_user_id,omitempty"`
+	SQL            string                         `json:"sql,omitempty"`
+	Query          string                         `json:"query,omitempty"`
+	ID             string                         `json:"id,omitempty"`
+	Summary        string                         `json:"summary,omitempty"`
+	Content        string                         `json:"content,omitempty"`
+	Tables         []string                       `json:"tables,omitempty"`
+	Published      bool                           `json:"published,omitempty"`
+	Revision       int                            `json:"revision,omitempty"`
+	Limit          int                            `json:"limit,omitempty"`
+	Offset         int                            `json:"offset,omitempty"`
+	RequestID      string                         `json:"request_id,omitempty"`
 }
 type Knowledge struct {
 	ID         string   `json:"id"`
@@ -160,12 +161,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Database == nil {
 			return nil, errors.New("需要 database 参数")
 		}
-		e := s.Catalog.Add(ctx, *in.Database)
-		if e != nil {
-			return nil, e
-		}
-
-		d, e := s.Catalog.Get(in.Database.ID)
+		d, e := s.Catalog.Create(ctx, *in.Database, in.Password)
 		if e != nil {
 			return nil, e
 		}
@@ -230,7 +226,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
-	case "get_discovery", "discover_database", "save_annotation":
+	case "get_discovery", "discover_database", "apply_discovery", "save_annotation":
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
@@ -246,6 +242,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			d, e = s.Catalog.Get(in.DatabaseID)
 		case "discover_database":
 			d, e = s.Catalog.Discover(ctx, in.DatabaseID)
+		case "apply_discovery":
+			if e := require("policy.write"); e != nil {
+				return nil, e
+			}
+			d, e = s.Catalog.ApplyDiscovery(ctx, in.DatabaseID, in.ID, in.Revision, in.Resolutions)
 		case "save_annotation":
 			if in.Annotation == nil {
 				return nil, errors.New("需要 annotation 参数")
@@ -263,13 +264,29 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Database == nil {
 			return nil, errors.New("需要 database 参数")
 		}
-		d := in.Database
+		d := *in.Database
+		d.Connection = store.ConnectionDefaults(d.Driver, d.Connection)
+		if in.Password != "" {
+			if d.Driver == "sqlite" || d.Connection == nil {
+				return nil, errors.New("仅网络数据库接受连接密码")
+			}
+			if d.Connection.PasswordEnv != "" || d.Connection.CredentialID != "" {
+				return nil, errors.New("请只提供一种数据库密码来源")
+			}
+			d.Connection.CredentialID = "probe"
+		}
 		if d.Driver == "sqlite" {
 			if e := s.Management.ValidatePath(d.Path); e != nil {
 				return nil, e
 			}
 		}
-		st, e := store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.Timeout)
+		var st *store.Store
+		var e error
+		if in.Password != "" {
+			st, e = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, in.Password, s.Catalog.Timeout)
+		} else {
+			st, e = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.Timeout)
+		}
 		if e != nil {
 			return nil, e
 		}
@@ -287,11 +304,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
-		svc, e := s.Catalog.Open(ctx, d)
+		st, e := s.Catalog.OpenStore(ctx, d)
 		if e != nil {
 			return nil, e
 		}
-		svc.Store.Close()
+		st.Close()
 		return map[string]bool{"connected": true}, nil
 	case "save_database":
 

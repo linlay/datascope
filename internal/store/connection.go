@@ -20,17 +20,42 @@ import (
 	ora "github.com/sijms/go-ora/v2"
 )
 
-// Connection contains no credentials. Both server processes resolve PasswordEnv
-// locally; secrets never enter database records, history, HTTP or MCP responses.
+// Connection contains references only. Passwords are resolved by the catalog
+// from the encrypted credential store, or from legacy environment variables.
 type Connection struct {
-	Host        string `json:"host" yaml:"host"`
-	Port        int    `json:"port" yaml:"port"`
-	Database    string `json:"database,omitempty" yaml:"database,omitempty"`
-	ServiceName string `json:"service_name,omitempty" yaml:"service_name,omitempty"`
-	Schema      string `json:"schema" yaml:"schema"`
-	Username    string `json:"username" yaml:"username"`
-	PasswordEnv string `json:"password_env" yaml:"password_env"`
-	TLSMode     string `json:"tls_mode,omitempty" yaml:"tls_mode,omitempty"`
+	Host         string `json:"host" yaml:"host"`
+	Port         int    `json:"port" yaml:"port"`
+	Database     string `json:"database,omitempty" yaml:"database,omitempty"`
+	ServiceName  string `json:"service_name,omitempty" yaml:"service_name,omitempty"`
+	Schema       string `json:"schema" yaml:"schema"`
+	Username     string `json:"username" yaml:"username"`
+	PasswordEnv  string `json:"password_env,omitempty" yaml:"password_env,omitempty"`
+	CredentialID string `json:"credential_id,omitempty" yaml:"credential_id,omitempty"`
+	TLSMode      string `json:"tls_mode,omitempty" yaml:"tls_mode,omitempty"`
+}
+
+var credentialID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+func DefaultPort(driver string) int {
+	return map[string]int{"mysql": 3306, "postgresql": 5432, "oracle": 1521, "dameng": 5236}[driver]
+}
+
+// ConnectionDefaults copies input so normalization cannot mutate a request or stored record.
+func ConnectionDefaults(driver string, c *Connection) *Connection {
+	if c == nil {
+		return nil
+	}
+	out := *c
+	if out.Port == 0 {
+		out.Port = DefaultPort(driver)
+	}
+	if driver == "mysql" && out.Schema == "" {
+		out.Schema = out.Database
+	}
+	if driver == "postgresql" && out.Schema == "" {
+		out.Schema = "public"
+	}
+	return &out
 }
 
 var passwordEnvName = regexp.MustCompile(`^DATASCOPE_DB_[A-Z0-9_]+$`)
@@ -51,7 +76,11 @@ func ValidateConnection(driver string, c *Connection) error {
 	if strings.TrimSpace(c.Host) == "" || strings.ContainsAny(c.Host, "/\\?#@\x00\r\n") || c.Port < 1 || c.Port > 65535 || c.Username == "" || c.Schema == "" {
 		return errors.New("需要合法 host、port、username 和 schema")
 	}
-	if !passwordEnvName.MatchString(c.PasswordEnv) {
+	if c.CredentialID != "" {
+		if c.PasswordEnv != "" || !credentialID.MatchString(c.CredentialID) {
+			return errors.New("数据库密码来源无效")
+		}
+	} else if !passwordEnvName.MatchString(c.PasswordEnv) {
 		return errors.New("password_env 必须为 DATASCOPE_DB_ 开头的大写环境变量名称")
 	}
 	if driver == "mysql" && (c.Database == "" || c.Database != c.Schema) {
@@ -95,13 +124,35 @@ func OpenConnection(ctx context.Context, driver, path string, c *Connection, tim
 	if driver == "sqlite" {
 		return Open(path, timeout)
 	}
-	if path != "" {
-		return nil, errors.New("网络数据库不能设置 path")
+	if c.CredentialID != "" {
+		return nil, errors.New("已保存的数据库密码需要通过管理凭据存储读取")
 	}
 	password, ok := os.LookupEnv(c.PasswordEnv)
 	if !ok || password == "" {
 		return nil, fmt.Errorf("服务端未配置密码环境变量 %s", c.PasswordEnv)
 	}
+	return OpenConnectionWithPassword(ctx, driver, path, c, password, timeout)
+}
+
+// OpenConnectionWithPassword uses a request-scoped password. It never persists
+// it or includes it in connection errors. The reference is validated separately.
+func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Connection, password string, timeout time.Duration) (*Store, error) {
+	if err := ValidateConnection(driver, c); err != nil {
+		return nil, err
+	}
+	if driver == "sqlite" {
+		if password != "" {
+			return nil, errors.New("SQLite 不接受连接密码")
+		}
+		return Open(path, timeout)
+	}
+	if path != "" {
+		return nil, errors.New("网络数据库不能设置 path")
+	}
+	if len(password) == 0 || len(password) > 16384 {
+		return nil, errors.New("需要数据库密码，最多 16384 字节")
+	}
+
 	if timeout <= 0 {
 		timeout = DefaultQueryTimeout
 	}

@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- |
 | datascope_query | database | list | 无 | 返回当前用户有权限的数据库 |
 | datascope_query | database | get | database_id | config.read |
-| datascope_manage | database | create | database | databases.create |
+| datascope_manage | database | create | database；可选 password | databases.create |
 | datascope_manage | database | update | database_id、database | config.read + config.write，仅改名称 |
 | datascope_manage | database | save | database_id、database | config.read + 实际变更部分的权限 |
 | datascope_manage | mcp | save | database_id、database | config.read + mcp.write |
@@ -26,7 +26,7 @@
 
 读取结果将数据库字段直接放在返回对象顶层，并附带 mcp_endpoint、permissions、business_user_id。构造 `args.database` 时只复制数据库字段：id、name、driver、path、connection、mcp_enabled、mcp_path、tools、business_tools、config、revision，以及返回时存在的 etag。不要把整份返回对象直接作为 database 传回。
 
-创建数据库只需传 `database:{id,name,driver:"sqlite",path}`，path 是 DataScope 服务端已有 SQLite 文件的路径，必须在服务端允许的数据根内。客户端本机路径不一定属于服务端。创建后服务端生成策略，默认关闭 MCP、禁用所有表、清空基础工具；回读实际配置再准备策略，不能假设传入策略已生效。
+创建数据库只需传 `database:{name,driver:"sqlite",path}，id 可省略，由服务端自动生成`，path 是 DataScope 服务端已有 SQLite 文件的路径，必须在服务端允许的数据根内。客户端本机路径不一定属于服务端。创建后服务端生成策略，默认关闭 MCP、禁用所有表、清空基础工具；回读实际配置再准备策略，不能假设传入策略已生效。
 
 已有数据库修改时，database.id 必须等于 database_id，database.revision 必须是最近回读的正整数版本。update 只采用 database.name；mcp.save 只采用 database 中的 mcp_enabled、mcp_path、tools、business_tools；policy.save 见策略文档。其他字段不随局部动作修改。使用完整 database.save 时保留当前配置，服务端按名称、策略、MCP 部分的实际差异逐项检查 config.write/policy.write/mcp.write；文件路径与驱动保持原值。
 
@@ -34,7 +34,7 @@
 
 业务工具使用 business_tools 数组，每项为 `{name,description,sql,parameters}`。parameters 为参数名到 `{type,description}` 的映射；type 为 string/integer/number/boolean，SQL 使用 `:arg_参数名` 绑定，每个声明参数都必须被使用。业务 SQL 继续受服务端改写约束。
 
-保存后重新 database.get 核对 revision 和目标字段。test_connection 检查保存配置下的连接和策略，不证明 OAuth 登录、所有业务 SQL 或数据库 MCP 均可用。管理地址的授权不能复用于数据库地址。
+保存后重新 database.get 核对 revision 和目标字段。test_connection 检查保存配置下的数据库连接，不证明 OAuth 登录、所有业务 SQL 或数据库 MCP 均可用。管理地址的授权不能复用于数据库地址。
 
 
 数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；或显式选择 `{type:"platform"}` 保留旧平台账号兼容模式。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。local 模式每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。
@@ -42,9 +42,9 @@
 
 ## 网络数据库
 
-支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、port、schema、username、password_env；MySQL/PG 还需 database，Oracle 需 service_name。MySQL schema 与 database 相同。password_env 必须为服务端 DATASCOPE_DB_ 开头的大写环境变量名称，禁止传入密码或 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
+支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、schema、username；port 可省略，自动采用对应默认端口；MySQL/PG 还需 database，Oracle 需 service_name。MySQL schema 与 database 相同。密码可直接通过 args.password 传入，服务端加密保存；不要将密码放入 database 或 connection。旧 connection.password_env 继续兼容，必须为 DATASCOPE_DB_ 开头的大写变量名。两种密码来源二选一，禁止 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
 
-未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{id,name,driver,connection}}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。connection 与驱动/目标登记后固定；保存策略需保留读取到的连接配置。
+未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{name,driver,connection},password:"实际密码"}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。connection 与驱动/目标登记后固定；保存策略需保留读取到的连接配置。
 
 网络查询与模板使用受限 SELECT 子集。策略中的 main.表名映射到配置的 schema；不支持的语法会拒绝，不能绕过改写执行原 SQL。详细范围见仓库 docs/databases.md。
 
@@ -53,7 +53,8 @@
 新建数据源自动提取全部表和字段并建立快照，全部表默认禁止、字段为当前显式白名单。管理 API 默认每 5 分钟自动检查结构变化；DISCOVERY_INTERVAL=0s 可关闭。扫描只读源库，不复制业务数据。表内容继续使用后台分页浏览。
 
 - 读取：`datascope_query`，action=`get`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。返回数据库配置、discovery.tables 原始结构、annotations 人工覆盖和 reports 最近 20 次结构变化报告。
-- 扫描并采用新结构：`datascope_manage`，action=`refresh`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。需要 config.read + config.write；扫描失败保留旧快照。新增表关闭，字段白名单不自动扩张，显式 wildcard 则保留原选择。
+- 检查结构变化：`datascope_manage`，action=`refresh`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。需要 config.read + config.write；返回 discovery.pending 候选及 changes；没有确认前不改变结构或权限。扫描失败保留旧快照。
+- 确认更新：`datascope_manage`，action=`apply`，args=`{"resourceType":"discovery","database_id":"目标 ID","id":"pending.id","revision":当前配置版本,"resolutions":[{"table":"表名","column":"字段名","follow_source":true}]}`。需要 config.read + config.write + policy.write。resolutions 可省略，默认保留人工说明；follow_source=true 对对应注释采用数据库新值。确认前必须向用户展示对比并获得确认；服务端重新检查源结构，拒绝过期候选。新增表关闭、字段白名单不自动扩张。
 - 保存映射：`datascope_manage`，action=`save`，args=`{"resourceType":"annotation","database_id":"目标 ID","table":"物理表名","column":"物理字段名","revision":当前数据库版本,"annotation":{"display_name":"展示名称","comment":"人工说明"}}`。column 省略或为空表示表。comment=null 表示跟随源注释，comment="" 表示明确清空说明。需要 config.read + config.write；整项替换当前对象的映射，保留既有值时需带回 display_name 和 comment。
 
 结构快照和人工覆盖不能通过 database.save 修改。扫描会保留人工覆盖，源注释变化导致冲突时展示旧值、新值和人工值；取消该项 comment 覆盖即可采用数据库新说明。扫描不自动修复行过滤 SQL 或业务工具，也不比较业务记录内容。

@@ -53,3 +53,28 @@ func TestExplicitEmptyReplacementValues(t *testing.T) {
 		t.Fatalf("replacement values lost: %s %+v %v", action, out, err)
 	}
 }
+
+func TestCreationAndConnectionTestAcceptPasswordWithoutAnID(t *testing.T) {
+	for _, tool := range []string{"datascope_manage", "datascope_inspect"} {
+		action, resource := "create", "database"
+		if tool == "datascope_inspect" {
+			action, resource = "test", "connection"
+		}
+		var in input
+		raw := map[string]any{"action": action, "args": map[string]any{"resourceType": resource, "password": "database-password", "database": map[string]any{"name": "业务数据库", "driver": "mysql", "connection": map[string]any{"host": "db.local", "database": "business", "username": "reader"}}}}
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(encoded, &in); err != nil {
+			t.Fatal(err)
+		}
+		_, out, err := decode(tool, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Database.ID != "" || out.Password != "database-password" {
+			t.Fatal("generated identity or password input was lost")
+		}
+	}
+}
