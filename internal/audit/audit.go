@@ -79,7 +79,7 @@ func Open(path string) (*Store, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, actor_id INTEGER NOT NULL, database_id TEXT NOT NULL, kind TEXT NOT NULL, started_at TEXT NOT NULL, data TEXT NOT NULL); CREATE INDEX IF NOT EXISTS audit_database_time ON audit_events(database_id,started_at); CREATE INDEX IF NOT EXISTS audit_request ON audit_events(request_id);`)
+	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, actor_id INTEGER NOT NULL, database_id TEXT NOT NULL, kind TEXT NOT NULL, started_at TEXT NOT NULL, data TEXT NOT NULL); CREATE INDEX IF NOT EXISTS audit_database_time ON audit_events(database_id,started_at); CREATE INDEX IF NOT EXISTS audit_request ON audit_events(request_id); CREATE INDEX IF NOT EXISTS audit_actor_time ON audit_events(actor_id,started_at); CREATE INDEX IF NOT EXISTS audit_kind_time ON audit_events(kind,started_at);`)
 	if e != nil {
 		db.Close()
 		return nil, e
@@ -139,35 +139,11 @@ func (s *Store) Finish(e *Event, err error) error {
 	return fmt.Errorf("审计完成记录写入失败: %w", last)
 }
 func (s *Store) List(ctx context.Context, database, request string, limit, offset int) ([]Event, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 100
+	page, err := s.search(ctx, Filter{DatabaseID: database, RequestID: request, Limit: limit, Offset: offset}, false)
+	if err != nil {
+		return nil, err
 	}
-	if offset < 0 {
-		offset = 0
-	}
-	rows, e := s.db.QueryContext(ctx, `SELECT data FROM audit_events WHERE (?='' OR database_id=?) AND (?='' OR request_id=?) ORDER BY started_at DESC,id DESC LIMIT ? OFFSET ?`, database, database, request, request, limit, offset)
-	if e != nil {
-		return nil, e
-	}
-	defer rows.Close()
-	out := []Event{}
-	for rows.Next() {
-		var raw string
-		var ev Event
-		if e = rows.Scan(&raw); e != nil {
-			return nil, e
-		}
-		if e = json.Unmarshal([]byte(raw), &ev); e != nil {
-			return nil, e
-		}
-		if ev.Status == "running" {
-			if started, e := time.Parse(time.RFC3339Nano, ev.StartedAt); e == nil && time.Since(started) > 2*time.Minute {
-				ev.Status = "unknown"
-			}
-		}
-		out = append(out, ev)
-	}
-	return out, rows.Err()
+	return page.Items, nil
 }
 func Join(err, other error) error { return errors.Join(err, other) }
 

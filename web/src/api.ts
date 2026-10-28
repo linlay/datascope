@@ -285,6 +285,10 @@ export const api = {
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
 
+export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
+export interface AuditFilters {database_id?:string;platform_only?:boolean;request_id?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;query?:string;started_from?:string;started_to?:string}
+export interface AuditResult {items:AuditEvent[];total:number;limit:number;offset:number;kinds:string[];sources:string[];actors:number[];actor_names:Record<string,string>}
+
 // Global platform endpoints must never be rewritten into a selected database path.
 export async function platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
  const response=await fetch(path,{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});

@@ -1,3 +1,4 @@
+import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
 import { Alert, Card, Col, Collapse, Descriptions, Row, Segmented, Space, Switch, Table, Tag, Typography } from 'antd';
 import { api, type PoliciesResponse, type PolicyView, type Scheme } from '../api';
@@ -6,26 +7,28 @@ import { SchemeTag, SqlBlock } from '../components/shared';
 const { Paragraph, Text } = Typography;
 
 function RuleDetail({ policy }: { policy: PolicyView }) {
+ const t=useI18n();
   if (policy.passthrough) {
-    return <Text type="secondary">passthrough: true，不改写，仅补全为 main.{policy.table}。</Text>;
+    return <Text type="secondary">{t("passthrough: true，不改写，仅补全为 main.")}{policy.table}。</Text>;
   }
   return (
     <Space orientation="vertical" style={{ width: '100%' }}>
-      <Text strong>配置（YAML 原文）</Text>
+      <Text strong>{t("配置（YAML 原文）")}</Text>
       <SqlBlock sql={policy.sql ?? ''} format={false} />
       {policy.deny_unless && (
         <>
-          <Text strong>deny_unless（执行前求值，为假时拒绝：{policy.deny_message}）</Text>
+          <Text strong>{t("deny_unless（执行前求值，为假时拒绝：")}{policy.deny_message}）</Text>
           <SqlBlock sql={policy.deny_unless} format={false} />
         </>
       )}
-      <Text strong>展开片段后的 SQL（绑定变量：{policy.params.map((p) => `:${p}`).join('、')}）</Text>
+      <Text strong>{t("展开片段后的 SQL（绑定变量：")}{policy.params.map((p) => `:${p}`).join('、')}）</Text>
       <SqlBlock sql={policy.compiled_sql ?? ''} />
     </Space>
   );
 }
 
 export function Policies() {
+ const t=useI18n();
   const [data, setData] = useState<PoliciesResponse>();
   const [error, setError] = useState<string>();
   const [scheme, setScheme] = useState<Scheme | 'ALL'>('ALL');
@@ -45,12 +48,11 @@ export function Policies() {
       <Alert
         type="info"
         showIcon
-        message="改写原则：表结构确定，权限即确定"
+        message={t("改写原则：表结构确定，权限即确定")}
         description={
           <>
-            AI 生成的标准 SQL 进入 MCP server 后，FROM / JOIN 中的每张表都按配置替换为子查询，查询其余部分不变。规则来自{' '}
-            <Text code>{data.path}</Text>，用户上下文以绑定变量传入，不拼接进 SQL 文本。
-          </>
+            {t("AI 生成的标准 SQL 进入 MCP server 后，FROM / JOIN 中的每张表都按配置替换为子查询，查询其余部分不变。规则来自")}{' '}
+            <Text code>{data.path}</Text>{t("，用户上下文以绑定变量传入，不拼接进 SQL 文本。")}</>
         }
       />
       <Row gutter={[16, 16]}>
@@ -59,7 +61,7 @@ export function Policies() {
             <Card size="small" hoverable onClick={() => setScheme(s.scheme)} className={scheme === s.scheme ? 'card-active' : undefined}>
               <Space>
                 <SchemeTag scheme={s.scheme} />
-                <Text strong>{data.policies.filter((p) => p.scheme === s.scheme).length} 张表</Text>
+                <Text strong>{data.policies.filter((p) => p.scheme === s.scheme).length} {t("张表")}</Text>
               </Space>
               <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
                 {s.description}
@@ -68,7 +70,7 @@ export function Policies() {
           </Col>
         ))}
       </Row>
-      <Card size="small" title="绑定变量与片段">
+      <Card size="small" title={t("绑定变量与片段")}>
         <Descriptions
           size="small"
           column={1}
@@ -79,7 +81,7 @@ export function Policies() {
             children: (
               <>
                 {v.description}
-                {v.name === 'asOf' && <Text type="secondary">（当前 {data.as_of}）</Text>}
+                {v.name === 'asOf' && <Text type="secondary">{t("（当前")}{data.as_of}）</Text>}
               </>
             ),
           }))}
@@ -96,17 +98,17 @@ export function Policies() {
       </Card>
       <Card
         size="small"
-        title="逐表改写规则"
+        title={t("逐表改写规则")}
         extra={
           <Space wrap>
             <Segmented
               value={scheme}
               onChange={(v) => setScheme(v as Scheme | 'ALL')}
-              options={[{ value: 'ALL', label: '全部' }, ...data.schemes.map((s) => ({ value: s.scheme, label: s.name }))]}
+              options={[{ value: 'ALL', label: t("全部") }, ...data.schemes.map((s) => ({ value: s.scheme, label: s.name }))]}
             />
             <Space>
               <Switch size="small" checked={dualOnly} onChange={setDualOnly} />
-              <Text>只看两种改写结果不同的表（{data.policies.filter((p) => p.divergent).length}）</Text>
+              <Text>{t("只看两种改写结果不同的表（")}{data.policies.filter((p) => p.divergent).length}）</Text>
             </Space>
           </Space>
         }
@@ -119,7 +121,7 @@ export function Policies() {
           expandable={{ expandedRowRender: (p) => <RuleDetail policy={p} /> }}
           columns={[
             {
-              title: '表',
+              title: t("表"),
               dataIndex: 'table',
               width: 200,
               render: (_: string, p) => (
@@ -129,14 +131,14 @@ export function Policies() {
                 </Space>
               ),
             },
-            { title: '方案', dataIndex: 'scheme', width: 110, render: (s: Scheme) => <SchemeTag scheme={s} /> },
+            { title: t("方案"), dataIndex: 'scheme', width: 110, render: (s: Scheme) => <SchemeTag scheme={s} /> },
             {
-              title: '替换为',
+              title: t("替换为"),
               dataIndex: 'sql',
               width: 360,
               render: (_: string, p) =>
                 p.passthrough ? (
-                  <Tag>不改写</Tag>
+                  <Tag>{t("不改写")}</Tag>
                 ) : (
                   <Space orientation="vertical" size={2}>
                     <Text code ellipsis={{ tooltip: p.sql }} style={{ maxWidth: 340 }}>
@@ -146,18 +148,18 @@ export function Policies() {
                   </Space>
                 ),
             },
-            { title: '依据', dataIndex: 'reason' },
+            { title: t("依据"), dataIndex: 'reason' },
             {
-              title: '另一种改写方式与判断',
+              title: t("另一种改写方式与判断"),
               dataIndex: 'alternative',
               render: (a: string | undefined, p) =>
                 a ? (
                   <Space align="start">
-                    {p.divergent ? <Tag color="orange">结果不同</Tag> : <Tag>结果等价</Tag>}
+                    {p.divergent ? <Tag color="orange">{t("结果不同")}</Tag> : <Tag>{t("结果等价")}</Tag>}
                     <span>{a}</span>
                   </Space>
                 ) : (
-                  <Text type="secondary">唯一路径</Text>
+                  <Text type="secondary">{t("唯一路径")}</Text>
                 ),
             },
           ]}

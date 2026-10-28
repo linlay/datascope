@@ -78,3 +78,22 @@ func TestCreationAndConnectionTestAcceptPasswordWithoutAnID(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditPageAcceptsFiltersAndRejectsInvalidTypes(t *testing.T) {
+	var in input
+	if err := json.Unmarshal([]byte(`{"action":"page","args":{"resourceType":"audit","database_id":"default","actor_id":0,"status":"failed","source":"web","kind":"sql.execute","tool":"query","query":"timeout","started_from":"2026-10-28T00:00:00+08:00","started_to":"2026-10-28T23:59:59+08:00","limit":50,"offset":0}}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	action, out, err := decode("datascope_query", in)
+	if err != nil || action != "get_audit_page" || out.ActorID == nil || *out.ActorID != 0 || out.Status != "failed" {
+		t.Fatal("audit filters were not decoded", action, out, err)
+	}
+	for _, raw := range []string{`{"action":"page","args":{"resourceType":"audit","actor_id":-1}}`, `{"action":"page","args":{"resourceType":"audit","platform_only":"true"}}`, `{"action":"page","args":{"resourceType":"audit","status":null}}`} {
+		if err := json.Unmarshal([]byte(raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := decode("datascope_query", in); err == nil {
+			t.Fatal("invalid audit filter accepted", raw)
+		}
+	}
+}

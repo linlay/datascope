@@ -23,6 +23,14 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	ActorID        *int64                         `json:"actor_id,omitempty"`
+	PlatformOnly   bool                           `json:"platform_only,omitempty"`
+	Kind           string                         `json:"kind,omitempty"`
+	Source         string                         `json:"source,omitempty"`
+	Status         string                         `json:"status,omitempty"`
+	Tool           string                         `json:"tool,omitempty"`
+	StartedFrom    string                         `json:"started_from,omitempty"`
+	StartedTo      string                         `json:"started_to,omitempty"`
 	Resolutions    []catalog.AnnotationResolution `json:"resolutions,omitempty"`
 	Table          string                         `json:"table,omitempty"`
 	Column         string                         `json:"column,omitempty"`
@@ -394,8 +402,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		}
 		defer svc.Store.Close()
 		return svc.Rewrite(ctx, in.SQL, bid)
-	case "search_audit_events":
-		if in.DatabaseID == "" && !u.SystemAdmin {
+	case "search_audit_events", "get_audit_page":
+		if (in.DatabaseID == "" || in.PlatformOnly) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
 		if in.DatabaseID != "" {
@@ -403,7 +411,24 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		return s.Management.Audit.List(ctx, in.DatabaseID, in.RequestID, in.Limit, in.Offset)
+		page, e := s.Management.Audit.Search(ctx, audit.Filter{DatabaseID: in.DatabaseID, PlatformOnly: in.PlatformOnly, RequestID: in.RequestID, ActorID: in.ActorID, Kind: in.Kind, Source: in.Source, Status: in.Status, Tool: in.Tool, Query: in.Query, StartedFrom: in.StartedFrom, StartedTo: in.StartedTo, Limit: in.Limit, Offset: in.Offset})
+		if e != nil {
+			return nil, e
+		}
+		if action == "search_audit_events" {
+			return page.Items, nil
+		}
+		for _, id := range page.Actors {
+			if id > 0 {
+				if actor, e := s.Management.User(ctx, id); e == nil {
+					page.ActorNames[id] = actor.Name
+					if page.ActorNames[id] == "" {
+						page.ActorNames[id] = actor.Username
+					}
+				}
+			}
+		}
+		return page, nil
 	case "search_knowledge", "read_knowledge":
 		return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
 	case "list_knowledge", "get_knowledge":

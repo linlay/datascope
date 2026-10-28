@@ -43,7 +43,8 @@ var operations = map[string][]operation{
 		{"knowledge", "get", "get_knowledge", "database_id id", ""},
 		{"knowledge", "search", "search_knowledge", "database_id query", ""},
 		{"knowledge", "read", "read_knowledge", "database_id id", ""},
-		{"audit", "search", "search_audit_events", "", "database_id request_id limit offset"},
+		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
+		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
 		{"discovery", "refresh", "discover_database", "database_id", ""},
@@ -110,7 +111,7 @@ func decode(tool string, in input) (string, application.Input, error) {
 		if err := decoder.Decode(&out); err != nil {
 			return "", out, fmt.Errorf("管理参数无效: %w", err)
 		}
-		if out.UserID < 0 || (slices.Contains(strings.Fields(op.required), "user_id") && out.UserID == 0) || out.BusinessUserID < 0 || out.Revision < 0 || out.Limit < 0 || out.Offset < 0 {
+		if (out.ActorID != nil && *out.ActorID < 0) || out.UserID < 0 || (slices.Contains(strings.Fields(op.required), "user_id") && out.UserID == 0) || out.BusinessUserID < 0 || out.Revision < 0 || out.Limit < 0 || out.Offset < 0 {
 			return "", out, fmt.Errorf("用户 ID 必须为正整数，业务身份、版本和分页参数不能为负数")
 		}
 		if out.Database != nil && op.domain != "create_database" && op.domain != "test_database_connection" {

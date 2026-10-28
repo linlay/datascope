@@ -295,3 +295,15 @@ details > summary {
  .discovery-page .ant-card-head-title { flex: 1 0 100%; padding: 0; }
  .discovery-page .ant-card-extra .ant-select { max-width: 100%; }
 }
+
+.audit-detail {
+ margin: 8px 0 0;
+ padding: 12px;
+ border: 1px solid var(--border);
+ border-radius: 6px;
+ background: var(--code-bg);
+ white-space: pre-wrap;
+ overflow-wrap: anywhere;
+}
+
+.system-settings-drawer .ant-drawer-content-wrapper { max-width: 100vw; }

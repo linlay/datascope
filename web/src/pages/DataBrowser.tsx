@@ -1,3 +1,4 @@
+import { useI18n } from '../ui/preferences';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Card, Descriptions, Empty, Input, Segmented, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType, SorterResult } from 'antd/es/table/interface';
@@ -12,6 +13,7 @@ interface Filter {
 }
 
 export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTable: (table: string, filter?: Filter) => void }) {
+ const t=useI18n();
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [error, setError] = useState<string>();
   const [search, setSearch] = useState('');
@@ -22,9 +24,9 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
 
   const groups = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const visible = tables.filter((t) => !term || t.name.toLowerCase().includes(term) || t.comment.toLowerCase().includes(term) || (t.display_name??'').toLowerCase().includes(term));
-    return Array.from(new Set(tables.map(t=>t.scheme)))
-      .map((scheme) => ({ scheme, tables: visible.filter((t) => t.scheme === scheme) }))
+    const visible = tables.filter((tableInfo) => !term || tableInfo.name.toLowerCase().includes(term) || tableInfo.comment.toLowerCase().includes(term) || (tableInfo.display_name??'').toLowerCase().includes(term));
+    return Array.from(new Set(tables.map(tableInfo=>tableInfo.scheme)))
+      .map((scheme) => ({ scheme, tables: visible.filter((tableInfo) => tableInfo.scheme === scheme) }))
       .filter((g) => g.tables.length > 0);
   }, [tables, search]);
 
@@ -32,24 +34,24 @@ export function DataBrowser({ table, onOpenTable }: { table?: string; onOpenTabl
 
   return (
     <div className="browser">
-      <Card size="small" className="browser-tables" title={`数据表（${tables.length}）`}>
-        <Input.Search placeholder="按表名或中文注释筛选" allowClear onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 8 }} />
+      <Card size="small" className="browser-tables" title={t("数据表（{0}）", {"0":(tables.length)})}>
+        <Input.Search placeholder={t("按表名或中文注释筛选")} allowClear onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 8 }} />
         {error && <Alert type="error" message={error} showIcon />}
         {groups.map((g) => (
           <div key={g.scheme} className="table-group">
             <div className="table-group-title">
               <SchemeTag scheme={g.scheme} />
             </div>
-            {g.tables.map((t) => (
+            {g.tables.map((tableInfo) => (
               <button
-                key={t.name}
+                key={tableInfo.name}
                 type="button"
-                className={`table-item${t.name === current ? ' active' : ''}`}
-                onClick={() => onOpenTable(t.name)}
+                className={`table-item${tableInfo.name === current ? ' active' : ''}`}
+                onClick={() => onOpenTable(tableInfo.name)}
               >
-                <span className="table-item-name mono">{t.name}</span>
-                <span className="table-item-count mono">{t.row_count_estimated?'约 ':''}{t.row_count}</span>
-                <span className="table-item-comment">{t.display_name||t.comment}</span>
+                <span className="table-item-name mono">{tableInfo.name}</span>
+                <span className="table-item-count mono">{tableInfo.row_count_estimated?t("约 "):''}{tableInfo.row_count}</span>
+                <span className="table-item-comment">{tableInfo.display_name||tableInfo.comment}</span>
               </button>
             ))}
           </div>
@@ -75,7 +77,8 @@ function TableView({
   tables: TableInfo[];
   onOpenTable: (table: string, filter?: Filter) => void;
 }) {
-  const info = tables.find((t) => t.name === table);
+ const t=useI18n();
+  const info = tables.find((tableInfo) => tableInfo.name === table);
   const [schema, setSchema] = useState<TableSchema>();
   const [page, setPage] = useState<BrowseResult>();
   const [loading, setLoading] = useState(false);
@@ -119,7 +122,7 @@ function TableView({
       if (c.references && value !== null && value !== undefined) {
         const [refTable, refColumn] = c.references.split('.');
         return (
-          <a onClick={() => onOpenTable(refTable, { col: refColumn, val: String(value) })} title={`查看 ${c.references} = ${value}`}>
+          <a onClick={() => onOpenTable(refTable, { col: refColumn, val: String(value) })} title={t("查看 {0} = {1}", {"0":(c.references),"1":(value)})}>
             <CellValue column={c.name} value={value} />
           </a>
         );
@@ -144,8 +147,8 @@ function TableView({
           value={view}
           onChange={(v) => setView(v as 'rows' | 'schema')}
           options={[
-            { label: '数据', value: 'rows' },
-            { label: '结构', value: 'schema' },
+            { label: t("数据"), value: 'rows' },
+            { label: t("结构"), value: 'schema' },
           ]}
         />
       }
@@ -154,7 +157,7 @@ function TableView({
         <>
                 <Space wrap style={{ marginBottom: 12 }}>
                   <Input.Search
-                    placeholder="在所有字段中搜索"
+                    placeholder={t("在所有字段中搜索")}
                     allowClear
                     enterButton
                     style={{ width: 300 }}
@@ -165,7 +168,7 @@ function TableView({
                       {query.filter.col} = {query.filter.val}
                     </Tag>
                   )}
-                  <Text type="secondary">超级管理员视图：全量数据，未经权限改写</Text>
+                  <Text type="secondary">{t("超级管理员视图：全量数据，未经权限改写")}</Text>
                 </Space>
                 {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 12 }} />}
                 <Table<Row>
@@ -182,7 +185,7 @@ function TableView({
                     total: page?.total ?? 0,
                     showSizeChanger: true,
                     pageSizeOptions: [20, 50, 100, 200, 500],
-                    showTotal: (total, [from, to]) => `${from}–${to} / 共 ${total} 行`,
+                    showTotal: (total, [from, to]) => t("{0}–{1} / 共 {2} 行", {"0":(from),"1":(to),"2":(total)}),
                   }}
                   onChange={(pagination, _filters, sorter) => {
                     const s = sorter as SorterResult<Row>;
@@ -207,19 +210,19 @@ function TableView({
               rowKey="name"
               dataSource={schema.columns}
               columns={[
-                { title: '字段', dataIndex: 'name', render: (v: string) => <span className="mono">{v}</span> },
-                { title: '类型', dataIndex: 'type', render: (v: string) => <span className="mono">{v}</span> },
-                { title: '主键', dataIndex: 'primary_key', render: (v: boolean) => (v ? <Tag color="gold">PK</Tag> : null) },
-                { title: '非空', dataIndex: 'not_null', render: (v: boolean) => (v ? '是' : '') },
+                { title: t("字段"), dataIndex: 'name', render: (v: string) => <span className="mono">{v}</span> },
+                { title: t("类型"), dataIndex: 'type', render: (v: string) => <span className="mono">{v}</span> },
+                { title: t("主键"), dataIndex: 'primary_key', render: (v: boolean) => (v ? <Tag color="gold">PK</Tag> : null) },
+                { title: t("非空"), dataIndex: 'not_null', render: (v: boolean) => (v ? t("是") : '') },
                 {
-                  title: '引用',
+                  title: t("引用"),
                   dataIndex: 'references',
                   render: (v?: string) => (v ? <a onClick={() => onOpenTable(v.split('.')[0])} className="mono">{v}</a> : null),
                 },
-                { title: '中文说明', dataIndex: 'comment' },
+                { title: t("中文说明"), dataIndex: 'comment' },
               ]}
             />
-            <Descriptions size="small" column={1} bordered items={[{ key: 'idx', label: '索引', children: schema.indexes.join('、') || '无' }]} />
+            <Descriptions size="small" column={1} bordered items={[{ key: 'idx', label: t("索引"), children: schema.indexes.join('、') || '无' }]} />
             <SqlBlock sql={schema.ddl} format={false} />
           </Space>
         )
