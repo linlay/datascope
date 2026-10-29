@@ -1,3 +1,4 @@
+import { useI18n } from '../ui/preferences';
 import { useMemo } from 'react';
 type DiffLine = { kind: 'same' | 'removed' | 'added'; text: string };
 
@@ -31,12 +32,13 @@ export function diffSQL(original: string, rewritten: string): DiffLine[] {
 }
 
 export function SqlDiff({ original, rewritten }: { original: string; rewritten: string }) {
+ const t=useI18n();
   const lines = useMemo(() => diffSQL(original, rewritten), [original, rewritten]);
   let oldLine = 0;
   let newLine = 0;
-  return <div className="sql-diff" role="region" aria-label="SQL 改写差异" tabIndex={0}>
-    <div className="sql-diff-heading">− 原始 SQL / + 改写后 SQL · 逐行对比</div>
-    {lines.every((line) => line.kind === 'same') && <div className="sql-diff-heading">当前权限下 SQL 无变化</div>}
+  return <div className="sql-diff" role="region" aria-label={t("SQL 改写差异")} tabIndex={0}>
+    <div className="sql-diff-heading">{t("− 原始 SQL / + 改写后 SQL · 逐行对比")}</div>
+    {lines.every((line) => line.kind === 'same') && <div className="sql-diff-heading">{t("当前权限下 SQL 无变化")}</div>}
     <div className="sql-diff-lines">
       {lines.map((line, index) => <div key={index} className={`sql-diff-line ${line.kind}`}>
         <span className="sql-diff-number">{line.kind !== 'added' ? ++oldLine : ''}</span>

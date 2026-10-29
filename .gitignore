@@ -25,3 +25,6 @@ coverage.out
 /data/*.sqlite
 /data/*.sqlite-*
 .upload-tmp/
+
+/data/*.credentials.key
+/data/.credential-key-*

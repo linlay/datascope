@@ -53,3 +53,47 @@ func TestExplicitEmptyReplacementValues(t *testing.T) {
 		t.Fatalf("replacement values lost: %s %+v %v", action, out, err)
 	}
 }
+
+func TestCreationAndConnectionTestAcceptPasswordWithoutAnID(t *testing.T) {
+	for _, tool := range []string{"datascope_manage", "datascope_inspect"} {
+		action, resource := "create", "database"
+		if tool == "datascope_inspect" {
+			action, resource = "test", "connection"
+		}
+		var in input
+		raw := map[string]any{"action": action, "args": map[string]any{"resourceType": resource, "password": "database-password", "database": map[string]any{"name": "业务数据库", "driver": "mysql", "connection": map[string]any{"host": "db.local", "database": "business", "username": "reader"}}}}
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = json.Unmarshal(encoded, &in); err != nil {
+			t.Fatal(err)
+		}
+		_, out, err := decode(tool, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Database.ID != "" || out.Password != "database-password" {
+			t.Fatal("generated identity or password input was lost")
+		}
+	}
+}
+
+func TestAuditPageAcceptsFiltersAndRejectsInvalidTypes(t *testing.T) {
+	var in input
+	if err := json.Unmarshal([]byte(`{"action":"page","args":{"resourceType":"audit","database_id":"default","actor_id":0,"status":"failed","source":"web","kind":"sql.execute","tool":"query","query":"timeout","started_from":"2026-10-28T00:00:00+08:00","started_to":"2026-10-28T23:59:59+08:00","limit":50,"offset":0}}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	action, out, err := decode("datascope_query", in)
+	if err != nil || action != "get_audit_page" || out.ActorID == nil || *out.ActorID != 0 || out.Status != "failed" {
+		t.Fatal("audit filters were not decoded", action, out, err)
+	}
+	for _, raw := range []string{`{"action":"page","args":{"resourceType":"audit","actor_id":-1}}`, `{"action":"page","args":{"resourceType":"audit","platform_only":"true"}}`, `{"action":"page","args":{"resourceType":"audit","status":null}}`} {
+		if err := json.Unmarshal([]byte(raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := decode("datascope_query", in); err == nil {
+			t.Fatal("invalid audit filter accepted", raw)
+		}
+	}
+}

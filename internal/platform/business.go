@@ -13,9 +13,19 @@ import (
 // Other databases get empty independent local realms and explicit accounts.
 // It never resets existing business passwords or creates platform users.
 func InitializeDemoRealm(ctx context.Context, c *catalog.Catalog, password string) error {
-	d, e := c.Get("default")
+	items, e := c.List()
 	if e != nil {
 		return e
+	}
+	var d *catalog.Database
+	for i := range items {
+		if items[i].ID == "default" {
+			d = &items[i]
+			break
+		}
+	}
+	if d == nil || d.Driver != "sqlite" {
+		return nil
 	}
 	if d.Authentication != nil {
 		return nil
@@ -30,8 +40,8 @@ func InitializeDemoRealm(ctx context.Context, c *catalog.Catalog, password strin
 	if e != nil {
 		return nil
 	}
-	if len(password) < 12 {
-		return fmt.Errorf("证券 demo 员工认证初始化需要 OAUTH_DEMO_PASSWORD（至少 12 字符）")
+	if len(password) < 6 {
+		return fmt.Errorf("证券 demo 员工认证初始化需要 OAUTH_DEMO_PASSWORD（至少 6 字符）")
 	}
 	for _, u := range users {
 		if _, e = c.Management.BusinessAccount(ctx, d.ID, u.EmpNo); e == nil {

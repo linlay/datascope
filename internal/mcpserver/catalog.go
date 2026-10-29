@@ -82,8 +82,15 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		if segment != "" {
 			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
 		}
-		endpointIssuer := d.AuthorizationIssuer(issuer)
-		if d.LocalAuthentication() && mode != "oauth" {
+		endpointIssuer := issuer
+		if c.Management != nil {
+			if !d.LocalAuthentication() {
+				http.Error(w, "业务 MCP 仅支持独立业务账号", 503)
+				return
+			}
+			endpointIssuer = d.AuthorizationIssuer(issuer)
+		}
+		if c.Management != nil && mode != "oauth" {
 			http.Error(w, "独立业务账号认证需要 OAuth 模式", 503)
 			return
 		}

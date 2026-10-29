@@ -10,13 +10,16 @@ export type Scheme = string;
 export type Row = Record<string, unknown>;
 
 export interface TableInfo {
+  display_name?: string;
   name: string;
   comment: string;
   row_count: number;
+  row_count_estimated?: boolean;
   scheme: Scheme;
 }
 
 export interface Column {
+  display_name?: string;
   name: string;
   type: string;
   not_null: boolean;
@@ -27,6 +30,7 @@ export interface Column {
 }
 
 export interface TableSchema {
+  display_name?: string;
   name: string;
   comment: string;
   columns: Column[];
@@ -197,8 +201,21 @@ export function selectDatabase(id: string) {
  selectedDatabase = id; localStorage.setItem('datascope-database', id); usersPromise = undefined;
 }
 export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
+export interface DatabaseConnection {
+ host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
+}
+export interface NewDatabase {id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
+export interface Annotation { display_name: string; comment: string | null }
+export interface TableAnnotation extends Annotation { columns: Record<string, Annotation> }
+export interface SchemaChange { table:string; column?:string; kind:'added'|'removed'|'modified'; property:string; before:string; after:string; manual?:string; conflict:boolean }
+export interface SchemaReport { version:number; at:string; changes:SchemaChange[] }
+export interface AnnotationResolution {table:string;column?:string;follow_source:boolean}
+export interface PendingDiscovery {id:string;base_version:number;detected_at:string;tables:TableSchema[];changes:SchemaChange[]}
+export interface Discovery { pending?:PendingDiscovery;version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
 export interface Database {
- authentication?: {type:"local"|"platform";label?:string;employee_directory?:boolean};
+ discovery?:Discovery;
+ connection?:DatabaseConnection;
+ authentication?: {type:"local";label?:string;employee_directory?:boolean};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
@@ -206,9 +223,13 @@ export interface Database {
 }
 export const databases = {
  list: () => request<Database[]>('/api/databases'),
+ applyDiscovery: (id:string,candidate:string,revision:number,resolutions:AnnotationResolution[]) => managementCall<Database>('apply_discovery',{database_id:id,id:candidate,revision,resolutions}),
+ discover: (id:string) => managementCall<Database>('discover_database',{database_id:id}),
+ annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
- add: (body: {id: string; name: string; driver: string; path: string}) => post<Database>('/api/databases', body),
- save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
+ test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database,password});},
+ add: (body: NewDatabase) => post<Database>('/api/databases', body),
+ save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify({...body,discovery:undefined})}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;
@@ -269,6 +290,10 @@ export const api = {
     post<CallResult>('/api/mcp/call', { name, arguments: args }),
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
+
+export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
+export interface AuditFilters {database_id?:string;platform_only?:boolean;request_id?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;query?:string;started_from?:string;started_to?:string}
+export interface AuditResult {items:AuditEvent[];total:number;limit:number;offset:number;kinds:string[];sources:string[];actors:number[];actor_names:Record<string,string>}
 
 // Global platform endpoints must never be rewritten into a selected database path.
 export async function platformRequest<T>(path: string, init?: RequestInit): Promise<T> {

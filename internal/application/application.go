@@ -7,6 +7,7 @@ import (
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"datascope-server/internal/store"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,26 +23,38 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
-	Account        *management.BusinessAccount `json:"account,omitempty"`
-	DatabaseID     string                      `json:"database_id,omitempty"`
-	UserID         int64                       `json:"user_id,omitempty"`
-	Username       string                      `json:"username,omitempty"`
-	Name           string                      `json:"name,omitempty"`
-	Password       string                      `json:"password,omitempty"`
-	Database       *catalog.Database           `json:"database,omitempty"`
-	Permissions    []string                    `json:"permissions,omitempty"`
-	BusinessUserID int64                       `json:"business_user_id,omitempty"`
-	SQL            string                      `json:"sql,omitempty"`
-	Query          string                      `json:"query,omitempty"`
-	ID             string                      `json:"id,omitempty"`
-	Summary        string                      `json:"summary,omitempty"`
-	Content        string                      `json:"content,omitempty"`
-	Tables         []string                    `json:"tables,omitempty"`
-	Published      bool                        `json:"published,omitempty"`
-	Revision       int                         `json:"revision,omitempty"`
-	Limit          int                         `json:"limit,omitempty"`
-	Offset         int                         `json:"offset,omitempty"`
-	RequestID      string                      `json:"request_id,omitempty"`
+	ActorID        *int64                         `json:"actor_id,omitempty"`
+	PlatformOnly   bool                           `json:"platform_only,omitempty"`
+	Kind           string                         `json:"kind,omitempty"`
+	Source         string                         `json:"source,omitempty"`
+	Status         string                         `json:"status,omitempty"`
+	Tool           string                         `json:"tool,omitempty"`
+	StartedFrom    string                         `json:"started_from,omitempty"`
+	StartedTo      string                         `json:"started_to,omitempty"`
+	Resolutions    []catalog.AnnotationResolution `json:"resolutions,omitempty"`
+	Table          string                         `json:"table,omitempty"`
+	Column         string                         `json:"column,omitempty"`
+	Annotation     *store.Annotation              `json:"annotation,omitempty"`
+	Account        *management.BusinessAccount    `json:"account,omitempty"`
+	DatabaseID     string                         `json:"database_id,omitempty"`
+	UserID         int64                          `json:"user_id,omitempty"`
+	Username       string                         `json:"username,omitempty"`
+	Name           string                         `json:"name,omitempty"`
+	Password       string                         `json:"password,omitempty"`
+	Database       *catalog.Database              `json:"database,omitempty"`
+	Permissions    []string                       `json:"permissions,omitempty"`
+	BusinessUserID int64                          `json:"business_user_id,omitempty"`
+	SQL            string                         `json:"sql,omitempty"`
+	Query          string                         `json:"query,omitempty"`
+	ID             string                         `json:"id,omitempty"`
+	Summary        string                         `json:"summary,omitempty"`
+	Content        string                         `json:"content,omitempty"`
+	Tables         []string                       `json:"tables,omitempty"`
+	Published      bool                           `json:"published,omitempty"`
+	Revision       int                            `json:"revision,omitempty"`
+	Limit          int                            `json:"limit,omitempty"`
+	Offset         int                            `json:"offset,omitempty"`
+	RequestID      string                         `json:"request_id,omitempty"`
 }
 type Knowledge struct {
 	ID         string   `json:"id"`
@@ -114,7 +127,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Account == nil || in.Account.DatabaseID != in.DatabaseID {
 			return nil, errors.New("业务账号的 database_id 必须一致")
 		}
-		if d.Authentication.EmployeeDirectory {
+		if d.Authentication != nil && d.Authentication.EmployeeDirectory {
 			svc, e := s.Catalog.Open(ctx, d)
 			if e != nil {
 				return nil, e
@@ -143,6 +156,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		out := []DatabaseView{}
 		for _, d := range ds {
 			v := s.DatabaseView(ctx, d)
+			v.Discovery = nil // Full snapshots are fetched only for the selected database.
 			if len(v.Permissions) > 0 {
 				out = append(out, v)
 			}
@@ -155,12 +169,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Database == nil {
 			return nil, errors.New("需要 database 参数")
 		}
-		e := s.Catalog.Add(ctx, *in.Database)
-		if e != nil {
-			return nil, e
-		}
-
-		d, e := s.Catalog.Get(in.Database.ID)
+		d, e := s.Catalog.Create(ctx, *in.Database, in.Password)
 		if e != nil {
 			return nil, e
 		}
@@ -225,6 +234,76 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
+	case "get_discovery", "discover_database", "apply_discovery", "save_annotation":
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if action != "get_discovery" {
+			if e := require("config.write"); e != nil {
+				return nil, e
+			}
+		}
+		var d *catalog.Database
+		var e error
+		switch action {
+		case "get_discovery":
+			d, e = s.Catalog.Get(in.DatabaseID)
+		case "discover_database":
+			d, e = s.Catalog.Discover(ctx, in.DatabaseID)
+		case "apply_discovery":
+			if e := require("policy.write"); e != nil {
+				return nil, e
+			}
+			d, e = s.Catalog.ApplyDiscovery(ctx, in.DatabaseID, in.ID, in.Revision, in.Resolutions)
+		case "save_annotation":
+			if in.Annotation == nil {
+				return nil, errors.New("需要 annotation 参数")
+			}
+			d, e = s.Catalog.SaveAnnotation(ctx, in.DatabaseID, in.Table, in.Column, in.Revision, *in.Annotation)
+		}
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *d), nil
+	case "test_database_connection":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.Database == nil {
+			return nil, errors.New("需要 database 参数")
+		}
+		d := *in.Database
+		d.Connection = store.ConnectionDefaults(d.Driver, d.Connection)
+		if in.Password != "" {
+			if d.Driver == "sqlite" || d.Connection == nil {
+				return nil, errors.New("仅网络数据库接受连接密码")
+			}
+			if d.Connection.PasswordEnv != "" || d.Connection.CredentialID != "" {
+				return nil, errors.New("请只提供一种数据库密码来源")
+			}
+			d.Connection.CredentialID = "probe"
+		}
+		if d.Driver == "sqlite" {
+			if e := s.Management.ValidatePath(d.Path); e != nil {
+				return nil, e
+			}
+		}
+		var st *store.Store
+		var e error
+		if in.Password != "" {
+			st, e = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, in.Password, s.Catalog.Timeout)
+		} else {
+			st, e = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.Timeout)
+		}
+		if e != nil {
+			return nil, e
+		}
+		defer st.Close()
+		names, e := st.TableNames(ctx)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"connected": true, "driver": d.Driver, "table_count": len(names)}, nil
 	case "test_connection":
 		if e := require("config.read"); e != nil {
 			return nil, e
@@ -233,11 +312,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
-		svc, e := s.Catalog.Open(ctx, d)
+		st, e := s.Catalog.OpenStore(ctx, d)
 		if e != nil {
 			return nil, e
 		}
-		svc.Store.Close()
+		st.Close()
 		return map[string]bool{"connected": true}, nil
 	case "save_database":
 
@@ -247,6 +326,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		old, e := s.Catalog.Get(in.DatabaseID)
 		if e != nil {
 			return nil, e
+		}
+		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
+			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -320,8 +402,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		}
 		defer svc.Store.Close()
 		return svc.Rewrite(ctx, in.SQL, bid)
-	case "search_audit_events":
-		if in.DatabaseID == "" && !u.SystemAdmin {
+	case "search_audit_events", "get_audit_page":
+		if (in.DatabaseID == "" || in.PlatformOnly) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
 		if in.DatabaseID != "" {
@@ -329,7 +411,24 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		return s.Management.Audit.List(ctx, in.DatabaseID, in.RequestID, in.Limit, in.Offset)
+		page, e := s.Management.Audit.Search(ctx, audit.Filter{DatabaseID: in.DatabaseID, PlatformOnly: in.PlatformOnly, RequestID: in.RequestID, ActorID: in.ActorID, Kind: in.Kind, Source: in.Source, Status: in.Status, Tool: in.Tool, Query: in.Query, StartedFrom: in.StartedFrom, StartedTo: in.StartedTo, Limit: in.Limit, Offset: in.Offset})
+		if e != nil {
+			return nil, e
+		}
+		if action == "search_audit_events" {
+			return page.Items, nil
+		}
+		for _, id := range page.Actors {
+			if id > 0 {
+				if actor, e := s.Management.User(ctx, id); e == nil {
+					page.ActorNames[id] = actor.Name
+					if page.ActorNames[id] == "" {
+						page.ActorNames[id] = actor.Username
+					}
+				}
+			}
+		}
+		return page, nil
 	case "search_knowledge", "read_knowledge":
 		return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
 	case "list_knowledge", "get_knowledge":
@@ -472,8 +571,10 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 	}
 	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		d.Discovery = nil
 		d.Authentication = nil
 		d.Path = ""
+		d.Connection = nil
 		d.Config = nil
 		d.BusinessTools = nil
 		d.Tools = nil

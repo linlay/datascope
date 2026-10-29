@@ -336,7 +336,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	issuer := "http://" + asHTTP.Listener.Addr().String()
 	base := "http://" + dbHTTP.Listener.Addr().String() + "/mcp"
 	adminResource := issuer + "/mcp/admin"
-	as, e := oauth.New(oauth.Config{Issuer: issuer, Resource: base, Management: f.m, KeyPath: filepath.Join(f.dir, "signing.pem"), StatePath: f.m.Path, ResourceAllowed: func(r string) bool { return r == adminResource || f.c.AllowsMCPResource(base, r) }, DatabaseForResource: func(r string) (string, error) {
+	as, e := oauth.New(oauth.Config{Catalog: f.c, Issuer: issuer, Resource: base, Management: f.m, KeyPath: filepath.Join(f.dir, "signing.pem"), StatePath: f.m.Path, ResourceAllowed: func(r string) bool { return r == adminResource || f.c.AllowsMCPResource(base, r) }, DatabaseForResource: func(r string) (string, error) {
 		if r == adminResource {
 			return "", nil
 		}
@@ -362,8 +362,13 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	dbHTTP.Config.Handler = h
 	dbHTTP.Start()
 	t.Cleanup(dbHTTP.Close)
-	token, e := as.SignEmployeeForResource(ctx, f.reader.ID, base+"/default")
+	if _, e = as.SignEmployeeForResource(ctx, f.reader.ID, base+"/default"); e == nil {
+		t.Fatal("platform account obtained a business token")
+	}
+	account, e := f.m.SaveBusinessAccount(f.ctx, management.BusinessAccount{DatabaseID: "default", Username: "E0001", Name: "Employee", BusinessUserID: 10, Active: true, Permissions: []string{"query", "knowledge.read"}}, "employee-default-password", 0)
 	must(t, e)
+	tokens, _, _ := employeeTokens(t, &realmEnv{f: f, issuer: issuer, resource: base}, "default", "employee-default-password")
+	token := tokens["access"]
 	session := connectMCP(t, base+"/default", token)
 	list, e := session.ListTools(ctx, nil)
 	must(t, e)
@@ -497,7 +502,9 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	if res.StatusCode != 401 {
 		t.Fatalf("audience cross-use %d", res.StatusCode)
 	}
-	must(t, f.m.SaveGrant(f.ctx, f.admin.ID, management.Grant{UserID: f.reader.ID, DatabaseID: "default", BusinessUserID: 10, Permissions: []string{}}))
+	account.Permissions = []string{}
+	_, e = f.m.SaveBusinessAccount(f.ctx, account, "", account.AuthVersion)
+	must(t, e)
 	out, e = callMCP(t, session, "query", map[string]any{"sql": "SELECT * FROM items"})
 	if e == nil && !out.IsError {
 		t.Fatal("revoked token still queries")
@@ -541,22 +548,13 @@ func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
 }
 
 func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
-	f := setup(t)
+	env := setupRealms(t)
+	f := env.f
 	ctx := context.Background()
+	tokens, _, _ := employeeTokens(t, env, "default", "employee-default-password")
+	session := connectMCP(t, env.resource+"/default", tokens["access"])
 	d, e := f.c.Get("default")
 	must(t, e)
-	svc, e := f.c.Open(ctx, d)
-	must(t, e)
-	defer svc.Store.Close()
-	server := mcpserver.ManagedServer(f.c, "default", svc, mcpserver.Options{AuthMode: "none", DefaultUserID: f.reader.ID, Management: f.m, Application: f.app})
-	left, right := mcp.NewInMemoryTransports()
-	ss, e := server.Connect(ctx, left, nil)
-	must(t, e)
-	defer ss.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "live", Version: "1"}, nil)
-	session, e := client.Connect(ctx, right, nil)
-	must(t, e)
-	defer session.Close()
 	d.BusinessTools = []catalog.BusinessTool{{Name: "find_items", Description: "Find item", SQL: "SELECT id FROM items WHERE name=:arg_name", Parameters: map[string]catalog.ToolParameter{"name": {Type: "string"}}}}
 	must(t, f.c.Save(f.ctx, *d))
 	list, e := session.ListTools(ctx, nil)

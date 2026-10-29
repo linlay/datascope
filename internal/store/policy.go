@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -12,6 +13,9 @@ var DefaultAsOf = time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
 // VisibleCustomerIDs independently derives customer visibility from owned or
 // scoped fund accounts without using the rewrite configuration.
 func (s *Store) VisibleCustomerIDs(ctx context.Context, userID int64, asOf time.Time) ([]string, error) {
+	if s == nil || s.engine != nil {
+		return nil, fmt.Errorf("customer_scope 仅适用于 SQLite 证券演示库")
+	}
 	var status, role string
 	err := s.db.QueryRowContext(ctx, `SELECT e.status,r.code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=?`, userID).Scan(&status, &role)
 	if errors.Is(err, sql.ErrNoRows) {

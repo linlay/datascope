@@ -32,6 +32,7 @@ type operation struct {
 // the application's per-action authorization, revision checks or audit.
 var operations = map[string][]operation{
 	"datascope_query": {
+		{"discovery", "get", "get_discovery", "database_id", ""},
 		{"database", "list", "list_databases", "", ""},
 		{"database", "get", "get_database", "database_id", ""},
 		{"policy", "get", "get_policy", "database_id", ""},
@@ -42,10 +43,14 @@ var operations = map[string][]operation{
 		{"knowledge", "get", "get_knowledge", "database_id id", ""},
 		{"knowledge", "search", "search_knowledge", "database_id query", ""},
 		{"knowledge", "read", "read_knowledge", "database_id id", ""},
-		{"audit", "search", "search_audit_events", "", "database_id request_id limit offset"},
+		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
+		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
-		{"database", "create", "create_database", "database", ""},
+		{"discovery", "refresh", "discover_database", "database_id", ""},
+		{"discovery", "apply", "apply_discovery", "database_id id revision", "resolutions"},
+		{"annotation", "save", "save_annotation", "database_id table revision annotation", "column"},
+		{"database", "create", "create_database", "database", "password"},
 		{"database", "save", "save_database", "database_id database", ""},
 		{"database", "update", "update_database", "database_id database", ""},
 		{"policy", "save", "save_policy", "database_id database", ""},
@@ -60,6 +65,7 @@ var operations = map[string][]operation{
 		{"knowledge", "save", "save_knowledge", "database_id id name summary content tables published revision", ""},
 	},
 	"datascope_inspect": {
+		{"connection", "test", "test_database_connection", "database", "password"},
 		{"database", "test_connection", "test_connection", "database_id", ""},
 		{"policy", "validate", "validate_policy", "database_id database", ""},
 		{"policy", "preview_rewrite", "preview_rewrite", "database_id sql", "business_user_id"},
@@ -105,10 +111,10 @@ func decode(tool string, in input) (string, application.Input, error) {
 		if err := decoder.Decode(&out); err != nil {
 			return "", out, fmt.Errorf("管理参数无效: %w", err)
 		}
-		if out.UserID < 0 || (slices.Contains(strings.Fields(op.required), "user_id") && out.UserID == 0) || out.BusinessUserID < 0 || out.Revision < 0 || out.Limit < 0 || out.Offset < 0 {
+		if (out.ActorID != nil && *out.ActorID < 0) || out.UserID < 0 || (slices.Contains(strings.Fields(op.required), "user_id") && out.UserID == 0) || out.BusinessUserID < 0 || out.Revision < 0 || out.Limit < 0 || out.Offset < 0 {
 			return "", out, fmt.Errorf("用户 ID 必须为正整数，业务身份、版本和分页参数不能为负数")
 		}
-		if out.Database != nil && op.action != "create" {
+		if out.Database != nil && op.domain != "create_database" && op.domain != "test_database_connection" {
 			if out.Database.ID != out.DatabaseID || out.Database.Revision <= 0 {
 				return "", out, fmt.Errorf("database.id 必须与 database_id 一致，且 database.revision 必须为最新正整数版本")
 			}
@@ -121,7 +127,19 @@ func decode(tool string, in input) (string, application.Input, error) {
 			required := "id revision"
 			switch op.domain {
 			case "create_database":
-				required = "id name driver path"
+				required = "name driver"
+				if out.Database.Driver == "sqlite" {
+					required += " path"
+				} else {
+					required += " connection"
+				}
+			case "test_database_connection":
+				required = "driver"
+				if out.Database.Driver == "sqlite" {
+					required += " path"
+				} else {
+					required += " connection"
+				}
 			case "save_database":
 				required += " name driver path config mcp_enabled mcp_path tools"
 			case "update_database":

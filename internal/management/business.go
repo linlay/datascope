@@ -87,8 +87,8 @@ func (s *Store) SaveBusinessAccount(ctx context.Context, a BusinessAccount, pass
 			return a, errors.New("业务账号只能获得查询、知识读取或全量只读查询能力")
 		}
 	}
-	if password != "" && len(password) < 12 {
-		return a, errors.New("密码至少 12 字符")
+	if password != "" && len(password) < 6 {
+		return a, errors.New("密码至少 6 字符")
 	}
 	if version == 0 && password == "" {
 		return a, errors.New("新建业务账号需要初始密码")

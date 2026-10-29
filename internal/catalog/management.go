@@ -2,10 +2,10 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"datascope-server/internal/management"
 	"datascope-server/internal/store"
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -40,17 +40,53 @@ func (c *Catalog) listSQLite(ctx context.Context) ([]Database, error) {
 	if e != nil {
 		return nil, e
 	}
+	checks, e := c.Management.Records(ctx, "discovery_checks")
+	if e != nil {
+		return nil, e
+	}
+	statuses := map[string]discoveryCheck{}
+	for _, r := range checks {
+		var check discoveryCheck
+		if e := json.Unmarshal([]byte(r.Data), &check); e != nil {
+			return nil, e
+		}
+		statuses[r.Key] = check
+	}
+	pendingRecords, e := c.Management.Records(ctx, "discovery_pending")
+	if e != nil {
+		return nil, e
+	}
+	pending := map[string]*PendingDiscovery{}
+	for _, r := range pendingRecords {
+		var p *PendingDiscovery
+		if e := json.Unmarshal([]byte(r.Data), &p); e != nil {
+			return nil, e
+		}
+		pending[r.Key] = p
+	}
 	out := []Database{}
 	for _, r := range records {
 		var d Database
 		if e = json.Unmarshal([]byte(r.Data), &d); e != nil {
 			return nil, e
 		}
+		if check, ok := statuses[d.ID]; ok && (d.Discovery == nil || check.AttemptedAt.After(d.Discovery.AttemptedAt)) {
+			if d.Discovery == nil {
+				d.Discovery = &Discovery{}
+			}
+			d.Discovery.CheckedAt = check.CheckedAt
+			d.Discovery.AttemptedAt = check.AttemptedAt
+			d.Discovery.Error = check.Error
+		}
+		if p := pending[d.ID]; p != nil && d.Discovery != nil && p.BaseVersion == d.Discovery.Version {
+			p.Changes = schemaDiff(d.Discovery.Tables, p.Tables, d.Discovery.Annotations)
+			d.Discovery.Pending = p
+		}
 		out = append(out, d)
 	}
 	return out, nil
 }
-func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn func(*[]Database) error) error {
+func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn func(*[]Database) error, credentials ...management.DatabaseCredential) error {
 	return c.Management.UpdateRecords(ctx, "databases", action, database, func(records []management.Record) ([]management.Record, error) {
 		items := []Database{}
 		for _, r := range records {
@@ -70,8 +106,13 @@ func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn 
 				return nil, fmt.Errorf("数据库 ID 或 MCP 路径无效、重复或保留")
 			}
 			routes[d.MCPRoute()] = true
-			if e := c.Management.ValidatePath(d.Path); e != nil {
+			if e := store.ValidateConnection(d.Driver, d.Connection); e != nil {
 				return nil, e
+			}
+			if d.Driver == "sqlite" {
+				if e := c.Management.ValidatePath(d.Path); e != nil {
+					return nil, e
+				}
 			}
 			d.ETag = ""
 			raw, e := json.Marshal(d)
@@ -81,5 +122,5 @@ func (c *Catalog) updateSQLite(ctx context.Context, action, database string, fn 
 			out = append(out, management.Record{Key: d.ID, Data: string(raw)})
 		}
 		return out, nil
-	})
+	}, credentials...)
 }

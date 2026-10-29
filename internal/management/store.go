@@ -81,6 +81,7 @@ func Open(path string, a *audit.Store) (*Store, error) {
  CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),expires INTEGER NOT NULL,resource TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS user_system_permissions(user_id INTEGER NOT NULL REFERENCES users(id),permission TEXT NOT NULL,PRIMARY KEY(user_id,permission));
  CREATE TABLE IF NOT EXISTS database_grants(user_id INTEGER NOT NULL REFERENCES users(id),database_id TEXT NOT NULL,permissions TEXT NOT NULL,business_user_id INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,database_id));
+ CREATE TABLE IF NOT EXISTS database_credentials(database_id TEXT PRIMARY KEY,ciphertext BLOB NOT NULL);
  CREATE TABLE IF NOT EXISTS records(bucket TEXT NOT NULL,key TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(bucket,key));
  CREATE TABLE IF NOT EXISTS record_versions(bucket TEXT NOT NULL,key TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(bucket,key,revision));
  CREATE TABLE IF NOT EXISTS outbox_events(id TEXT PRIMARY KEY,data TEXT NOT NULL);
@@ -211,8 +212,8 @@ func (s *Store) Bootstrap(ctx context.Context, username, password string) error 
 	if n > 0 {
 		return nil
 	}
-	if username == "" || len(password) < 12 {
-		return errors.New("首次启动需设置 ADMIN_USERNAME 和至少 12 字符的 ADMIN_PASSWORD")
+	if username == "" || len(password) < 6 {
+		return errors.New("首次启动需设置 ADMIN_USERNAME 和至少 6 字符的 ADMIN_PASSWORD")
 	}
 	hash, e := passwordHash(password)
 	if e != nil {
@@ -276,8 +277,8 @@ func (s *Store) Authenticate(ctx context.Context, name, password string) (User, 
 	return u, nil
 }
 func (s *Store) CreateUser(ctx context.Context, name, display, password string) (User, error) {
-	if len(name) == 0 || len(name) > 80 || strings.TrimSpace(name) != name || len(password) < 12 {
-		return User{}, errors.New("需要用户名和至少 12 字符的密码")
+	if len(name) == 0 || len(name) > 80 || strings.TrimSpace(name) != name || len(password) < 6 {
+		return User{}, errors.New("需要用户名和至少 6 字符的密码")
 	}
 	hash, e := passwordHash(password)
 	if e != nil {
@@ -314,8 +315,8 @@ func (s *Store) DisableUser(ctx context.Context, id int64) error {
 	})
 }
 func (s *Store) ResetPassword(ctx context.Context, id int64, password string) error {
-	if len(password) < 12 {
-		return errors.New("密码至少 12 字符")
+	if len(password) < 6 {
+		return errors.New("密码至少 6 字符")
 	}
 	h, e := passwordHash(password)
 	if e != nil {
@@ -483,7 +484,10 @@ func readRecords(ctx context.Context, q queryer, bucket string) ([]Record, error
 	}
 	return out, rows.Err()
 }
-func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database string, fn func([]Record) ([]Record, error)) error {
+func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database string, fn func([]Record) ([]Record, error), credentials ...DatabaseCredential) error {
+	if len(credentials) > 1 || (len(credentials) == 1 && (bucket != "databases" || action != "database.create" || credentials[0].DatabaseID != database)) {
+		return errors.New("凭据只能随对应数据库创建一同保存")
+	}
 	detail := map[string]any{"bucket": bucket, "changes": []any{}}
 	return s.Change(ctx, action, database, detail, func(tx *sql.Tx) error {
 		records, e := readRecords(ctx, tx, bucket)
@@ -493,6 +497,20 @@ func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database stri
 		updated, e := fn(records)
 		if e != nil {
 			return e
+		}
+		if len(credentials) == 1 {
+			found := false
+			for _, r := range updated {
+				if r.Key == database {
+					found = true
+				}
+			}
+			if !found {
+				return errors.New("缺少凭据所属的数据库配置")
+			}
+			if _, e = tx.ExecContext(ctx, "INSERT INTO database_credentials(database_id,ciphertext) VALUES(?,?)", credentials[0].DatabaseID, credentials[0].Ciphertext); e != nil {
+				return e
+			}
 		}
 		for _, r := range updated {
 			var old string

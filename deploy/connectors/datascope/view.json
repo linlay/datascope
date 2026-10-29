@@ -13,7 +13,7 @@
         "required": ["sql", "variables"],
         "properties": {
           "title": {"type": "string", "maxLength": 120},
-          "sql": {"type": "string", "minLength": 1, "maxLength": 20000, "description": "One read-only SELECT (SQLite dialect) with bare {{name}} placeholders."},
+          "sql": {"type": "string", "minLength": 1, "maxLength": 20000, "description": "One read-only SELECT in the dialect declared by the database MCP server, with bare {{name}} placeholders."},
           "variables": {
             "type": "object",
             "maxProperties": 20,

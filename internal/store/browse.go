@@ -38,6 +38,9 @@ type BrowseResult struct {
 // Browse returns a page of rows from a table, unfiltered by business
 // permissions (the super-admin view).
 func (s *Store) Browse(ctx context.Context, opts BrowseOptions) (*BrowseResult, error) {
+	if s.engine != nil {
+		return s.remoteBrowse(ctx, opts)
+	}
 	schema, err := s.Describe(ctx, opts.Table)
 	if err != nil {
 		return nil, err
@@ -122,6 +125,9 @@ type UserSummary struct {
 
 // Users lists every system user with their role names.
 func (s *Store) Users(ctx context.Context) ([]UserSummary, error) {
+	if s == nil || s.engine != nil {
+		return []UserSummary{}, nil
+	}
 	rows, err := s.db.QueryContext(ctx, `
  SELECT e.employee_id,e.emp_no,e.name,r.code,e.branch_code,e.department_code,e.status,r.name
  FROM employees e JOIN roles r ON r.id=e.role_id ORDER BY e.employee_id`)

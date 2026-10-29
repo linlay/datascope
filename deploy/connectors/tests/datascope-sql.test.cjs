@@ -71,11 +71,15 @@ function host() {
   const calls = [];
   vm.runInNewContext(fs.readFileSync(script, 'utf8'), {
     document: { getElementById: () => app, createElement: tag => new Element(tag), documentElement: { lang: 'zh-CN' } },
+    setTimeout,
     window: { viewHost: { onData: fn => { receive = fn; }, query: (name, params) => new Promise((resolve, reject) => calls.push({ name, params, resolve, reject })) } },
   });
   return { app, calls, receive: (doc, queryable = true) => receive(doc, {}, { queryable }) };
 }
 function text(node) { return [node.textContent || '', ...node.children.map(text)].join(' '); }
+function find(node, match) { if (match(node)) return node; for (const c of node.children) { const hit = find(c, match); if (hit) return hit; } return null; }
+const field = (h, name) => find(h.app, n => n.name === name);
+const press = (h, label) => find(h.app, n => n.tag === 'button' && n.textContent === label).listeners.click();
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const doc = n => ({ sql: 'SELECT {{n}} AS value', variables: { n: variable('integer', n) }, maxRows: 50 });
 
@@ -88,10 +92,10 @@ test('host auto-runs defaults, sends only query SQL/row limit and does not persi
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0].params)), { sql: 'SELECT 12 AS value', max_rows: 50 });
   h.calls[0].resolve({ data: { columns: ['value'], rows: [{ value: 12 }], row_count: 1 } });
   await flush();
-  const form = h.app.children[1];
-  const input = form.children[0].children[0].children[1];
+  assert.equal(find(h.app, n => n.tag === 'form'), null); // the host sandbox drops form submits
+  const input = field(h, 'n');
   input.value = '-3'; input.listeners.input();
-  form.listeners.submit({ preventDefault() {} });
+  press(h, '查询');
   assert.equal(h.calls[1].params.sql, 'SELECT (-3) AS value');
   assert.equal(payload.variables.n.default, 12);
   const reopened = host(); reopened.receive(payload);
@@ -119,15 +123,60 @@ test('old responses cannot populate a new invalid view; queryability restoration
 
 test('invalid edits invalidate an in-flight response without issuing another query', async () => {
   const h = host(); h.receive(doc(1));
-  const form = h.app.children[1];
-  const input = form.children[0].children[0].children[1];
+  const input = field(h, 'n');
   input.value = 'invalid'; input.listeners.input();
-  form.listeners.submit({ preventDefault() {} });
+  input.listeners.keydown({ key: 'Enter', preventDefault() {} });
   assert.equal(h.calls.length, 1);
   h.calls[0].resolve({ data: { rows: [{ value: 'STALE' }] } });
   await flush();
   assert.doesNotMatch(text(h.app), /STALE/);
   assert.match(text(h.app), /请修正/);
+});
+
+test('Enter in a text field runs the query; busy connectors are retried', async () => {
+  const h = host(); h.receive(doc(1));
+  h.calls[0].reject(new Error('连接器正在初始化、授权或更新。请等待当前操作结束，再重试。'));
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].params.sql, 'SELECT 1 AS value');
+  h.calls[1].resolve({ data: { rows: [{ value: 'FRESH' }] } });
+  await flush();
+  assert.match(text(h.app), /FRESH/);
+  assert.doesNotMatch(text(h.app), /正在初始化/);
+  const input = field(h, 'n');
+  input.value = '7'; input.listeners.input();
+  input.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  assert.equal(h.calls[2].params.sql, 'SELECT 7 AS value');
+  h.calls[2].reject(new Error('connector_unavailable'));
+  await flush();
+  assert.equal(h.calls.length, 3); // other failures are shown, not retried
+  assert.match(text(h.app), /不可用/);
+});
+
+test('inputs show the values in effect, including dates', async () => {
+  const h = host();
+  h.receive({ sql: 'SELECT {{d}}, {{n}}', variables: { d: variable('date', '2026-10-16'), n: variable('integer', 3) } });
+  assert.equal(field(h, 'd').value, '2026-10-16');
+  assert.equal(field(h, 'n').value, '3');
+  h.calls[0].resolve({ data: { rows: [] } });
+  await flush();
+  const input = field(h, 'n');
+  input.value = '9'; input.listeners.input();
+  press(h, '查询');
+  assert.equal(field(h, 'n').value, '9');
+  assert.equal(h.calls[1].params.sql, "SELECT '2026-10-16', 9");
+});
+
+test('the SQL toggle sits in the title row and shows the executed statement', async () => {
+  const h = host(); h.receive(doc(5));
+  const header = h.app.children[0];
+  const toggle = header.children[1];
+  assert.equal(toggle.textContent, '执行的 SQL');
+  const pane = find(h.app, n => n.tag === 'pre');
+  assert.equal(pane.hidden, true);
+  toggle.listeners.click();
+  assert.equal(pane.hidden, false);
+  assert.equal(pane.textContent, 'SELECT 5 AS value');
 });
 
 test('manifest routes exclusively through the permission-rewriting MCP tool', () => {

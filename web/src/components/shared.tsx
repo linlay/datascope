@@ -1,3 +1,4 @@
+import { useI18n } from '../ui/preferences';
 import { useEffect, useMemo, useState } from 'react';
 import { Select, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -14,17 +15,19 @@ export const schemeMeta: Record<Scheme, { label: string; color: string }> = {
 };
 
 export function SchemeTag({ scheme }: { scheme: Scheme }) {
+ const t=useI18n();
   const meta = schemeMeta[scheme];
-  return meta ? <Tag color={meta.color}>{meta.label}</Tag> : <Tag>{scheme}</Tag>;
+  return meta ? <Tag color={meta.color}>{t(meta.label)}</Tag> : <Tag>{scheme}</Tag>;
 }
 
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' });
 
 export function CellValue({ column, value }: { column: string; value: unknown }) {
+ const t=useI18n();
   if (value === null || value === undefined) return <Text type="secondary">NULL</Text>;
   if (column.endsWith('_cents') && typeof value === 'number') {
     return (
-      <Tooltip title={`${value} 分`}>
+      <Tooltip title={t("{0} 分", {"0":(value)})}>
         <span className="mono" style={{ color: value < 0 ? '#cf1322' : undefined }}>
           {money.format(value / 100)}
         </span>
@@ -46,6 +49,7 @@ export function ResultTable({
   loading?: boolean;
   pageSize?: number;
 }) {
+ const t=useI18n();
   const tableColumns: ColumnsType<Row> = columns.map((name) => ({
     title: <span className="mono">{name}</span>,
     dataIndex: name,
@@ -62,7 +66,7 @@ export function ResultTable({
       dataSource={rows.map((row, i) => ({ ...row, __key: i }))}
       rowKey="__key"
       scroll={{ x: 'max-content' }}
-      pagination={{ pageSize, showSizeChanger: true, hideOnSinglePage: true, showTotal: (n) => `${n} 行` }}
+      pagination={{ pageSize, showSizeChanger: true, hideOnSinglePage: true, showTotal: (n) => t("{0} 行", {"0":(n)}) }}
     />
   );
 }
@@ -104,23 +108,24 @@ export function UserPicker({
   disabled?: boolean;
   size?: 'small' | 'middle' | 'large';
 }) {
+ const t=useI18n();
   const [users, setUsers] = useState<UserSummary[]>([]);
   useEffect(() => {
     api.users().then(setUsers).catch(() => setUsers([]));
   }, []);
   const label = (u: UserSummary) =>
-    `${u.emp_no} ${u.name} · ${u.roles || '无角色'}${u.status !== 'active' ? ' · 已离职' : ''}`;
+    `${u.emp_no} ${u.name} · ${u.roles || '无角色'}${u.status !== 'active' ? t(" · 已离职") : ''}`;
   const byId = new Map(users.map((u) => [u.id, u]));
   const options = [
     {
-      label: '典型身份',
+      label: t("典型身份"),
       options: presets.map((p) => ({
         value: p.id,
         label: byId.has(p.id) ? `${label(byId.get(p.id)!)}（${p.note}）` : `#${p.id}（${p.note}）`,
       })),
     },
     {
-      label: '全部员工',
+      label: t("全部员工"),
       options: users.filter((u) => !presets.some((p) => p.id === u.id)).map((u) => ({ value: u.id, label: label(u) })),
     },
   ];

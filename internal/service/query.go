@@ -36,6 +36,18 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 		return nil, err
 	}
 	for _, pol := range cfg.Tables {
+		if st.Driver() != "sqlite" {
+			if pol.CompiledSQL != "" {
+				if err := st.ValidatePortable(pol.CompiledSQL, pol.Params); err != nil {
+					return nil, fmt.Errorf("表 %s 策略不兼容: %w", pol.Table, err)
+				}
+			}
+			if pol.CompiledGuard != "" {
+				if err := st.ValidatePortable(rewrite.GuardQuery(pol.CompiledGuard), pol.GuardParams); err != nil {
+					return nil, fmt.Errorf("表 %s 前置检查不兼容: %w", pol.Table, err)
+				}
+			}
+		}
 		if len(pol.Columns) == 0 {
 			continue
 		}
@@ -45,10 +57,18 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 		}
 		known := map[string]bool{}
 		for _, c := range schema.Columns {
-			known[strings.ToLower(c.Name)] = true
+			key := c.Name
+			if st.Driver() == "sqlite" {
+				key = strings.ToLower(key)
+			}
+			known[key] = true
 		}
 		for _, c := range pol.Columns {
-			if !known[strings.ToLower(c)] {
+			key := c
+			if st.Driver() == "sqlite" {
+				key = strings.ToLower(key)
+			}
+			if !known[key] {
 				return nil, fmt.Errorf("表 %s 没有字段 %s", pol.Table, c)
 			}
 		}
@@ -65,9 +85,13 @@ func (s *QueryService) Config() *rewrite.Config { return s.Rewriter.Config() }
 
 // Bindings returns the trusted values for every template variable.
 func (s *QueryService) Bindings(userID int64) map[string]any {
+	var asOf any = s.AsOf.UTC().Format("2006-01-02T15:04:05Z")
+	if s.Store.Driver() != "sqlite" {
+		asOf = s.AsOf.UTC()
+	}
 	return map[string]any{
 		rewrite.VarUserID: userID,
-		rewrite.VarAsOf:   s.AsOf.UTC().Format("2006-01-02T15:04:05Z"),
+		rewrite.VarAsOf:   asOf,
 	}
 }
 
@@ -116,6 +140,9 @@ func (s *QueryService) rewriteWithParameters(ctx context.Context, query string, 
 	}
 	res, err := s.Rewriter.RewriteWithParameters(query, names)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.Store.ValidatePortable(res.RewrittenSQL, res.Params); err != nil {
 		return nil, err
 	}
 	if event != nil {

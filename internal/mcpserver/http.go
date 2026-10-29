@@ -33,7 +33,7 @@ func HTTPHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer
 		base := u.Scheme + "://" + u.Host
 		metaPath := "/.well-known/oauth-protected-resource" + strings.TrimRight(u.Path, "/")
 		scopes := []string{"sql:query", "sql:debug"}
-		if len(catalogues) > 0 && catalogues[0] != nil {
+		if len(catalogues) > 0 && catalogues[0] != nil && catalogues[0].Management != nil {
 			if d, e := catalogues[0].Get(database); e == nil && d.LocalAuthentication() {
 				scopes = []string{"sql:query"}
 			}
