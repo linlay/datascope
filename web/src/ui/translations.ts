@@ -176,6 +176,8 @@ export const english: Record<string,string> = {
   "已配置": "Configured",
   "平台操作": "Platform operation",
   "平台用户": "Platform users",
+  "平台用户管理": "Platform user management",
+  "创建平台账号、重置密码并控制启用状态。": "Create platform accounts, reset passwords and control sign-in status.",
   "开启 MCP": "Enable MCP",
   "开始时间": "Start time",
   "开放": "Access",
