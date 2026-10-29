@@ -21,6 +21,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"datascope-server/internal/action"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/management"
 	"datascope-server/internal/rewrite"
@@ -29,25 +30,28 @@ import (
 )
 
 var DefaultTools = []string{"list_tables", "describe_table", "query"}
-var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge"}
+var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "describe_action", "invoke_action"}
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
-	Discovery              *Discovery        `json:"discovery,omitempty" yaml:"discovery,omitempty"`
-	AuthenticationRevision int64             `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
-	Authentication         *Authentication   `json:"authentication,omitempty" yaml:"authentication,omitempty"`
-	BusinessTools          []BusinessTool    `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
-	ID                     string            `json:"id" yaml:"id"`
-	Name                   string            `json:"name" yaml:"name"`
-	Driver                 string            `json:"driver" yaml:"driver"`
-	Path                   string            `json:"path" yaml:"path"`
-	Connection             *store.Connection `json:"connection,omitempty" yaml:"connection,omitempty"`
-	MCPEnabled             bool              `json:"mcp_enabled" yaml:"mcp_enabled"`
-	MCPPath                string            `json:"mcp_path" yaml:"mcp_path,omitempty"`
-	Tools                  []string          `json:"tools" yaml:"tools"`
-	Config                 *rewrite.Config   `json:"config" yaml:"config"`
-	Revision               int               `json:"revision" yaml:"revision"`
-	ETag                   string            `json:"etag,omitempty" yaml:"-"`
+	Actions                []action.Definition `json:"actions,omitempty" yaml:"actions,omitempty"`
+	WriteEnabled           bool                `json:"write_enabled,omitempty" yaml:"write_enabled,omitempty"`
+	WriteConnection        *store.Connection   `json:"write_connection,omitempty" yaml:"write_connection,omitempty"`
+	Discovery              *Discovery          `json:"discovery,omitempty" yaml:"discovery,omitempty"`
+	AuthenticationRevision int64               `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
+	Authentication         *Authentication     `json:"authentication,omitempty" yaml:"authentication,omitempty"`
+	BusinessTools          []BusinessTool      `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
+	ID                     string              `json:"id" yaml:"id"`
+	Name                   string              `json:"name" yaml:"name"`
+	Driver                 string              `json:"driver" yaml:"driver"`
+	Path                   string              `json:"path" yaml:"path"`
+	Connection             *store.Connection   `json:"connection,omitempty" yaml:"connection,omitempty"`
+	MCPEnabled             bool                `json:"mcp_enabled" yaml:"mcp_enabled"`
+	MCPPath                string              `json:"mcp_path" yaml:"mcp_path,omitempty"`
+	Tools                  []string            `json:"tools" yaml:"tools"`
+	Config                 *rewrite.Config     `json:"config" yaml:"config"`
+	Revision               int                 `json:"revision" yaml:"revision"`
+	ETag                   string              `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
 	Management *management.Store
@@ -277,6 +281,10 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 		st.Close()
 		return nil, err
 	}
+	if err := validateActions(*d); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := validateBusinessTools(*d, svc.Rewriter, st); err != nil {
 		st.Close()
 		return nil, err
@@ -372,6 +380,9 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	d.Discovery = nil
 	applyDiscovery(&d, tables)
 	d.MCPEnabled = false
+	d.Actions = nil
+	d.WriteEnabled = false
+	d.WriteConnection = nil
 	d.Tools = append([]string(nil), DefaultTools...)
 	d.Revision = 1
 	d.AuthenticationRevision = 1
@@ -393,6 +404,25 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	}, credentials...)
 }
 func (c *Catalog) Save(ctx context.Context, d Database) error {
+	return c.SaveWithWritePassword(ctx, d, "")
+}
+
+func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, password string) error {
+	var credentials []management.DatabaseCredential
+	if password != "" {
+		if c.Management == nil || d.Driver == "sqlite" || d.WriteConnection == nil {
+			return fmt.Errorf("写入密码仅用于网络数据库")
+		}
+		if d.WriteConnection.PasswordEnv != "" {
+			return fmt.Errorf("请只提供一种写入密码来源")
+		}
+		d.WriteConnection.CredentialID = management.WriteCredentialID(d.ID)
+		sealed, e := c.Management.SealDatabaseCredential(d.WriteConnection.CredentialID, password)
+		if e != nil {
+			return e
+		}
+		credentials = append(credentials, sealed)
+	}
 	if err := d.ValidateAuthentication(); err != nil {
 		return err
 	}
@@ -438,7 +468,7 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 			}
 		}
 		return fmt.Errorf("数据库不存在")
-	})
+	}, credentials...)
 }
 func (c *Catalog) update(fn func(*[]Database) error) error {
 	return c.updateContext(context.Background(), "database.import", "", fn)

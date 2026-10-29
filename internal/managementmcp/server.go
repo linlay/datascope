@@ -47,6 +47,7 @@ var operations = map[string][]operation{
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"action", "save", "configure_actions", "database_id database", "write_password"},
 		{"discovery", "refresh", "discover_database", "database_id", ""},
 		{"discovery", "apply", "apply_discovery", "database_id id revision", "resolutions"},
 		{"annotation", "save", "save_annotation", "database_id table revision annotation", "column"},
@@ -65,6 +66,7 @@ var operations = map[string][]operation{
 		{"knowledge", "save", "save_knowledge", "database_id id name summary content tables published revision", ""},
 	},
 	"datascope_inspect": {
+		{"action", "try", "try_action", "database_id name arguments request_id business_user_id", ""},
 		{"connection", "test", "test_database_connection", "database", "password"},
 		{"database", "test_connection", "test_connection", "database_id", ""},
 		{"policy", "validate", "validate_policy", "database_id database", ""},
@@ -146,6 +148,8 @@ func decode(tool string, in input) (string, application.Input, error) {
 				required += " name"
 			case "save_policy", "validate_policy":
 				required += " config"
+			case "configure_actions":
+				required += " actions write_enabled"
 			case "configure_mcp":
 				required += " mcp_enabled mcp_path tools"
 			}

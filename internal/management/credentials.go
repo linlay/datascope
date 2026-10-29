@@ -5,8 +5,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -114,4 +116,10 @@ func (s *Store) DatabasePassword(ctx context.Context, id string) (string, error)
 		return "", errors.New("无法解密数据库连接密码，请检查密钥备份")
 	}
 	return string(plain), nil
+}
+
+// WriteCredentialID separates encrypted write credentials from query credentials.
+func WriteCredentialID(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return fmt.Sprintf("write_%x", sum[:16])
 }

@@ -206,7 +206,12 @@ export interface SchemaReport { version:number; at:string; changes:SchemaChange[
 export interface AnnotationResolution {table:string;column?:string;follow_source:boolean}
 export interface PendingDiscovery {id:string;base_version:number;detected_at:string;tables:TableSchema[];changes:SchemaChange[]}
 export interface Discovery { pending?:PendingDiscovery;version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
+export interface ActionParameter { type: "string"|"integer"|"number"|"boolean"; description: string; optional?: boolean; enum?: unknown[]; min?: number; max?: number; max_length?: number; pattern?: string }
+export interface ActionDefinition { name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
 export interface Database {
+ actions?: ActionDefinition[];
+ write_enabled?: boolean;
+ write_connection?: DatabaseConnection;
  discovery?:Discovery;
  connection?:DatabaseConnection;
  authentication?: {type:"local";label?:string;employee_directory?:boolean};

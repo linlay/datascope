@@ -54,7 +54,7 @@ export function BusinessAccounts({ db, onSaved }: { db: Database; onSaved: () =>
     <Form.Item name="name" label={t("姓名")} rules={[{ required: true }]}><Input /></Form.Item>
     <Form.Item name="business_user_id" label={t("业务身份编号（用于 SQL 行权限）")} rules={[{ required: true }]}><InputNumber min={1} precision={0} /></Form.Item>
     <Form.Item name="password" label={editing?.revision ? t("新密码（留空保留原密码）") : t("初始密码")} rules={[{ required: !editing?.revision, min: 6 }]}><Input.Password autoComplete="new-password" /></Form.Item>
-    <Form.Item name="permissions" label={t("业务能力")}><Checkbox.Group options={[{ value: 'query', label: t("权限查询") }, { value: 'knowledge.read', label: t("读取知识") }, { value: 'raw_query', label: t("全量只读查询（绕过行权限）") }]} /></Form.Item>
+    <Form.Item name="permissions" label={t("业务能力")}><Checkbox.Group options={[{ value: 'action', label: t('执行业务操作') }, { value: 'query', label: t("权限查询") }, { value: 'knowledge.read', label: t("读取知识") }, { value: 'raw_query', label: t("全量只读查询（绕过行权限）") }]} /></Form.Item>
     <Form.Item name="active" label={t("启用账号")} valuePropName="checked"><Switch /></Form.Item>
    </Form>
   </Modal>

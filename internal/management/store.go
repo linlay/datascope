@@ -23,7 +23,7 @@ import (
 )
 
 var ErrDenied = errors.New("无权执行此操作")
-var Permissions = []string{"config.read", "config.write", "policy.write", "mcp.write", "knowledge.read", "knowledge.write", "query", "raw_query", "audit.read", "grant", "impersonate"}
+var Permissions = []string{"config.read", "config.write", "policy.write", "mcp.write", "action.write", "knowledge.read", "knowledge.write", "query", "raw_query", "audit.read", "grant", "impersonate"}
 var SystemPermissions = []string{"users.manage", "databases.create"}
 
 type Store struct {
@@ -104,6 +104,10 @@ func Open(path string, a *audit.Store) (*Store, error) {
 	}
 	m := &Store{DB: db, Path: abs, Audit: a}
 	if e = m.initBusinessAccounts(); e != nil {
+		db.Close()
+		return nil, e
+	}
+	if e = m.initActions(); e != nil {
 		db.Close()
 		return nil, e
 	}
@@ -485,8 +489,9 @@ func readRecords(ctx context.Context, q queryer, bucket string) ([]Record, error
 	return out, rows.Err()
 }
 func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database string, fn func([]Record) ([]Record, error), credentials ...DatabaseCredential) error {
-	if len(credentials) > 1 || (len(credentials) == 1 && (bucket != "databases" || action != "database.create" || credentials[0].DatabaseID != database)) {
-		return errors.New("凭据只能随对应数据库创建一同保存")
+	writeCredential := len(credentials) == 1 && bucket == "databases" && action == "database.update" && credentials[0].DatabaseID == WriteCredentialID(database)
+	if len(credentials) > 1 || (len(credentials) == 1 && !writeCredential && (bucket != "databases" || action != "database.create" || credentials[0].DatabaseID != database)) {
+		return errors.New("凭据只能随对应数据库创建或写入账号更新一同保存")
 	}
 	detail := map[string]any{"bucket": bucket, "changes": []any{}}
 	return s.Change(ctx, action, database, detail, func(tx *sql.Tx) error {
@@ -508,7 +513,11 @@ func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database stri
 			if !found {
 				return errors.New("缺少凭据所属的数据库配置")
 			}
-			if _, e = tx.ExecContext(ctx, "INSERT INTO database_credentials(database_id,ciphertext) VALUES(?,?)", credentials[0].DatabaseID, credentials[0].Ciphertext); e != nil {
+			credentialSQL := "INSERT INTO database_credentials(database_id,ciphertext) VALUES(?,?)"
+			if writeCredential {
+				credentialSQL += " ON CONFLICT(database_id) DO UPDATE SET ciphertext=excluded.ciphertext"
+			}
+			if _, e = tx.ExecContext(ctx, credentialSQL, credentials[0].DatabaseID, credentials[0].Ciphertext); e != nil {
 				return e
 			}
 		}

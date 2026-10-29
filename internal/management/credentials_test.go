@@ -136,3 +136,47 @@ func TestCredentialCreationIsAtomicAndKeyPublicationIsConcurrent(t *testing.T) {
 		t.Fatal("credential survived a rolled-back record write")
 	}
 }
+
+func TestWriteCredentialsRotateWithoutChangingReadCredentials(t *testing.T) {
+	ctx := context.Background()
+	m, e := Open(filepath.Join(t.TempDir(), "management.sqlite"), nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	save := func(action string, c DatabaseCredential) error {
+		return m.UpdateRecords(ctx, "databases", action, "source", func([]Record) ([]Record, error) { return []Record{{Key: "source", Data: `{"id":"source"}`}}, nil }, c)
+	}
+	read, e := m.SealDatabaseCredential("source", "read-password")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = save("database.create", read); e != nil {
+		t.Fatal(e)
+	}
+	key := WriteCredentialID("source")
+	for _, password := range []string{"write-password", "rotated-password"} {
+		sealed, e := m.SealDatabaseCredential(key, password)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = save("database.update", sealed); e != nil {
+			t.Fatal(e)
+		}
+		got, e := m.DatabasePassword(ctx, key)
+		if e != nil || got != password {
+			t.Fatal(got, e)
+		}
+	}
+	got, e := m.DatabasePassword(ctx, "source")
+	if e != nil || got != "read-password" {
+		t.Fatal("query credential changed", e)
+	}
+	foreign, e := m.SealDatabaseCredential(WriteCredentialID("foreign"), "foreign-password")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = save("database.update", foreign); e == nil {
+		t.Fatal("cross-database write credential accepted")
+	}
+}

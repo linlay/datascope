@@ -62,6 +62,53 @@
           }
         }
       }
+    },
+    "action": {
+      "title": "确认业务操作",
+      "description": "Display a confirm_required response from invoke_action. Copy preview and confirmation_url from the tool response exactly. The human opens the confirmation page and signs in with the originating business account. Never submit credentials or confirm on the human's behalf; after confirmation, call invoke_action with the original request_id to retrieve its result.",
+      "renderer": "html",
+      "usage": [
+        "display"
+      ],
+      "entry": "views/action.html",
+      "assets": [
+        "views/sql.css",
+        "views/action.js"
+      ],
+      "dataSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "preview",
+          "confirmation_url"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "preview": {
+            "type": "object",
+            "required": [
+              "result",
+              "writes"
+            ],
+            "properties": {
+              "result": {},
+              "writes": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "confirmation_url": {
+            "type": "string",
+            "maxLength": 2048
+          }
+        }
+      }
     }
   }
 }

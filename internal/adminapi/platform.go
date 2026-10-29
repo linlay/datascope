@@ -19,7 +19,12 @@ import (
 func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 	m := app.Management
 	limiter := rate.NewLimiter(2, 10)
+	confirmation := ActionConfirmationHandler(app)
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/actions/confirm" {
+			confirmation.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return

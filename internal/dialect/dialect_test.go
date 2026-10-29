@@ -185,3 +185,30 @@ func TestExecutableCommentsAreNotForwarded(t *testing.T) {
 		t.Fatalf("comment forwarded: %s", out)
 	}
 }
+
+func TestActionDMLCompilation(t *testing.T) {
+	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+		t.Run(driver, func(t *testing.T) {
+			for _, q := range []string{"INSERT INTO records(id,owner) VALUES(:id,:owner)", "UPDATE records SET owner=:owner WHERE id=:id", "DELETE FROM records WHERE id=:id"} {
+				out, args, e := engine(driver).CompileWrite(q, sql.Named("id", 7), sql.Named("owner", 2))
+				if e != nil {
+					t.Fatal(q, e)
+				}
+				if !strings.Contains(out, "Records") || !strings.Contains(out, "business") || len(args) == 0 || strings.Contains(out, ":owner") {
+					t.Fatal(out, args)
+				}
+				if driver == "postgresql" && !strings.Contains(out, "$1") {
+					t.Fatal(out)
+				}
+				if (driver == "oracle" || driver == "dameng") && !strings.Contains(out, ":1") {
+					t.Fatal(out)
+				}
+			}
+			for _, q := range []string{"DELETE FROM records", "UPDATE records SET owner=2", "DROP TABLE records", "UPDATE foreign.records SET owner=2 WHERE id=1", "INSERT INTO foreign.records(id) VALUES(1)", "INSERT OR REPLACE INTO records(id) VALUES(1)"} {
+				if _, _, e := engine(driver).CompileWrite(q); e == nil {
+					t.Fatal("accepted", q)
+				}
+			}
+		})
+	}
+}

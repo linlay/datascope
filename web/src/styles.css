@@ -307,3 +307,6 @@ details > summary {
 }
 
 .system-settings-drawer .ant-drawer-content-wrapper { max-width: 100vw; }
+
+/* Keep action code and transaction previews readable over the glass panels. */
+.action-dialog .ant-modal-container { background: var(--bg-base); }

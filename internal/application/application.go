@@ -23,6 +23,8 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	Arguments      map[string]any                 `json:"arguments,omitempty"`
+	WritePassword  string                         `json:"write_password,omitempty"`
 	ActorID        *int64                         `json:"actor_id,omitempty"`
 	PlatformOnly   bool                           `json:"platform_only,omitempty"`
 	Kind           string                         `json:"kind,omitempty"`
@@ -89,6 +91,45 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "try_action":
+		if e := require("action.write"); e != nil {
+			return nil, e
+		}
+		if e := require("impersonate"); e != nil {
+			return nil, e
+		}
+		if in.BusinessUserID <= 0 {
+			return nil, errors.New("需要正整数业务身份")
+		}
+		return s.invokeAction(ctx, in.DatabaseID, in.Name, in.RequestID, in.Arguments, fmt.Sprintf("platform:%d", u.ID), in.BusinessUserID, "", 0, true)
+	case "configure_actions":
+		if e := require("action.write"); e != nil {
+			return nil, e
+		}
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("需要标识一致的 database")
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Revision != in.Database.Revision {
+			return nil, errors.New("配置已变更，请刷新后重试")
+		}
+		d.Actions = in.Database.Actions
+		d.WriteEnabled = in.Database.WriteEnabled
+		d.WriteConnection = in.Database.WriteConnection
+		if e = s.Catalog.SaveWithWritePassword(ctx, *d, in.WritePassword); e != nil {
+			return nil, e
+		}
+		saved, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *saved), nil
 	case "list_users", "create_user", "disable_user", "enable_user", "reset_password":
 		if e := guard.Require(ctx, s.Management, "", "users.manage"); e != nil {
 			return nil, e
@@ -330,6 +371,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
 			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
+		if !reflect.DeepEqual(old.Actions, in.Database.Actions) || old.WriteEnabled != in.Database.WriteEnabled || !reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) || in.WritePassword != "" {
+			if e := require("action.write"); e != nil {
+				return nil, e
+			}
+		}
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
@@ -351,10 +397,10 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
-		if e := s.Catalog.Save(ctx, *in.Database); e != nil {
+		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
 			return nil, e
 		}
 		d, e := s.Catalog.Get(in.DatabaseID)
@@ -577,6 +623,9 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.Connection = nil
 		d.Config = nil
 		d.BusinessTools = nil
+		d.Actions = nil
+		d.WriteConnection = nil
+		d.WriteEnabled = false
 		d.Tools = nil
 	}
 	return DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}

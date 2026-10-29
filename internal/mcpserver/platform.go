@@ -50,11 +50,16 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			}
 			ctx = audit.With(ctx, audit.Metadata{RequestID: audit.From(ctx).RequestID, DatabaseID: d.ID, SubjectID: a.BusinessUserID, Source: "business-mcp", Tool: tool, PolicyVersion: d.Revision})
 			permission := "query"
+			if tool == "describe_action" || tool == "invoke_action" {
+				permission = "action"
+			}
 			if tool == "raw_query" || tool == "customer_scope" {
 				permission = "raw_query"
 			}
-			if err = guard.Require(ctx, h.opts.Management, d.ID, permission); err != nil {
-				return nil, err
+			if method == "tools/call" || method != "tools/list" && method != "initialize" && method != "notifications/initialized" && method != "ping" {
+				if err = guard.Require(ctx, h.opts.Management, d.ID, permission); err != nil {
+					return nil, err
+				}
 			}
 			if tool == "search_knowledge" || tool == "read_knowledge" {
 				if err = guard.Require(ctx, h.opts.Management, d.ID, "knowledge.read"); err != nil {
@@ -66,6 +71,13 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 				list := res.(*mcp.ListToolsResult)
 				allowed := []*mcp.Tool{}
 				for _, t := range list.Tools {
+					if t.Name == "describe_action" || t.Name == "invoke_action" {
+						if !d.WriteEnabled || !slices.Contains(a.Permissions, "action") {
+							continue
+						}
+					} else if !slices.Contains(a.Permissions, "query") {
+						continue
+					}
 					if (t.Name == "raw_query" || t.Name == "customer_scope") && !slices.Contains(a.Permissions, "raw_query") {
 						continue
 					}

@@ -22,7 +22,7 @@ type BusinessAccount struct {
 	AuthVersion    int64    `json:"revision"`
 }
 
-var BusinessPermissions = []string{"query", "knowledge.read", "raw_query"}
+var BusinessPermissions = []string{"query", "knowledge.read", "raw_query", "action"}
 
 func (s *Store) initBusinessAccounts() error {
 	_, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS business_accounts(
@@ -84,7 +84,7 @@ func (s *Store) SaveBusinessAccount(ctx context.Context, a BusinessAccount, pass
 	}
 	for _, p := range a.Permissions {
 		if !slices.Contains(BusinessPermissions, p) {
-			return a, errors.New("业务账号只能获得查询、知识读取或全量只读查询能力")
+			return a, errors.New("业务账号只能获得 query、knowledge.read、raw_query 或 action 能力")
 		}
 	}
 	if password != "" && len(password) < 6 {

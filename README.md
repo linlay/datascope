@@ -31,7 +31,8 @@ internal/
   management/       平台用户、会话、直接授权、配置记录与版本、审计 outbox
   guard/            统一授权检查与可信身份上下文
   rewrite/          AST 解析、表字段限制、行权限注入、参数检查
-  store/            只读数据库执行、结构读取、分页、超时与行数上限
+  store/            只读查询、独立 Action 写事务、结构读取、分页与限制
+  action/           goja 脚本、固定 SQL 模板、参数校验与事务运行器
   audit/            请求、改写、执行、权限检查及操作审计
   application/      Web 与管理 MCP 共用的领域动作
   adminapi/         受保护的后台 HTTP API
@@ -50,7 +51,7 @@ internal/
 | `data/oauth/signing.pem` | OAuth 私钥，独立文件保存 |
 | `data/management.sqlite.credentials.key` | 数据库连接密码加密密钥，首次直接保存密码时自动生成，须与管理库一同备份 |
 
-业务数据库只读连接。`DATABASE_ALLOWED_ROOTS` 指定允许登记的目录，macOS/Linux 多个目录用 `:` 分隔；默认 `data`。管理库、审计库及其符号链接、硬链接不能注册为业务数据源。原始查询也禁止 ATTACH 和修改连接状态的 PRAGMA，避免从已授权业务库访问内部状态。
+常规查询使用业务数据库只读连接；业务 Action 使用显式启用的独立写入连接，见 [业务操作说明](docs/actions.md)。`DATABASE_ALLOWED_ROOTS` 指定允许登记的目录，macOS/Linux 多个目录用 `:` 分隔；默认 `data`。管理库、审计库及其符号链接、硬链接不能注册为业务数据源。原始查询也禁止 ATTACH 和修改连接状态的 PRAGMA，避免从已授权业务库访问内部状态。
 
 ## 全站显示设置
 
@@ -65,7 +66,8 @@ internal/
 | `config.read` | 查看连接和配置，使用配置管理页面 |
 | `config.write` | 修改数据库名称 |
 | `policy.write` | 修改表、字段、行权限策略 |
-| `mcp.write` | 配置 MCP 地址、基础工具与业务工具 |
+| `mcp.write` | 配置 MCP 地址、基础工具与业务查询工具 |
+| `action.write` | 编写业务 Action、启停独立写入及维护写入账号 |
 | `knowledge.read` | 通过数据库 MCP 检索、读取已发布知识；还需 `query` |
 | `knowledge.write` | 编辑、发布知识 |
 | `query` | 以可信业务身份改写并执行查询 |
@@ -107,7 +109,7 @@ Web 与管理 MCP 共用管理动作：`get_discovery`（`config.read`）、`dis
 - `local`：DataScope 模拟当前数据库的员工认证。账号单独存入 `business_accounts`，以 `(database_id, username)` 隔离，密码独立哈希；业务库仍只读，不要求业务库自行提供账号表。未填写 `authentication` 时也使用独立业务账号，初始账号为空。
 - `employee_directory: true`：额外校验当前业务库 `employees` 目录的工号、员工编号与在职状态，适用于证券 demo。其他数据库通常关闭，由其业务账号绑定对应 SQL 策略需要的业务身份编号。
 
-平台管理员可以为每个数据库分别创建、停用业务账号、设置业务能力或重置密码，也可以通过管理 MCP 的 `business_account.list/save` 操作维护。业务账号最多获得 `query`、`knowledge.read` 和单独授予的 `raw_query`；它不能登录管理后台或调用管理 MCP。管理业务账号及修改认证设置仅限平台管理员。
+平台管理员可以为每个数据库分别创建、停用业务账号、设置业务能力或重置密码，也可以通过管理 MCP 的 `business_account.list/save` 操作维护。业务账号可获得 `query`、`action`、`knowledge.read` 和单独授予的 `raw_query`；它不能登录管理后台或调用管理 MCP。管理业务账号及修改认证设置仅限平台管理员。
 
 每个数据库有独立 OAuth issuer：`{OAUTH_ISSUER}/auth/databases/{database_id}`。业务 MCP 的资源发现元数据返回该 issuer，客户端随后发现其授权、注册、令牌端点并跳转该数据库的员工登录页。管理 MCP 始终使用平台根 issuer。旧客户端仍从根授权入口发起业务授权时，会跳转相应数据库的员工认证入口。
 
@@ -145,7 +147,7 @@ Web 与管理 MCP 共用管理动作：`get_discovery`（`config.read`）、`dis
 
 默认地址为 `http://127.0.0.1:8080/mcp/{mcp_path}`，保留原有分库地址及默认库 `/mcp` 入口。`admin` 为保留路径后缀。
 
-每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`search_knowledge`、`read_knowledge`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
+每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`search_knowledge`、`read_knowledge`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
 
 HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数据库的令牌不能混用。业务 MCP 按数据库认证来源重新检查当前业务账号、能力和工具启停；管理 MCP 检查平台账号及管理授权。已有连接不能保留已撤销权限。
 
@@ -172,6 +174,10 @@ HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数�
 
 工具定义保存时验证名称、参数与 SQL。业务工具自动出现在对应数据库 MCP 中，删除定义即停用；MCP 总开关继续生效。
 
+## 业务操作 Action
+
+「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、持久幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。
+
 ## 业务知识与渐进式披露
 
 “业务知识”中编辑名称、摘要、正文、关联表与发布状态。建议正文记录表关联、关联基数、金额单位、统计口径、去重方式、查询步骤与示例 SQL。
@@ -191,7 +197,7 @@ query(...)                     → 权限改写并执行
 
 SQL 在改写和执行前同步写入起始记录，审计不可用时拒绝执行。记录包括 request ID、平台用户、业务身份、入口、工具、策略版本、原始 SQL、改写 SQL、执行 SQL、参数、时间、返回行数、截断和错误。
 
-覆盖普通查询、改写预览、全量只读查询、分页浏览自动生成的 SQL，以及 `deny_unless` 的前置检查。SQL 解析失败、权限拒绝、超时也有记录。MCP HTTP 层在认证前记录 SQL 请求，因此撤销令牌后的拒绝请求仍可追踪。结果数据正文不保存；密码、会话令牌和 OAuth 凭据不进入操作审计。
+覆盖普通查询、改写预览、全量只读查询、分页浏览自动生成的 SQL，以及 `deny_unless` 的前置检查。SQL 解析失败、权限拒绝、超时也有记录。MCP HTTP 层在认证前记录 SQL 请求，因此撤销令牌后的拒绝请求仍可追踪。普通查询结果数据正文不保存；Action 另记录脚本返回值和写入计划；密码、会话令牌和 OAuth 凭据不进入操作审计。
 
 管理变更与审计 outbox 在管理库同一事务提交，后台重试投递到审计库；事件 ID 去重。数据库配置和知识同时保留历史版本。完成审计独立于请求取消进行有限重试；长期未完成的事件显示为结果未知，不能据此判定查询成功。当前不自动删除审计，备份和保留周期由部署方安排。
 
