@@ -104,6 +104,9 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 		return nil, err
 	}
 	st.Audit = c.Audit
+	if c.Management != nil {
+		st.Audit = c.Management.AuditFor(d.ID)
+	}
 	if d.Discovery != nil {
 		st.Annotations = d.Discovery.Annotations
 	}

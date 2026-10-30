@@ -11,21 +11,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-// DatabaseCredential is sealed before a source is registered. Only the opaque
-// reference goes into versioned configuration and operation audit records.
+// DatabaseCredential carries sealed credentials only inside configuration transactions.
 type DatabaseCredential struct {
 	DatabaseID string `json:"-"`
 	Ciphertext []byte `json:"-"`
 }
 
-func (s *Store) credentialKey(create bool) ([]byte, error) {
-	path := s.Path + ".credentials.key"
+func (s *Store) credentialKey(id string, create bool) ([]byte, error) {
+	source, err := s.credentialSource(id, create)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(filepath.Dir(source.Path), "credentials.key")
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) && create {
 		var count int
-		if err := s.DB.QueryRow("SELECT COUNT(*) FROM database_credentials").Scan(&count); err != nil {
+		if err := source.DB.QueryRow("SELECT COUNT(*) FROM CONNECTION_CONFIG WHERE PASSWORD_CIPHERTEXT_ IS NOT NULL").Scan(&count); err != nil {
 			return nil, err
 		}
 		if count > 0 {
@@ -50,7 +54,6 @@ func (s *Store) credentialKey(create bool) ([]byte, error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		// Publish a complete key atomically; another process may win this race.
 		if err = os.Link(file.Name(), path); err != nil && !os.IsExist(err) {
 			return nil, err
 		}
@@ -68,9 +71,8 @@ func (s *Store) credentialKey(create bool) ([]byte, error) {
 	}
 	return key, nil
 }
-
-func (s *Store) credentialCipher(create bool) (cipher.AEAD, error) {
-	key, err := s.credentialKey(create)
+func (s *Store) credentialCipher(id string, create bool) (cipher.AEAD, error) {
+	key, err := s.credentialKey(id, create)
 	if err != nil {
 		return nil, err
 	}
@@ -80,12 +82,11 @@ func (s *Store) credentialCipher(create bool) (cipher.AEAD, error) {
 	}
 	return cipher.NewGCM(block)
 }
-
 func (s *Store) SealDatabaseCredential(id, password string) (DatabaseCredential, error) {
 	if id == "" || len(password) == 0 || len(password) > 16384 {
 		return DatabaseCredential{}, errors.New("需要数据库密码，最多 16384 字节")
 	}
-	aead, err := s.credentialCipher(true)
+	aead, err := s.credentialCipher(id, true)
 	if err != nil {
 		return DatabaseCredential{}, err
 	}
@@ -95,16 +96,23 @@ func (s *Store) SealDatabaseCredential(id, password string) (DatabaseCredential,
 	}
 	return DatabaseCredential{DatabaseID: id, Ciphertext: aead.Seal(nonce, nonce, []byte(password), []byte(id))}, nil
 }
-
 func (s *Store) DatabasePassword(ctx context.Context, id string) (string, error) {
+	source, err := s.credentialSource(id, false)
+	if err != nil {
+		return "", err
+	}
+	purpose := "READ"
+	if id != filepath.Base(filepath.Dir(source.Path)) {
+		purpose = "WRITE"
+	}
 	var sealed []byte
-	if err := s.DB.QueryRowContext(ctx, "SELECT ciphertext FROM database_credentials WHERE database_id=?", id).Scan(&sealed); err != nil {
+	if err := source.DB.QueryRowContext(ctx, "SELECT PASSWORD_CIPHERTEXT_ FROM CONNECTION_CONFIG WHERE PURPOSE_=?", purpose).Scan(&sealed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", errors.New("数据库连接密码尚未保存")
 		}
 		return "", err
 	}
-	aead, err := s.credentialCipher(false)
+	aead, err := s.credentialCipher(id, false)
 	if err != nil {
 		return "", err
 	}
@@ -118,8 +126,39 @@ func (s *Store) DatabasePassword(ctx context.Context, id string) (string, error)
 	return string(plain), nil
 }
 
-// WriteCredentialID separates encrypted write credentials from query credentials.
 func WriteCredentialID(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	return fmt.Sprintf("write_%x", sum[:16])
+}
+
+func (s *Store) credentialSource(key string, create bool) (*Source, error) {
+	ids, _ := s.sourceIDs()
+	for _, id := range ids {
+		if key == id || key == WriteCredentialID(id) {
+			return s.source(context.Background(), id, create)
+		}
+	}
+	if create && sourceID.MatchString(key) && !strings.HasPrefix(key, "write_") {
+		return s.source(context.Background(), key, true)
+	}
+	return nil, errors.New("数据库凭据引用无效")
+}
+func (s *Store) openLegacyCredential(id string, sealed []byte) (string, error) {
+	key, e := os.ReadFile(s.Path + ".credentials.key")
+	if e != nil {
+		return "", e
+	}
+	block, e := aes.NewCipher(key)
+	if e != nil {
+		return "", e
+	}
+	gcm, e := cipher.NewGCM(block)
+	if e != nil {
+		return "", e
+	}
+	if len(sealed) < gcm.NonceSize() {
+		return "", errors.New("旧凭据格式无效")
+	}
+	plain, e := gcm.Open(nil, sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():], []byte(id))
+	return string(plain), e
 }

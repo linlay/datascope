@@ -6,7 +6,7 @@ const port = Number(process.env.WEB_PORT ?? 8082);
 // Keep the browser's Host header (Vite's string shorthand would rewrite it) so
 // the admin API's same-origin and DNS-rebinding checks see the real origin.
 const target = { target: adminApi, changeOrigin: false };
-const proxy = { '/api': target, '/healthz': target };
+const proxy = { '/api': target, '/actions': target, '/healthz': target };
 
 export default defineConfig({
   esbuild: { jsx: 'automatic' },

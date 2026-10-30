@@ -1,3 +1,4 @@
+import { AuthenticationSettings } from './AuthenticationSettings';
 import { useState } from 'react';
 import { Button, Card, Drawer, Select, Space, Typography } from 'antd';
 import { usePreferences, type Appearance, type Language } from '../ui/preferences';
@@ -7,6 +8,7 @@ import { PlatformUsersDialog } from './PlatformUsers';
 export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
  const {language,setLanguage,appearance,setAppearance,t}=usePreferences();
  const {user}=useAuth();
+ const [authOpen,setAuthOpen]=useState(false);
  const [usersOpen,setUsersOpen]=useState(false);
  const close=()=>{setUsersOpen(false);onClose();};
  return <>
@@ -25,12 +27,14 @@ export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
     <Typography.Paragraph>{t('创建平台账号、重置密码并控制启用状态。')}</Typography.Paragraph>
     <Button type="primary" onClick={()=>setUsersOpen(true)}>{t('用户管理')}</Button>
    </Card>}
+   {user.system_admin&&<Card size="small" title="全局认证"><p>配置普通账号、企业认证、演示 OAuth 与接口绑定。</p><Button onClick={()=>setAuthOpen(true)}>认证配置</Button></Card>}
    <Card size="small" title={t('管理连接器')}>
     <Typography.Paragraph>{t('使用平台账号授权，权限与管理后台一致。')}</Typography.Paragraph>
     <Button type="primary" href="/api/connectors/datascope-admin.zip">{t('下载连接器 ZIP')}</Button>
    </Card>
   </Space>
  </Drawer>
+ {user.system_admin&&<AuthenticationSettings open={authOpen} onClose={()=>setAuthOpen(false)}/>}
  {user.system_admin&&<PlatformUsersDialog open={usersOpen} onClose={()=>setUsersOpen(false)}/>}
  </>;
 }

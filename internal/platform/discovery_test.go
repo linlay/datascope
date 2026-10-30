@@ -35,7 +35,7 @@ func TestDiscoveryAuthorizationAndDriftRecovery(t *testing.T) {
 		t.Fatal("unchanged scan invalidated an editor revision")
 	}
 	var snapshotCount int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM record_versions WHERE bucket='databases' AND key='default'").Scan(&snapshotCount))
+	must(t, sourceDB(t, f, "default").QueryRow("SELECT COUNT(*) FROM CONFIG_VERSION WHERE BUCKET_='databases' AND KEY_='default'").Scan(&snapshotCount))
 	if snapshotCount != 2 {
 		t.Fatalf("unchanged scan rewrote full snapshot history: %d", snapshotCount)
 	}

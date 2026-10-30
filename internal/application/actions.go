@@ -273,10 +273,25 @@ func (s *Service) ConfirmAction(ctx context.Context, token, password string) (*A
 	if e = json.Unmarshal([]byte(rec.Data), &p); e != nil {
 		return nil, e
 	}
-	a, e := s.Management.AuthenticateBusiness(ctx, rec.DatabaseID, p.Username, password)
+	policy, e := s.Management.ResolveAuth(ctx, "DATABASE", rec.DatabaseID)
 	if e != nil {
 		return nil, e
 	}
+	a, trusted := guard.Business(ctx)
+	if !trusted || policy.Provider.Type != "ENTERPRISE_OAUTH" {
+		if policy.Provider.Type == "DEMO_OAUTH" {
+			a, e = s.Management.AuthenticateBusiness(ctx, rec.DatabaseID, p.Username, password)
+		} else {
+			a, e = s.Management.VerifyAccount(ctx, policy, rec.DatabaseID, p.Username, password)
+		}
+		if e != nil {
+			return nil, e
+		}
+	}
+	if a.DatabaseID != rec.DatabaseID {
+		return nil, management.ErrDenied
+	}
+
 	if fmt.Sprintf("business:%d", a.ID) != rec.Actor || a.AuthVersion != p.AccountRevision || a.BusinessUserID != p.UserID {
 		return nil, management.ErrDenied
 	}
@@ -291,8 +306,10 @@ func (s *Service) ConfirmAction(ctx context.Context, token, password string) (*A
 	if rec.Revision != d.Revision || p.AuthenticationVersion != d.AuthenticationVersion() {
 		return nil, errors.New("数据库配置已变化，请重新预览")
 	}
-	if _, e = s.Catalog.BusinessAccount(ctx, d, a.Username); e != nil {
-		return nil, e
+	if policy.Local() {
+		if _, e = s.Catalog.BusinessAccount(ctx, d, a.Username); e != nil {
+			return nil, e
+		}
 	}
 	if e = s.Management.TransitionAction(ctx, rec, "pending", "running", rec.Data, "", 0); e != nil {
 		return nil, e

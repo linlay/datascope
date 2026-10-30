@@ -1,7 +1,7 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Input, Space, Typography, message } from 'antd';
-import { managementCall, type Database } from '../api';
+import { Alert, Button, Card, Descriptions, Input, Space, Typography, message, Switch, Tag } from 'antd';
+import { managementCall, type Database, type DatabaseConnection } from '../api';
 import { driverLabels } from '../components/ConnectionFields';
 import { useAuth } from '../Auth';
 import { AccessPage } from './PlatformPages';
@@ -11,9 +11,13 @@ export function DatabaseSettings({ db, onSaved }: {db?:Database;onSaved:()=>void
  const {user}=useAuth();
  const can=(p:string)=>user.system_admin||!!db?.permissions?.includes(p);
  const [name,setName]=useState(db?.name??'');
+ const [writeEnabled,setWriteEnabled]=useState(!!db?.write_enabled);
+ const [writeUser,setWriteUser]=useState(db?.write_connection?.username||'');
+ const [writePassword,setWritePassword]=useState('');
+ const [writeEnv,setWriteEnv]=useState(db?.write_connection?.password_env||'');
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState<string>();
- useEffect(()=>{setName(db?.name??'');setError(undefined)},[db?.id,db?.name]);
+ useEffect(()=>{setName(db?.name??'');setWriteEnabled(!!db?.write_enabled);setWriteUser(db?.write_connection?.username||'');setWriteEnv(db?.write_connection?.password_env||'');setWritePassword('');setError(undefined)},[db?.id,db?.name]);
  const run=async(work:()=>Promise<unknown>,text:string)=>{setBusy(true);setError(undefined);try{await work();message.success(text);onSaved()}catch(e){setError((e as Error).message)}finally{setBusy(false)}};
  const c=db?.connection;
  return <Space orientation="vertical" style={{width:'100%'}} size="middle">
@@ -35,6 +39,8 @@ export function DatabaseSettings({ db, onSaved }: {db?:Database;onSaved:()=>void
     ]}/>
    </Space>
   </Card>}
+  {db&&can('config.read')&&<Card title="管理存储与认证"><Descriptions column={1} items={[{key:'management',label:'业务管理库',children:<Typography.Text copyable>{db.management_path}</Typography.Text>},{key:'audit',label:'审计库',children:<Typography.Text copyable>{db.audit_path}</Typography.Text>},{key:'mode',label:'认证方式',children:<Space><Tag>{db.access?.policy.mode}</Tag>{db.access?.policy.name} · {db.access?.provider.name}</Space>}]}/><Typography.Paragraph type="secondary">认证方式由系统设置中的全局认证配置绑定；本库业务账号用于演示认证。审计写入失败不会阻止查询或 Action。</Typography.Paragraph></Card>}
+  {db&&can('config.read')&&<Card title="Action 写入连接" extra={<Button type="primary" disabled={!can('action.write')} loading={busy} onClick={()=>void run(()=>{let write_connection:DatabaseConnection|undefined=db.write_connection;if(db.driver!=='sqlite'&&writeUser)write_connection={...db.connection!,username:writeUser,password_env:writePassword?undefined:writeEnv||undefined,credential_id:writePassword||writeEnv?undefined:db.write_connection?.credential_id};return managementCall('configure_actions',{database_id:db.id,database:{...db,write_enabled:writeEnabled,write_connection},write_password:writePassword})},'写入连接已保存')}>保存写入连接</Button>}><Space orientation="vertical" style={{width:'100%'}}><Space><Switch aria-label="启用 Action 写入" checked={writeEnabled} disabled={!can('action.write')} onChange={setWriteEnabled}/>启用 Action 写入</Space>{db.driver!=='sqlite'?<Space wrap><Input placeholder="独立写入账号" aria-label="独立写入账号" value={writeUser} onChange={e=>setWriteUser(e.target.value)}/><Input.Password placeholder="写入密码（留空保留）" value={writePassword} onChange={e=>setWritePassword(e.target.value)} autoComplete="new-password"/><Input placeholder="写入密码环境变量（可选）" value={writeEnv} onChange={e=>setWriteEnv(e.target.value)}/></Space>:<Typography.Text type="secondary">SQLite 使用同一业务文件的独立事务连接执行写入。</Typography.Text>}<Typography.Text type="secondary">Action 的参数、代码与试运行在“动作配置”中管理。</Typography.Text></Space></Card>}
   {can('grant')&&<AccessPage db={db} onSaved={onSaved}/>}
  </Space>;
 }

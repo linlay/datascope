@@ -3,11 +3,11 @@ package adminapi
 import (
 	"bytes"
 	"context"
+	"datascope-server/internal/testutil"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"datascope-server/internal/testutil"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"

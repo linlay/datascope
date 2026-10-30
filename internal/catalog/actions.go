@@ -66,7 +66,7 @@ func (c *Catalog) OpenWriter(ctx context.Context, d *Database) (*store.Store, er
 		}
 		st, e := store.OpenWriter(ctx, d.Path, c.Timeout)
 		if st != nil {
-			st.Audit = c.Audit
+			st.Audit = c.Management.AuditFor(d.ID)
 		}
 		return st, e
 	}
@@ -85,7 +85,7 @@ func (c *Catalog) OpenWriter(ctx context.Context, d *Database) (*store.Store, er
 		st, e = store.OpenConnection(ctx, d.Driver, "", d.WriteConnection, c.Timeout)
 	}
 	if st != nil {
-		st.Audit = c.Audit
+		st.Audit = c.Management.AuditFor(d.ID)
 	}
 	return st, e
 }

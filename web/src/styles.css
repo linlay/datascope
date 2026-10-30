@@ -310,3 +310,15 @@ details > summary {
 
 /* Keep action code and transaction previews readable over the glass panels. */
 .action-dialog .ant-modal-container { background: var(--bg-base); }
+
+.workspace-layout { min-height: calc(100vh - 44px); }
+.workspace-sidebar { border-right:1px solid var(--border); }
+.workspace-sidebar .ant-layout-sider-children { position:sticky;top:44px;max-height:calc(100vh - 44px);overflow:auto; }
+.workspace-sidebar .ant-menu {border-inline-end:0!important;}
+.workspace-label {padding:22px 20px 14px;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.app-header > .ant-space:last-child {margin-left:auto;}
+.code-editor {border:1px solid var(--border);border-radius:8px;overflow:hidden;line-height:1.65;font-size:13px;}
+.parameter-row {border:1px solid var(--border);padding:12px;border-radius:8px;width:100%;}
+@media(max-width:991px){.workspace-sidebar .workspace-label{padding:16px 6px;font-size:10px}.workspace-sidebar .ant-menu-title-content{font-size:11px}.workspace-sidebar .ant-menu-item{padding-inline:6px!important;}.workspace-sidebar .ant-menu-submenu-title{padding-inline:6px!important;}.app-content{padding:12px;}.parameter-row .ant-space{max-width:100%;}}
+.ant-modal-container,.ant-drawer-content {background:#fff!important;}
+:root[data-theme='dark'] .ant-modal-container,:root[data-theme='dark'] .ant-drawer-content {background:#202024!important;}

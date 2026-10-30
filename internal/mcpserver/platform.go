@@ -25,24 +25,30 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			if err != nil {
 				return nil, err
 			}
-			if !d.LocalAuthentication() {
+			a, trusted := guard.Business(ctx)
+			if !trusted {
+				if !d.LocalAuthentication() {
+					return nil, management.ErrDenied
+				}
+				if h.opts.AuthMode != "oauth" || req.GetExtra() == nil || req.GetExtra().TokenInfo == nil {
+					return nil, management.ErrDenied
+				}
+				extra := req.GetExtra().TokenInfo.Extra
+				if extra["identity"] != "database" || extra["database_id"] != d.ID {
+					return nil, management.ErrDenied
+				}
+				username, ok := extra["username"].(string)
+				if !ok {
+					return nil, management.ErrDenied
+				}
+				a, err = h.opts.Catalog.BusinessAccount(ctx, d, username)
+				if err != nil || strconv.FormatInt(a.ID, 10) != req.GetExtra().TokenInfo.UserID {
+					return nil, management.ErrDenied
+				}
+			} else if a.DatabaseID != d.ID || !a.Active {
 				return nil, management.ErrDenied
 			}
-			if h.opts.AuthMode != "oauth" || req.GetExtra() == nil || req.GetExtra().TokenInfo == nil {
-				return nil, management.ErrDenied
-			}
-			extra := req.GetExtra().TokenInfo.Extra
-			if extra["identity"] != "database" || extra["database_id"] != d.ID {
-				return nil, management.ErrDenied
-			}
-			username, ok := extra["username"].(string)
-			if !ok {
-				return nil, management.ErrDenied
-			}
-			a, err := h.opts.Catalog.BusinessAccount(ctx, d, username)
-			if err != nil || strconv.FormatInt(a.ID, 10) != req.GetExtra().TokenInfo.UserID {
-				return nil, management.ErrDenied
-			}
+
 			ctx = guard.WithBusiness(ctx, a)
 			tool := method
 			if method == "tools/call" {

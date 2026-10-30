@@ -299,11 +299,11 @@ func TestCatalogMigrationConcurrencyAndInternalIsolation(t *testing.T) {
 	}
 	must(t, f.m.Flush(f.ctx))
 	var count int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM outbox_events").Scan(&count))
+	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name='AUDIT_OUTBOX'").Scan(&count))
 	if count != 0 {
-		t.Fatal("outbox not drained")
+		t.Fatal("runtime audit queue persisted in management")
 	}
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM record_versions WHERE bucket='databases'").Scan(&count))
+	must(t, sourceDB(t, f, "default").QueryRow("SELECT COUNT(*) FROM CONFIG_VERSION WHERE BUCKET_='databases'").Scan(&count))
 	if count < 2 {
 		t.Fatal("missing versions")
 	}
@@ -519,7 +519,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 		t.Fatal("old JWT valid after reset")
 	}
 }
-func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
+func TestAuditFailureIsIsolatedAndGrantEscalation(t *testing.T) {
 	f := setup(t)
 	_, e := f.app.Call(f.readerContext(), "grant_database_permissions", application.Input{DatabaseID: "default", UserID: f.reader.ID, Permissions: []string{"raw_query"}})
 	if !errors.Is(e, management.ErrDenied) {
@@ -541,9 +541,10 @@ func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
 		}
 	}
 	must(t, f.a.Close())
+	must(t, f.m.AuditFor("default").Close())
 	_, e = svc.Query(f.readerContext(), "SELECT * FROM items", 10, 200)
-	if e == nil {
-		t.Fatal("query executed with unavailable audit")
+	if e != nil {
+		t.Fatalf("unavailable audit blocked query: %v", e)
 	}
 }
 
@@ -630,4 +631,11 @@ func TestKnowledgeVisibilityAndConflict(t *testing.T) {
 	if e == nil {
 		t.Fatal("knowledge exposing restricted fields still visible")
 	}
+}
+
+func sourceDB(t *testing.T, f *fixture, id string) *sql.DB {
+	t.Helper()
+	x, e := f.m.Source(f.ctx, id)
+	must(t, e)
+	return x.DB
 }

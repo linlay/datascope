@@ -137,7 +137,7 @@ func TestActionExpiredChangedAndRevokedConfirmation(t *testing.T) {
 			must(t, e)
 			switch mode {
 			case "expired":
-				_, e = f.m.DB.Exec("UPDATE action_requests SET expires=0")
+				_, e = sourceDB(t, f, "default").Exec("UPDATE ACTION_RECEIPT SET EXPIRES_=0")
 			case "config":
 				d, err := f.c.Get("default")
 				must(t, err)
@@ -300,9 +300,30 @@ func TestActionConcurrentInvokeAndUnknownReceipt(t *testing.T) {
 		t.Fatal("repeated business execution", writes)
 	}
 	// Simulate a process crash after reserving a new request. Never reclaim it.
-	_, e = f.m.DB.Exec("UPDATE action_requests SET state='running',data=json_remove(data,'$.response') WHERE request_id='concurrent'")
+	_, e = sourceDB(t, f, "default").Exec("UPDATE ACTION_RECEIPT SET STATE_='running',DATA_=json_remove(DATA_,'$.response') WHERE REQUEST_ID_='concurrent'")
 	must(t, e)
 	if _, e = f.app.InvokeAction(ctx, "default", "rename_item", "concurrent", args); e == nil || !strings.Contains(e.Error(), "结果未知") {
 		t.Fatal(e)
+	}
+}
+
+func TestActionCommitsWithUnavailableAudit(t *testing.T) {
+	f, ctx := setupAction(t, false)
+	must(t, f.a.Close())
+	must(t, f.m.AuditFor("default").Close())
+	out, e := f.app.InvokeAction(ctx, "default", "rename_item", "audit-offline", map[string]any{"id": 1, "name": "committed-without-audit"})
+	must(t, e)
+	if out.Status != "done" {
+		t.Fatal(out)
+	}
+	rows, e := f.st.Query(ctx, "SELECT name FROM items WHERE id=1", 1)
+	must(t, e)
+	if rows.Rows[0]["name"] != "committed-without-audit" {
+		t.Fatal(rows)
+	}
+	var state string
+	must(t, sourceDB(t, f, "default").QueryRow("SELECT STATE_ FROM ACTION_RECEIPT WHERE REQUEST_ID_='audit-offline'").Scan(&state))
+	if state != "done" {
+		t.Fatal(state)
 	}
 }

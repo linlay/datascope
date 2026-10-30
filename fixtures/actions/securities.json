@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "database_id": "default",
+  "cases": [
+    {
+      "id": "update_customer_mobile",
+      "name": "update_customer_mobile",
+      "title": "更新本人完整管理客户手机号",
+      "business_user_id": 1,
+      "arguments": {
+        "customer_no": "C00001359",
+        "mobile": "13900001359",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_customer_risk_level",
+      "name": "update_customer_risk_level",
+      "title": "客户风险等级 C4 → C2",
+      "business_user_id": 1,
+      "arguments": {
+        "customer_no": "C00001359",
+        "risk_level": "C2",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_customer_investor_type",
+      "name": "update_customer_investor_type",
+      "title": "普通 → 专业投资者",
+      "business_user_id": 1,
+      "arguments": {
+        "customer_no": "C00001359",
+        "investor_type": "专业",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "freeze_fund_account",
+      "name": "freeze_fund_account",
+      "title": "冻结本人账户",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "unfreeze_fund_account",
+      "name": "unfreeze_fund_account",
+      "title": "先冻结再解冻",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "freeze_fund_account",
+          "arguments": {
+            "fund_account_no": "880000000079",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "reassign_account_manager",
+      "name": "reassign_account_manager",
+      "title": "管理员把客户经理1调整为2",
+      "business_user_id": 175,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "expected_manager_id": 1,
+        "new_manager_id": 2,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_employee_mobile",
+      "name": "update_employee_mobile",
+      "title": "修改本人联系方式",
+      "business_user_id": 1,
+      "arguments": {
+        "employee_id": 1,
+        "mobile": "13900000001",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_branch_address",
+      "name": "update_branch_address",
+      "title": "管理员维护分公司地址",
+      "business_user_id": 175,
+      "arguments": {
+        "code": "B001",
+        "address": "上海市演示大道100号（合成地址）",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_department_address",
+      "name": "update_department_address",
+      "title": "管理员维护营业部地址",
+      "business_user_id": 175,
+      "arguments": {
+        "code": "D001",
+        "address": "上海市演示大道200号（合成地址）",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "rename_security",
+      "name": "rename_security",
+      "title": "管理员维护证券展示名称",
+      "business_user_id": 175,
+      "arguments": {
+        "code": "688001",
+        "name": "华辰科技（演示维护）",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "cancel_order_remainder",
+      "name": "cancel_order_remainder",
+      "title": "撤销部分成交委托剩余200股",
+      "business_user_id": 1,
+      "arguments": {
+        "order_no": "O0000002309",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "update_order_channel",
+      "name": "update_order_channel",
+      "title": "更正委托来源 COUNTER → APP",
+      "business_user_id": 1,
+      "arguments": {
+        "order_no": "O0000002309",
+        "channel": "APP",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "close_unused_stock_account",
+      "name": "close_unused_stock_account",
+      "title": "删除没有任何历史委托的深市账户",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000164",
+        "exchange": "SZ",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "open_stock_account",
+      "name": "open_stock_account",
+      "title": "删除无委托账户后重新新增深市账号",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000164",
+        "exchange": "SZ",
+        "stock_account_no": "9000000164",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "close_unused_stock_account",
+          "arguments": {
+            "fund_account_no": "880000000164",
+            "exchange": "SZ",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "done",
+      "expected_writes": 1
+    },
+    {
+      "id": "deposit_demo_cash",
+      "name": "deposit_demo_cash",
+      "title": "演示入金100元，同步日结与流水",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000927",
+        "amount_cents": 10000,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 2
+    },
+    {
+      "id": "withdraw_demo_cash",
+      "name": "withdraw_demo_cash",
+      "title": "演示出金50元，同步日结与流水",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000927",
+        "amount_cents": 5000,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 2
+    },
+    {
+      "id": "transfer_demo_cash",
+      "name": "transfer_demo_cash",
+      "title": "管理员在同客户两个账户间划转100元",
+      "business_user_id": 175,
+      "arguments": {
+        "source_fund_account_no": "880000000080",
+        "target_fund_account_no": "880000000079",
+        "amount_cents": 10000,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 4
+    },
+    {
+      "id": "correct_latest_close_price",
+      "name": "correct_latest_close_price",
+      "title": "最新收盘价8722分改8800分，同步重估持仓",
+      "business_user_id": 175,
+      "arguments": {
+        "security_code": "688001",
+        "trade_date": "2026-10-20",
+        "expected_close": 8722,
+        "close_price": 8800,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "done",
+      "expected_writes": 2
+    },
+    {
+      "id": "deny_other_manager",
+      "name": "freeze_fund_account",
+      "title": "拒绝操作其他经理账户",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000005",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_scope_is_not_write",
+      "name": "freeze_fund_account",
+      "title": "主管能查看但不能直接修改其他经理账户",
+      "business_user_id": 121,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_shared_customer",
+      "name": "update_customer_mobile",
+      "title": "拒绝单个经理修改跨经理共享客户资料",
+      "business_user_id": 1,
+      "arguments": {
+        "customer_no": "C00000061",
+        "mobile": "13900000061",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_public_directory_write",
+      "name": "update_branch_address",
+      "title": "公共表可查询不代表普通员工可维护",
+      "business_user_id": 1,
+      "arguments": {
+        "code": "B001",
+        "address": "不应生效",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_other_employee",
+      "name": "update_employee_mobile",
+      "title": "拒绝普通员工修改他人联系方式",
+      "business_user_id": 1,
+      "arguments": {
+        "employee_id": 2,
+        "mobile": "13900000002",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_already_frozen",
+      "name": "freeze_fund_account",
+      "title": "拒绝重复冻结",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "freeze_fund_account",
+          "arguments": {
+            "fund_account_no": "880000000079",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_frozen_withdrawal",
+      "name": "withdraw_demo_cash",
+      "title": "冻结账户不能出金",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000927",
+        "amount_cents": 100,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "freeze_fund_account",
+          "arguments": {
+            "fund_account_no": "880000000927",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_insufficient_withdrawable",
+      "name": "withdraw_demo_cash",
+      "title": "拒绝超出可取余额",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "amount_cents": 100,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_cross_customer_transfer",
+      "name": "transfer_demo_cash",
+      "title": "拒绝跨客户划转",
+      "business_user_id": 175,
+      "arguments": {
+        "source_fund_account_no": "880000000080",
+        "target_fund_account_no": "880000001913",
+        "amount_cents": 100,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_stale_manager",
+      "name": "reassign_account_manager",
+      "title": "拒绝使用过期的原经理编号",
+      "business_user_id": 175,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "expected_manager_id": 2,
+        "new_manager_id": 3,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_wrong_target_role",
+      "name": "reassign_account_manager",
+      "title": "拒绝把账户分配给主管而非客户经理",
+      "business_user_id": 175,
+      "arguments": {
+        "fund_account_no": "880000000079",
+        "expected_manager_id": 1,
+        "new_manager_id": 121,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_duplicate_stock_account",
+      "name": "open_stock_account",
+      "title": "拒绝重复开立同交易所账户",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000164",
+        "exchange": "SZ",
+        "stock_account_no": "9000000164",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_stock_number_format",
+      "name": "open_stock_account",
+      "title": "拒绝证券账号与交易所格式不匹配",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000000164",
+        "exchange": "SZ",
+        "stock_account_no": "A000000164",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "close_unused_stock_account",
+          "arguments": {
+            "fund_account_no": "880000000164",
+            "exchange": "SZ",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_historical_revaluation",
+      "name": "correct_latest_close_price",
+      "title": "拒绝回写历史行情",
+      "business_user_id": 175,
+      "arguments": {
+        "security_code": "688001",
+        "trade_date": "2026-10-19",
+        "expected_close": 8774,
+        "close_price": 8800,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_stale_close",
+      "name": "correct_latest_close_price",
+      "title": "拒绝使用过期价格更正行情",
+      "business_user_id": 175,
+      "arguments": {
+        "security_code": "688001",
+        "trade_date": "2026-10-20",
+        "expected_close": 1,
+        "close_price": 8800,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_unauthorized_revaluation",
+      "name": "correct_latest_close_price",
+      "title": "拒绝普通员工重估全库持仓",
+      "business_user_id": 1,
+      "arguments": {
+        "security_code": "688001",
+        "trade_date": "2026-10-20",
+        "expected_close": 8722,
+        "close_price": 8800,
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_resigned_operator",
+      "name": "update_employee_mobile",
+      "title": "拒绝离职员工操作",
+      "business_user_id": 176,
+      "arguments": {
+        "employee_id": 176,
+        "mobile": "13900000176",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_referenced_stock_account",
+      "name": "close_unused_stock_account",
+      "title": "拒绝删除已有历史委托引用的证券账户",
+      "business_user_id": 1,
+      "arguments": {
+        "fund_account_no": "880000001186",
+        "exchange": "SZ",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [],
+      "expected_status": "denied",
+      "expected_writes": 0
+    },
+    {
+      "id": "deny_already_cancelled_order",
+      "name": "cancel_order_remainder",
+      "title": "已撤余单不能再次撤销",
+      "business_user_id": 1,
+      "arguments": {
+        "order_no": "O0000002309",
+        "reason": "证券 Action 完整案例演示"
+      },
+      "prepare": [
+        {
+          "name": "cancel_order_remainder",
+          "arguments": {
+            "order_no": "O0000002309",
+            "reason": "准备前置状态"
+          }
+        }
+      ],
+      "expected_status": "denied",
+      "expected_writes": 0
+    }
+  ]
+}

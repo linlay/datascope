@@ -22,8 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/mcpserver"
@@ -32,6 +30,8 @@ import (
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
 	"datascope-server/internal/testutil"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 )
 
 type env struct {

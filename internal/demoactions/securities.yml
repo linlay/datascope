@@ -1,0 +1,858 @@
+# 证券演示操作；经显式安装后存入管理数据库，不自动读取。
+version: 1
+actions:
+  - name: "update_customer_mobile"
+    title: "修改客户手机号"
+    description: "修改客户共享资料；要求客户全部账户归本人管理，或证券业务管理员执行。"
+    confirm: true
+    parameters:
+      customer_no: {"type": "string", "description": "客户编号，例如 C00001359", "pattern": "^C[0-9]{8}$"}
+      mobile: {"type": "string", "description": "合成演示手机号码，例如 13900001359", "pattern": "^1[3-9][0-9]{9}$"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), before=ownedCustomer(args.customer_no,u,ctx);
+        if (before.mobile===args.mobile) deny('新值与当前值相同，无需修改');
+        const n=db.exec`UPDATE customers SET mobile=${args.mobile} WHERE customer_no=${args.customer_no} AND mobile=${before.mobile} AND status='active'`;
+        if(n!==1) deny('客户资料已变化，请重新预览');
+        const after=my.one`SELECT customer_no, mobile FROM customers WHERE customer_no=${args.customer_no}`;
+        if(!after || after.mobile!==args.mobile) deny('客户资料后置校验失败');
+        return {customer_no:args.customer_no,before:before.mobile,after:after.mobile,reason:args.reason};
+      }
+  - name: "update_customer_risk_level"
+    title: "更新客户风险等级"
+    description: "修改客户共享资料；要求客户全部账户归本人管理，或证券业务管理员执行。"
+    confirm: true
+    parameters:
+      customer_no: {"type": "string", "description": "客户编号，例如 C00001359", "pattern": "^C[0-9]{8}$"}
+      risk_level: {"type": "string", "description": "风险等级 C1–C5", "enum": ["C1", "C2", "C3", "C4", "C5"]}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), before=ownedCustomer(args.customer_no,u,ctx);
+        if (before.risk_level===args.risk_level) deny('新值与当前值相同，无需修改');
+        const n=db.exec`UPDATE customers SET risk_level=${args.risk_level} WHERE customer_no=${args.customer_no} AND risk_level=${before.risk_level} AND status='active'`;
+        if(n!==1) deny('客户资料已变化，请重新预览');
+        const after=my.one`SELECT customer_no, risk_level FROM customers WHERE customer_no=${args.customer_no}`;
+        if(!after || after.risk_level!==args.risk_level) deny('客户资料后置校验失败');
+        return {customer_no:args.customer_no,before:before.risk_level,after:after.risk_level,reason:args.reason};
+      }
+  - name: "update_customer_investor_type"
+    title: "变更投资者类型"
+    description: "修改客户共享资料；要求客户全部账户归本人管理，或证券业务管理员执行。"
+    confirm: true
+    parameters:
+      customer_no: {"type": "string", "description": "客户编号，例如 C00001359", "pattern": "^C[0-9]{8}$"}
+      investor_type: {"type": "string", "description": "演示库使用中文枚举", "enum": ["普通", "专业"]}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), before=ownedCustomer(args.customer_no,u,ctx);
+        if (before.investor_type===args.investor_type) deny('新值与当前值相同，无需修改');
+        const n=db.exec`UPDATE customers SET investor_type=${args.investor_type} WHERE customer_no=${args.customer_no} AND investor_type=${before.investor_type} AND status='active'`;
+        if(n!==1) deny('客户资料已变化，请重新预览');
+        const after=my.one`SELECT customer_no, investor_type FROM customers WHERE customer_no=${args.customer_no}`;
+        if(!after || after.investor_type!==args.investor_type) deny('客户资料后置校验失败');
+        return {customer_no:args.customer_no,before:before.investor_type,after:after.investor_type,reason:args.reason};
+      }
+  - name: "freeze_fund_account"
+    title: "冻结资金账户"
+    description: "仅本人管理的资金账户或业务管理员可操作；不修改资金、成交和持仓。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,false);
+        if(a.status!=='active') deny('仅 active 状态可执行此操作');
+        const n=db.exec`UPDATE fund_accounts SET status='frozen' WHERE fund_account_no=${a.fund_account_no} AND manager_id=${a.manager_id} AND status='active'`;
+        if(n!==1) deny('账户状态或归属已变化，请重新预览');
+        const after=my.one`SELECT status FROM fund_accounts WHERE fund_account_no=${a.fund_account_no}`;
+        if(!after || after.status!=='frozen') deny('账户状态后置校验失败');
+        return {fund_account_no:a.fund_account_no,before:'active',after:after.status,reason:args.reason};
+      }
+  - name: "unfreeze_fund_account"
+    title: "解冻资金账户"
+    description: "仅本人管理的资金账户或业务管理员可操作；不修改资金、成交和持仓。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,false);
+        if(a.status!=='frozen') deny('仅 frozen 状态可执行此操作');
+        const n=db.exec`UPDATE fund_accounts SET status='active' WHERE fund_account_no=${a.fund_account_no} AND manager_id=${a.manager_id} AND status='frozen'`;
+        if(n!==1) deny('账户状态或归属已变化，请重新预览');
+        const after=my.one`SELECT status FROM fund_accounts WHERE fund_account_no=${a.fund_account_no}`;
+        if(!after || after.status!=='active') deny('账户状态后置校验失败');
+        return {fund_account_no:a.fund_account_no,before:'frozen',after:after.status,reason:args.reason};
+      }
+  - name: "reassign_account_manager"
+    title: "调整账户客户经理"
+    description: "仅业务管理员；校验原经理和目标在职客户经理，修改后立即影响行权限。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      expected_manager_id: {"type": "integer", "description": "当前客户经理编号", "min": 1}
+      new_manager_id: {"type": "integer", "description": "目标在职客户经理编号，例如 2", "min": 1}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx); administrator(u);
+        const a=ownedAccount(args.fund_account_no,u,ctx,false);
+        if(a.manager_id!==args.expected_manager_id) deny('原客户经理已变化');
+        if(args.new_manager_id===a.manager_id) deny('目标经理与当前经理相同');
+        const target=db.one`SELECT e.employee_id FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${args.new_manager_id} AND e.status='active' AND r.code='MANAGER'`;
+        if(!target) deny('目标必须是在职客户经理');
+        const n=db.exec`UPDATE fund_accounts SET manager_id=${args.new_manager_id} WHERE fund_account_no=${a.fund_account_no} AND manager_id=${args.expected_manager_id}`;
+        if(n!==1) deny('账户归属已变化');
+        const after=db.one`SELECT manager_id FROM fund_accounts WHERE fund_account_no=${a.fund_account_no}`;
+        if(!after || after.manager_id!==args.new_manager_id) deny('账户归属后置校验失败');
+        return {fund_account_no:a.fund_account_no,before:a.manager_id,after:after.manager_id,reason:args.reason};
+      }
+  - name: "update_employee_mobile"
+    title: "修改员工手机号"
+    description: "在职员工可修改本人联系方式；业务管理员可修改其他在职员工。"
+    confirm: true
+    parameters:
+      employee_id: {"type": "integer", "description": "员工编号，例如 1", "min": 1}
+      mobile: {"type": "string", "description": "合成演示手机号码，例如 13900001359", "pattern": "^1[3-9][0-9]{9}$"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx);
+        if(args.employee_id!==ctx.userId && u.role_code!=='ADMIN') deny('只能修改本人联系方式');
+        const before=my.one`SELECT employee_id,mobile,status FROM employees WHERE employee_id=${args.employee_id}`;
+        if(!before || before.status!=='active') deny('目标员工不存在、已离职或不可见');
+        if(before.mobile===args.mobile) deny('新手机号与当前值相同');
+        const n=db.exec`UPDATE employees SET mobile=${args.mobile} WHERE employee_id=${args.employee_id} AND mobile=${before.mobile} AND status='active'`;
+        if(n!==1) deny('员工资料已变化');
+        const after=my.one`SELECT mobile FROM employees WHERE employee_id=${args.employee_id}`;
+        if(!after || after.mobile!==args.mobile) deny('员工联系方式后置校验失败');
+        return {employee_id:args.employee_id,before:before.mobile,after:after.mobile,reason:args.reason};
+      }
+  - name: "update_branch_address"
+    title: "维护分公司地址"
+    description: "仅业务管理员可维护公共目录；不修改主键、关联关系、证券数量或价格。"
+    confirm: true
+    parameters:
+      code: {"type": "string", "description": "分公司编号，例如 B001", "pattern": "^B[0-9]{3}$"}
+      address: {"type": "string", "description": "新展示名称或合成演示地址", "max_length": 120, "pattern": "\\S"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx); administrator(u);
+        const before=my.one`SELECT code,address FROM branches WHERE code=${args.code}`;
+        if(!before) deny('目录记录不存在或不可见');
+        if(before.address===args.address) deny('新值与当前值相同');
+        const n=db.exec`UPDATE branches SET address=${args.address} WHERE code=${args.code} AND address=${before.address}`;
+        if(n!==1) deny('目录记录已变化');
+        const after=my.one`SELECT address FROM branches WHERE code=${args.code}`;
+        if(!after || after.address!==args.address) deny('目录更新后置校验失败');
+        return {code:args.code,before:before.address,after:after.address,reason:args.reason};
+      }
+  - name: "update_department_address"
+    title: "维护营业部地址"
+    description: "仅业务管理员可维护公共目录；不修改主键、关联关系、证券数量或价格。"
+    confirm: true
+    parameters:
+      code: {"type": "string", "description": "营业部编号，例如 D001", "pattern": "^D[0-9]{3}$"}
+      address: {"type": "string", "description": "新展示名称或合成演示地址", "max_length": 120, "pattern": "\\S"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx); administrator(u);
+        const before=my.one`SELECT code,address FROM departments WHERE code=${args.code}`;
+        if(!before) deny('目录记录不存在或不可见');
+        if(before.address===args.address) deny('新值与当前值相同');
+        const n=db.exec`UPDATE departments SET address=${args.address} WHERE code=${args.code} AND address=${before.address}`;
+        if(n!==1) deny('目录记录已变化');
+        const after=my.one`SELECT address FROM departments WHERE code=${args.code}`;
+        if(!after || after.address!==args.address) deny('目录更新后置校验失败');
+        return {code:args.code,before:before.address,after:after.address,reason:args.reason};
+      }
+  - name: "rename_security"
+    title: "维护证券展示名称"
+    description: "仅业务管理员可维护公共目录；不修改主键、关联关系、证券数量或价格。"
+    confirm: true
+    parameters:
+      code: {"type": "string", "description": "证券代码，例如 688001", "pattern": "^[0-9]{6}$"}
+      name: {"type": "string", "description": "新展示名称或合成演示地址", "max_length": 120, "pattern": "\\S"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx); administrator(u);
+        const before=my.one`SELECT code,name FROM securities WHERE code=${args.code}`;
+        if(!before) deny('目录记录不存在或不可见');
+        if(before.name===args.name) deny('新值与当前值相同');
+        const n=db.exec`UPDATE securities SET name=${args.name} WHERE code=${args.code} AND name=${before.name}`;
+        if(n!==1) deny('目录记录已变化');
+        const after=my.one`SELECT name FROM securities WHERE code=${args.code}`;
+        if(!after || after.name!==args.name) deny('目录更新后置校验失败');
+        return {code:args.code,before:before.name,after:after.name,reason:args.reason};
+      }
+  - name: "cancel_order_remainder"
+    title: "撤销未成交委托余量"
+    description: "仅 PARTIAL 委托可转为 PART_CANCELLED，保留已有成交、费用和持仓；样例库未建冻结资金/证券模型，不生成退款。"
+    confirm: true
+    parameters:
+      order_no: {"type": "string", "description": "委托编号，例如 O0000002309", "pattern": "^O[0-9]{10}$"}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), o=my.one`SELECT id,order_no,fund_account_no,status,quantity,filled_quantity FROM orders WHERE order_no=${args.order_no}`;
+        if(!o) deny('委托不存在或无权查看');
+        ownedAccount(o.fund_account_no,u,ctx,true);
+        if(o.status!=='PARTIAL' || o.filled_quantity<=0 || o.filled_quantity>=o.quantity) deny('只有部分成交且仍有余量的委托可撤余单');
+        const trades=db.one`SELECT COALESCE(SUM(quantity),0) AS n FROM trades WHERE order_id=${o.id}`;
+        if(trades.n!==o.filled_quantity) deny('委托与成交数量不一致，不能撤单');
+        const n=db.exec`UPDATE orders SET status='PART_CANCELLED' WHERE id=${o.id} AND status='PARTIAL' AND quantity=${o.quantity} AND filled_quantity=${o.filled_quantity}`;
+        if(n!==1) deny('委托状态已变化');
+        const after=my.one`SELECT status,filled_quantity FROM orders WHERE id=${o.id}`;
+        if(!after || after.status!=='PART_CANCELLED' || after.filled_quantity!==o.filled_quantity) deny('撤单后置校验失败');
+        return {order_no:o.order_no,before:o.status,after:after.status,cancelled_quantity:o.quantity-o.filled_quantity,filled_quantity:o.filled_quantity,reason:args.reason};
+      }
+  - name: "update_order_channel"
+    title: "更正委托来源渠道"
+    description: "仅修改 APP/PC/COUNTER 来源元数据；不得修改成交、价格、数量和金额。"
+    confirm: true
+    parameters:
+      order_no: {"type": "string", "description": "委托编号，例如 O0000002309", "pattern": "^O[0-9]{10}$"}
+      channel: {"type": "string", "description": "来源渠道", "enum": ["APP", "PC", "COUNTER"]}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), o=my.one`SELECT id,order_no,fund_account_no,channel FROM orders WHERE order_no=${args.order_no}`;
+        if(!o) deny('委托不存在或不可见');
+        ownedAccount(o.fund_account_no,u,ctx,false);
+        if(o.channel===args.channel) deny('新渠道与当前值相同');
+        const n=db.exec`UPDATE orders SET channel=${args.channel} WHERE id=${o.id} AND channel=${o.channel}`;
+        if(n!==1) deny('委托元数据已变化');
+        const after=my.one`SELECT channel FROM orders WHERE id=${o.id}`;
+        if(!after || after.channel!==args.channel) deny('渠道后置校验失败');
+        return {order_no:o.order_no,before:o.channel,after:after.channel,reason:args.reason};
+      }
+  - name: "close_unused_stock_account"
+    title: "删除无委托的证券账户"
+    description: "仅本人账户或业务管理员操作；保留所有被历史委托引用的账户。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      exchange: {"type": "string", "description": "证券交易所", "enum": ["SH", "SZ"]}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,true);
+         const old=my.one`SELECT id,stock_account_no FROM stock_accounts WHERE fund_account_no=${a.fund_account_no} AND exchange=${args.exchange}`;
+
+         if(!old) deny('证券账户不存在或不可见');
+         const used=db.one`SELECT COUNT(*) AS n FROM orders WHERE stock_account_id=${old.id}`;
+         if(used.n!==0) deny('证券账户已有历史委托，不可删除');
+         const n=db.exec`DELETE FROM stock_accounts WHERE id=${old.id} AND fund_account_no=${a.fund_account_no} AND stock_account_no=${old.stock_account_no} AND NOT EXISTS(SELECT 1 FROM orders WHERE stock_account_id=${old.id})`;
+         if(n!==1) deny('证券账户已变化或已被委托引用');
+         if(db.one`SELECT id FROM stock_accounts WHERE id=${old.id}`) deny('证券账户删除后置校验失败');
+         return {fund_account_no:a.fund_account_no,exchange:args.exchange,stock_account_no:old.stock_account_no,deleted:true,reason:args.reason};
+      }
+  - name: "open_stock_account"
+    title: "新增证券账户"
+    description: "仅本人账户或业务管理员操作；保留所有被历史委托引用的账户。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      exchange: {"type": "string", "description": "证券交易所", "enum": ["SH", "SZ"]}
+      stock_account_no: {"type": "string", "description": "沪 A+9位数字；深10位数字，例如 9000000164", "max_length": 10}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,true);
+         const old=my.one`SELECT id,stock_account_no FROM stock_accounts WHERE fund_account_no=${a.fund_account_no} AND exchange=${args.exchange}`;
+
+         if(old) deny('该资金账户已存在此交易所的证券账户，请先删除无委托账户');
+         if(args.exchange==='SH' ? !/^A[0-9]{9}$/.test(args.stock_account_no) : !/^[0-9]{10}$/.test(args.stock_account_no)) deny('证券账号格式与交易所不符');
+         if(db.one`SELECT id FROM stock_accounts WHERE stock_account_no=${args.stock_account_no}`) deny('证券账号已被使用');
+         const n=db.exec`INSERT INTO stock_accounts(fund_account_no,exchange,stock_account_no) VALUES(${a.fund_account_no},${args.exchange},${args.stock_account_no})`;
+         if(n!==1) deny('证券账户新增失败');
+         const after=my.one`SELECT stock_account_no FROM stock_accounts WHERE fund_account_no=${a.fund_account_no} AND exchange=${args.exchange}`;
+         if(!after || after.stock_account_no!==args.stock_account_no) deny('证券账户新增后置校验失败');
+         return {fund_account_no:a.fund_account_no,exchange:args.exchange,stock_account_no:after.stock_account_no,created:true,reason:args.reason};
+      }
+  - name: "deposit_demo_cash"
+    title: "演示入金记账"
+    description: "在最新演示账期同步追加资金流水和更新日结，费用为0；并非真实银行转账，不能回写历史账期。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      amount_cents: {"type": "integer", "description": "金额单位为分，例如 10000 为100元；仅演示记账，无外部支付", "min": 1, "max": 100000000}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function balance(a) {
+        const last=db.one`SELECT MAX(trade_date) AS day FROM daily_balances`;
+        const b=my.one`SELECT id,trade_date,opening_balance,transfer_in,transfer_out,buy_amount,sell_amount,fees,closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE fund_account_no=${a.fund_account_no} AND trade_date=${last.day}`;
+        if(!b) deny('账户缺少最新日结，不能补写历史账期');
+        if(!Number.isSafeInteger(b.closing_balance) || b.available_balance!==b.closing_balance || b.withdrawable_balance!==Math.max(0,b.closing_balance-b.sell_amount)) deny('日结精度或可用可取口径不符合演示模型');
+        const flow=db.one`SELECT trade_date,balance_after FROM cash_flows WHERE fund_account_no=${a.fund_account_no} ORDER BY id DESC LIMIT 1`;
+        if(flow && (flow.balance_after!==b.closing_balance || flow.trade_date>b.trade_date)) deny('流水尾余额与日结不一致');
+        return b;
+      }
+      function changeCash(a,b,amount,debit) {
+        let n;
+        if(debit) {
+          n=db.exec`UPDATE daily_balances SET transfer_out=transfer_out+${amount}, closing_balance=closing_balance-${amount}, available_balance=available_balance-${amount}, withdrawable_balance=MAX(0,closing_balance-${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND available_balance>=${amount} AND withdrawable_balance>=${amount}`;
+        } else {
+          n=db.exec`UPDATE daily_balances SET transfer_in=transfer_in+${amount}, closing_balance=closing_balance+${amount}, available_balance=available_balance+${amount}, withdrawable_balance=MAX(0,closing_balance+${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND closing_balance<=9007199254740991-${amount}`;
+        }
+        if(n!==1) deny('可取资金不足、余额已变化或超出安全整数范围');
+        const after=db.one`SELECT closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE id=${b.id}`;
+        const delta=debit?-amount:amount, type=debit?'WITHDRAWAL':'DEPOSIT';
+        if(after.closing_balance!==b.closing_balance+delta) deny('日结金额后置校验失败');
+        const inserted=db.exec`INSERT INTO cash_flows(customer_no,fund_account_no,trade_date,flow_type,trade_id,amount_cents,fee_cents,balance_after) VALUES(${a.customer_no},${a.fund_account_no},${b.trade_date},${type},NULL,${delta},0,${after.closing_balance})`;
+        if(inserted!==1) deny('资金流水写入失败');
+        const check=db.one`SELECT SUM(CASE WHEN flow_type='DEPOSIT' THEN amount_cents ELSE 0 END) AS tin, SUM(CASE WHEN flow_type='WITHDRAWAL' THEN -amount_cents ELSE 0 END) AS tout FROM cash_flows WHERE fund_account_no=${a.fund_account_no} AND trade_date=${b.trade_date}`;
+        const final=db.one`SELECT transfer_in,transfer_out,closing_balance FROM daily_balances WHERE id=${b.id}`;
+        if(check.tin!==final.transfer_in || check.tout!==final.transfer_out) deny('资金流水与日结转入转出对账失败');
+        return {fund_account_no:a.fund_account_no,before:b.closing_balance,after:after.closing_balance,available_balance:after.available_balance,withdrawable_balance:after.withdrawable_balance};
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,true);
+        const b=balance(a), changed=changeCash(a,b,args.amount_cents,false);
+        return {...changed,trade_date:b.trade_date,amount_cents:args.amount_cents,fee_cents:0,reason:args.reason};
+      }
+  - name: "withdraw_demo_cash"
+    title: "演示出金记账"
+    description: "在最新演示账期同步追加资金流水和更新日结，费用为0；并非真实银行转账，不能回写历史账期。"
+    confirm: true
+    parameters:
+      fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      amount_cents: {"type": "integer", "description": "金额单位为分，例如 10000 为100元；仅演示记账，无外部支付", "min": 1, "max": 100000000}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function balance(a) {
+        const last=db.one`SELECT MAX(trade_date) AS day FROM daily_balances`;
+        const b=my.one`SELECT id,trade_date,opening_balance,transfer_in,transfer_out,buy_amount,sell_amount,fees,closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE fund_account_no=${a.fund_account_no} AND trade_date=${last.day}`;
+        if(!b) deny('账户缺少最新日结，不能补写历史账期');
+        if(!Number.isSafeInteger(b.closing_balance) || b.available_balance!==b.closing_balance || b.withdrawable_balance!==Math.max(0,b.closing_balance-b.sell_amount)) deny('日结精度或可用可取口径不符合演示模型');
+        const flow=db.one`SELECT trade_date,balance_after FROM cash_flows WHERE fund_account_no=${a.fund_account_no} ORDER BY id DESC LIMIT 1`;
+        if(flow && (flow.balance_after!==b.closing_balance || flow.trade_date>b.trade_date)) deny('流水尾余额与日结不一致');
+        return b;
+      }
+      function changeCash(a,b,amount,debit) {
+        let n;
+        if(debit) {
+          n=db.exec`UPDATE daily_balances SET transfer_out=transfer_out+${amount}, closing_balance=closing_balance-${amount}, available_balance=available_balance-${amount}, withdrawable_balance=MAX(0,closing_balance-${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND available_balance>=${amount} AND withdrawable_balance>=${amount}`;
+        } else {
+          n=db.exec`UPDATE daily_balances SET transfer_in=transfer_in+${amount}, closing_balance=closing_balance+${amount}, available_balance=available_balance+${amount}, withdrawable_balance=MAX(0,closing_balance+${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND closing_balance<=9007199254740991-${amount}`;
+        }
+        if(n!==1) deny('可取资金不足、余额已变化或超出安全整数范围');
+        const after=db.one`SELECT closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE id=${b.id}`;
+        const delta=debit?-amount:amount, type=debit?'WITHDRAWAL':'DEPOSIT';
+        if(after.closing_balance!==b.closing_balance+delta) deny('日结金额后置校验失败');
+        const inserted=db.exec`INSERT INTO cash_flows(customer_no,fund_account_no,trade_date,flow_type,trade_id,amount_cents,fee_cents,balance_after) VALUES(${a.customer_no},${a.fund_account_no},${b.trade_date},${type},NULL,${delta},0,${after.closing_balance})`;
+        if(inserted!==1) deny('资金流水写入失败');
+        const check=db.one`SELECT SUM(CASE WHEN flow_type='DEPOSIT' THEN amount_cents ELSE 0 END) AS tin, SUM(CASE WHEN flow_type='WITHDRAWAL' THEN -amount_cents ELSE 0 END) AS tout FROM cash_flows WHERE fund_account_no=${a.fund_account_no} AND trade_date=${b.trade_date}`;
+        const final=db.one`SELECT transfer_in,transfer_out,closing_balance FROM daily_balances WHERE id=${b.id}`;
+        if(check.tin!==final.transfer_in || check.tout!==final.transfer_out) deny('资金流水与日结转入转出对账失败');
+        return {fund_account_no:a.fund_account_no,before:b.closing_balance,after:after.closing_balance,available_balance:after.available_balance,withdrawable_balance:after.withdrawable_balance};
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx), a=ownedAccount(args.fund_account_no,u,ctx,true);
+        const b=balance(a), changed=changeCash(a,b,args.amount_cents,true);
+        return {...changed,trade_date:b.trade_date,amount_cents:args.amount_cents,fee_cents:0,reason:args.reason};
+      }
+  - name: "transfer_demo_cash"
+    title: "同客户资金账户演示划转"
+    description: "同客户、同币种、最新账期内原子划转；两账户均须本人管理或由业务管理员执行。四条写入同时成功或同时回滚。"
+    confirm: true
+    parameters:
+      source_fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      target_fund_account_no: {"type": "string", "description": "12 位资金账号，例如 880000001913", "pattern": "^880[0-9]{9}$"}
+      amount_cents: {"type": "integer", "description": "金额单位为分，例如 10000 为100元；仅演示记账，无外部支付", "min": 1, "max": 100000000}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function balance(a) {
+        const last=db.one`SELECT MAX(trade_date) AS day FROM daily_balances`;
+        const b=my.one`SELECT id,trade_date,opening_balance,transfer_in,transfer_out,buy_amount,sell_amount,fees,closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE fund_account_no=${a.fund_account_no} AND trade_date=${last.day}`;
+        if(!b) deny('账户缺少最新日结，不能补写历史账期');
+        if(!Number.isSafeInteger(b.closing_balance) || b.available_balance!==b.closing_balance || b.withdrawable_balance!==Math.max(0,b.closing_balance-b.sell_amount)) deny('日结精度或可用可取口径不符合演示模型');
+        const flow=db.one`SELECT trade_date,balance_after FROM cash_flows WHERE fund_account_no=${a.fund_account_no} ORDER BY id DESC LIMIT 1`;
+        if(flow && (flow.balance_after!==b.closing_balance || flow.trade_date>b.trade_date)) deny('流水尾余额与日结不一致');
+        return b;
+      }
+      function changeCash(a,b,amount,debit) {
+        let n;
+        if(debit) {
+          n=db.exec`UPDATE daily_balances SET transfer_out=transfer_out+${amount}, closing_balance=closing_balance-${amount}, available_balance=available_balance-${amount}, withdrawable_balance=MAX(0,closing_balance-${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND available_balance>=${amount} AND withdrawable_balance>=${amount}`;
+        } else {
+          n=db.exec`UPDATE daily_balances SET transfer_in=transfer_in+${amount}, closing_balance=closing_balance+${amount}, available_balance=available_balance+${amount}, withdrawable_balance=MAX(0,closing_balance+${amount}-sell_amount) WHERE id=${b.id} AND closing_balance=${b.closing_balance} AND closing_balance<=9007199254740991-${amount}`;
+        }
+        if(n!==1) deny('可取资金不足、余额已变化或超出安全整数范围');
+        const after=db.one`SELECT closing_balance,available_balance,withdrawable_balance FROM daily_balances WHERE id=${b.id}`;
+        const delta=debit?-amount:amount, type=debit?'WITHDRAWAL':'DEPOSIT';
+        if(after.closing_balance!==b.closing_balance+delta) deny('日结金额后置校验失败');
+        const inserted=db.exec`INSERT INTO cash_flows(customer_no,fund_account_no,trade_date,flow_type,trade_id,amount_cents,fee_cents,balance_after) VALUES(${a.customer_no},${a.fund_account_no},${b.trade_date},${type},NULL,${delta},0,${after.closing_balance})`;
+        if(inserted!==1) deny('资金流水写入失败');
+        const check=db.one`SELECT SUM(CASE WHEN flow_type='DEPOSIT' THEN amount_cents ELSE 0 END) AS tin, SUM(CASE WHEN flow_type='WITHDRAWAL' THEN -amount_cents ELSE 0 END) AS tout FROM cash_flows WHERE fund_account_no=${a.fund_account_no} AND trade_date=${b.trade_date}`;
+        const final=db.one`SELECT transfer_in,transfer_out,closing_balance FROM daily_balances WHERE id=${b.id}`;
+        if(check.tin!==final.transfer_in || check.tout!==final.transfer_out) deny('资金流水与日结转入转出对账失败');
+        return {fund_account_no:a.fund_account_no,before:b.closing_balance,after:after.closing_balance,available_balance:after.available_balance,withdrawable_balance:after.withdrawable_balance};
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx);
+        if(args.source_fund_account_no===args.target_fund_account_no) deny('转出和转入账户不能相同');
+        const source=ownedAccount(args.source_fund_account_no,u,ctx,true), target=ownedAccount(args.target_fund_account_no,u,ctx,true);
+        if(source.customer_no!==target.customer_no || source.currency!==target.currency) deny('只允许同客户同币种账户之间划转');
+        const sb=balance(source), tb=balance(target);
+        if(sb.trade_date!==tb.trade_date) deny('两个账户必须使用同一最新账期');
+        const debit=changeCash(source,sb,args.amount_cents,true);
+        const credit=changeCash(target,tb,args.amount_cents,false);
+        if(debit.before+credit.before!==debit.after+credit.after) deny('资金划转守恒校验失败');
+        return {trade_date:sb.trade_date,amount_cents:args.amount_cents,source:debit,target:credit,reason:args.reason};
+      }
+  - name: "correct_latest_close_price"
+    title: "更正最新收盘价并重估持仓"
+    description: "仅业务管理员；仅最新行情日，原子更正行情收盘/高低价并同步重估同日该证券全部持仓，不改成交和资金。"
+    confirm: true
+    parameters:
+      security_code: {"type": "string", "description": "证券代码，例如 688001", "pattern": "^[0-9]{6}$"}
+      trade_date: {"type": "string", "description": "最新演示账期，例如 2026-10-20", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+      expected_close: {"type": "integer", "description": "更正前的收盘价，单位分；688001示例为8722", "min": 1, "max": 1000000}
+      close_price: {"type": "integer", "description": "新收盘价，单位分", "min": 1, "max": 1000000}
+      reason: {"type": "string", "description": "修改原因；会进入执行结果与审计", "max_length": 200, "pattern": "\\S"}
+    script: |
+      function operator(ctx) {
+        const u = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
+        if (!u || u.status !== 'active') deny('仅在职员工可执行演示操作');
+        return u;
+      }
+      function administrator(u) {
+        if (u.role_code !== 'ADMIN') deny('此操作仅证券业务管理员可执行');
+      }
+      function ownedAccount(no, u, ctx, active) {
+        const a = my.one`SELECT fund_account_no, customer_no, manager_id, currency, status FROM fund_accounts WHERE fund_account_no=${no}`;
+        if (!a) deny('资金账户不存在或无权查看');
+        if (a.manager_id !== ctx.userId && u.role_code !== 'ADMIN') deny('只能操作本人管理的资金账户；可查询不代表可修改');
+        if (active && a.status !== 'active') deny('资金账户必须处于 active 状态');
+        return a;
+      }
+      function ownedCustomer(no, u, ctx) {
+        const c = my.one`SELECT customer_no, mobile, risk_level, investor_type, status FROM customers WHERE customer_no=${no}`;
+        if (!c || c.status !== 'active') deny('客户不存在、非正常状态或无权查看');
+        const ownership = db.one`SELECT COUNT(*) AS total, SUM(CASE WHEN manager_id<>${ctx.userId} THEN 1 ELSE 0 END) AS other_accounts_n FROM fund_accounts WHERE customer_no=${no}`;
+        if (!ownership || ownership.total===0 || (u.role_code!=='ADMIN' && ownership.other_accounts_n>0)) deny('客户资料由多个经理共享，须全部账户归本人管理或由业务管理员修改');
+        return c;
+      }
+
+      function run(args, ctx) {
+        const u=operator(ctx); administrator(u);
+        const last=db.one`SELECT MAX(trade_date) AS day FROM daily_quotes`;
+        if(args.trade_date!==last.day) deny('仅允许更正最新行情日，不回写历史价格');
+        const q=my.one`SELECT id,close FROM daily_quotes WHERE security_code=${args.security_code} AND trade_date=${args.trade_date}`;
+        if(!q || q.close!==args.expected_close) deny('行情不存在或原收盘价已变化');
+        if(args.close_price===q.close) deny('新收盘价与当前值相同');
+        const count=db.one`SELECT COUNT(*) AS n FROM positions WHERE security_code=${args.security_code} AND trade_date=${args.trade_date}`;
+        const future=db.one`SELECT COUNT(*) AS n FROM positions WHERE security_code=${args.security_code} AND trade_date>${args.trade_date}`;
+        if(future.n!==0) deny('已有后续持仓，不能更正历史收盘价');
+        const n=db.exec`UPDATE daily_quotes SET close=${args.close_price}, high=MAX(high,${args.close_price}), low=MIN(low,${args.close_price}) WHERE id=${q.id} AND close=${args.expected_close}`;
+        if(n!==1) deny('行情已变化');
+        const revalued=db.exec`UPDATE positions SET close_price=${args.close_price}, market_value_cents=quantity*${args.close_price} WHERE security_code=${args.security_code} AND trade_date=${args.trade_date}`;
+        if(revalued!==count.n) deny('持仓集合已变化');
+        const bad=db.one`SELECT COUNT(*) AS n FROM positions WHERE security_code=${args.security_code} AND trade_date=${args.trade_date} AND (close_price<>${args.close_price} OR market_value_cents<>quantity*close_price)`;
+        const after=my.one`SELECT close,high,low FROM daily_quotes WHERE id=${q.id}`;
+        if(bad.n!==0 || !after || after.close!==args.close_price || after.high<after.close || after.low>after.close) deny('行情或持仓重估后置校验失败');
+        return {security_code:args.security_code,trade_date:args.trade_date,before:q.close,after:after.close,revalued_positions:revalued,reason:args.reason};
+      }

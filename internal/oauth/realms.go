@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-// Each local database provider exposes its own OAuth issuer/discovery URL. The
-// implementation and key may be shared; accounts, grants and tokens never are.
 func (s *Server) realm(database string) (*Server, error) {
 	if s.cfg.Catalog == nil {
 		return nil, fmt.Errorf("未配置业务认证来源")
@@ -19,6 +17,10 @@ func (s *Server) realm(database string) (*Server, error) {
 	d, e := s.cfg.Catalog.Get(database)
 	if e != nil || !d.MCPEnabled || !d.LocalAuthentication() {
 		return nil, fmt.Errorf("业务认证来源未开启")
+	}
+	p, e := s.cfg.Management.ResolveAuth(context.Background(), "DATABASE", d.ID)
+	if e != nil || p.Provider.Type != "DEMO_OAUTH" {
+		return nil, management.ErrDenied
 	}
 	scoped := *s
 	scoped.cfg = s.cfg
@@ -81,6 +83,13 @@ func (s *Server) identity() string {
 	return "employee"
 }
 func (s *Server) authConfig() string {
+	if s.cfg.AccountDatabase == "" && s.cfg.Management != nil {
+		p, e := s.cfg.Management.ResolveAuth(context.Background(), "API", "platform")
+		if e != nil {
+			return "invalid"
+		}
+		return p.Fingerprint()
+	}
 	d, e := s.localDatabase()
 	if e != nil {
 		return ""
@@ -99,6 +108,10 @@ func (v *Verifier) businessToken(ctx context.Context, sub, identity, config stri
 	}
 	d, e := v.Catalog.Get(v.DatabaseID)
 	if e != nil || !d.MCPEnabled || !d.LocalAuthentication() || identity != "database:"+d.ID || config != d.AuthenticationVersion() {
+		return management.BusinessAccount{}, management.ErrDenied
+	}
+	p, e := v.Catalog.Management.ResolveAuth(ctx, "DATABASE", d.ID)
+	if e != nil || p.Provider.Type != "DEMO_OAUTH" {
 		return management.BusinessAccount{}, management.ErrDenied
 	}
 	a, e := v.Catalog.BusinessAccount(ctx, d, sub)
@@ -131,9 +144,9 @@ func (s *Server) redirectRealm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// authConfigMatches also makes a changed directory mapping invalidate an open
-// authorization page, a code or a refresh token before issuing a new JWT.
 func (s *Server) authConfigMatches(g grant) bool {
 	return g.Realm == s.cfg.AccountDatabase && g.AuthConfig == s.authConfig()
 }
-func databaseIdentity(identity string) bool { return strings.HasPrefix(identity, "database:") }
+func databaseIdentity(identity string) bool {
+	return strings.HasPrefix(identity, "database:")
+}

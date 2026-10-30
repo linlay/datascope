@@ -1,4 +1,4 @@
-// Package management owns platform identity, direct grants and versioned configuration.
+// Package management owns global identities and per-source durable configuration.
 package management
 
 import (
@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"datascope-server/internal/audit"
+	"datascope-server/internal/metaschema"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -19,11 +20,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
 var ErrDenied = errors.New("无权执行此操作")
-var Permissions = []string{"config.read", "config.write", "policy.write", "mcp.write", "action.write", "knowledge.read", "knowledge.write", "query", "raw_query", "audit.read", "grant", "impersonate"}
+var Permissions = []string{
+	"config.read", "config.write", "policy.write", "mcp.write", "action.write", "knowledge.read", "knowledge.write", "query", "raw_query", "audit.read", "grant", "impersonate"}
 var SystemPermissions = []string{"users.manage", "databases.create"}
 
 type Store struct {
@@ -31,6 +35,10 @@ type Store struct {
 	Path         string
 	Audit        *audit.Store
 	AllowedRoots []string
+	mu           sync.Mutex
+	sources      map[string]*Source
+	sessions     map[string]session
+	closeOnce    sync.Once
 }
 type User struct {
 	ID          int64  `json:"id"`
@@ -66,6 +74,15 @@ func Open(path string, a *audit.Store) (*Store, error) {
 	if e = os.MkdirAll(filepath.Dir(abs), 0700); e != nil {
 		return nil, e
 	}
+	lock, e := os.OpenFile(abs+".migration.lock", os.O_CREATE|os.O_RDWR, 0600)
+	if e != nil {
+		return nil, e
+	}
+	defer lock.Close()
+	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); e != nil {
+		return nil, e
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	f, e := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
 		return nil, e
@@ -77,47 +94,38 @@ func Open(path string, a *audit.Store) (*Store, error) {
 		return nil, e
 	}
 	db.SetMaxOpenConns(4)
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,username TEXT NOT NULL UNIQUE,name TEXT NOT NULL,password_hash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,system_admin INTEGER NOT NULL DEFAULT 0,auth_version INTEGER NOT NULL DEFAULT 0);
- CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),expires INTEGER NOT NULL,resource TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS user_system_permissions(user_id INTEGER NOT NULL REFERENCES users(id),permission TEXT NOT NULL,PRIMARY KEY(user_id,permission));
- CREATE TABLE IF NOT EXISTS database_grants(user_id INTEGER NOT NULL REFERENCES users(id),database_id TEXT NOT NULL,permissions TEXT NOT NULL,business_user_id INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,database_id));
- CREATE TABLE IF NOT EXISTS database_credentials(database_id TEXT PRIMARY KEY,ciphertext BLOB NOT NULL);
- CREATE TABLE IF NOT EXISTS records(bucket TEXT NOT NULL,key TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(bucket,key));
- CREATE TABLE IF NOT EXISTS record_versions(bucket TEXT NOT NULL,key TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(bucket,key,revision));
- CREATE TABLE IF NOT EXISTS outbox_events(id TEXT PRIMARY KEY,data TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
- INSERT OR IGNORE INTO schema_migrations VALUES(1,CURRENT_TIMESTAMP);`)
+	if e = metaschema.Migrate(db); e != nil {
+		db.Close()
+		return nil, e
+	}
+	_, e = db.Exec("CREATE TABLE IF NOT EXISTS PLATFORM_USER(ID_ INTEGER PRIMARY KEY,USERNAME_ TEXT NOT NULL UNIQUE,NAME_ TEXT NOT NULL,PASSWORD_HASH_ TEXT NOT NULL,ACTIVE_ INTEGER NOT NULL DEFAULT 1,SYSTEM_ADMIN_ INTEGER NOT NULL DEFAULT 0,AUTH_VERSION_ INTEGER NOT NULL DEFAULT 0);\n CREATE TABLE IF NOT EXISTS PLATFORM_SESSION(TOKEN_HASH_ TEXT PRIMARY KEY,USER_ID_ INTEGER NOT NULL REFERENCES PLATFORM_USER(ID_),EXPIRES_ INTEGER NOT NULL,RESOURCE_ TEXT NOT NULL);\n CREATE TABLE IF NOT EXISTS PLATFORM_PERMISSION(USER_ID_ INTEGER NOT NULL REFERENCES PLATFORM_USER(ID_),PERMISSION_ TEXT NOT NULL,PRIMARY KEY(USER_ID_,PERMISSION_));\n CREATE TABLE IF NOT EXISTS PLATFORM_GRANT(USER_ID_ INTEGER NOT NULL REFERENCES PLATFORM_USER(ID_),DATABASE_ID_ TEXT NOT NULL,PERMISSIONS_ TEXT NOT NULL,BUSINESS_USER_ID_ INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(USER_ID_,DATABASE_ID_));\n CREATE TABLE IF NOT EXISTS CONNECTION_SECRET(DATABASE_ID_ TEXT PRIMARY KEY,CIPHERTEXT_ BLOB NOT NULL);\n CREATE TABLE IF NOT EXISTS CONFIG_RECORD(BUCKET_ TEXT NOT NULL,KEY_ TEXT NOT NULL,DATA_ TEXT NOT NULL,PRIMARY KEY(BUCKET_,KEY_));\n CREATE TABLE IF NOT EXISTS CONFIG_VERSION(BUCKET_ TEXT NOT NULL,KEY_ TEXT NOT NULL,REVISION_ INTEGER NOT NULL,DATA_ TEXT NOT NULL,CREATED_AT_ TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(BUCKET_,KEY_,REVISION_));\n CREATE TABLE IF NOT EXISTS AUDIT_OUTBOX(ID_ TEXT PRIMARY KEY,DATA_ TEXT NOT NULL);\n CREATE TABLE IF NOT EXISTS SCHEMA_VERSION(VERSION_ INTEGER PRIMARY KEY,APPLIED_AT_ TEXT NOT NULL);\n INSERT OR IGNORE INTO SCHEMA_VERSION VALUES(1,CURRENT_TIMESTAMP);")
 	if e != nil {
 		db.Close()
 		return nil, e
 	}
-	var hasVersion int
-	if e = db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='auth_version'").Scan(&hasVersion); e != nil {
+	m := &Store{DB: db, Path: abs, Audit: a, sources: map[string]*Source{}, sessions: map[string]session{}}
+	if e = m.initSources(); e != nil {
 		db.Close()
 		return nil, e
 	}
-	if hasVersion == 0 {
-		if _, e = db.Exec("ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0"); e != nil {
-			db.Close()
-			return nil, e
-		}
-	}
-	m := &Store{DB: db, Path: abs, Audit: a}
-	if e = m.initBusinessAccounts(); e != nil {
-		db.Close()
-		return nil, e
-	}
-	if e = m.initActions(); e != nil {
-		db.Close()
-		return nil, e
-	}
-	if e = m.initSearch(); e != nil {
-		db.Close()
+
+	if e = m.initAuth(); e != nil {
+		m.Close()
 		return nil, e
 	}
 	return m, nil
 }
-func (s *Store) Close() error { return s.DB.Close() }
+func (s *Store) Close() error {
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, x := range s.sources {
+			x.Close()
+		}
+		s.DB.Close()
+	})
+	return nil
+}
 func passwordHash(password string) (string, error) {
 	salt := make([]byte, 16)
 	if _, e := rand.Read(salt); e != nil {
@@ -150,7 +158,6 @@ func tokenHash(token string) string {
 	return base64.RawURLEncoding.EncodeToString(b[:])
 }
 
-// Change commits the mutation and its audit outbox entry in the same transaction.
 func (s *Store) Change(ctx context.Context, action, database string, detail any, fn func(*sql.Tx) error) error {
 	tx, e := s.DB.BeginTx(ctx, nil)
 	if e != nil {
@@ -162,55 +169,21 @@ func (s *Store) Change(ctx context.Context, action, database string, detail any,
 	}
 	ev := audit.Event{Metadata: audit.From(ctx), ID: audit.ID(), Kind: action, Status: "success", StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Detail: detail}
 	ev.DatabaseID = database
-	raw, e := json.Marshal(ev)
-	if e != nil {
+	if e = tx.Commit(); e != nil {
 		return e
 	}
-	if _, e = tx.ExecContext(ctx, "INSERT INTO outbox_events VALUES(?,?)", ev.ID, string(raw)); e != nil {
-		return e
-	}
-	return tx.Commit()
+	return s.Audit.Put(ctx, ev)
+
 }
 func (s *Store) Flush(ctx context.Context) error {
-	if s.Audit == nil {
-		return nil
-	}
-	rows, e := s.DB.QueryContext(ctx, "SELECT id,data FROM outbox_events LIMIT 200")
-	if e != nil {
-		return e
-	}
-	var events []audit.Event
-	for rows.Next() {
-		var id, raw string
-		var ev audit.Event
-		if e = rows.Scan(&id, &raw); e != nil {
-			rows.Close()
-			return e
-		}
-		if e = json.Unmarshal([]byte(raw), &ev); e != nil {
-			rows.Close()
-			return e
-		}
-		events = append(events, ev)
-	}
-	e = rows.Err()
-	rows.Close()
-	if e != nil {
-		return e
-	}
-	for _, ev := range events {
-		if e = s.Audit.Put(ctx, ev); e != nil {
-			return e
-		}
-		if _, e = s.DB.ExecContext(ctx, "DELETE FROM outbox_events WHERE id=?", ev.ID); e != nil {
-			return e
-		}
+	if s.Audit != nil {
+		s.Audit.Flush(ctx)
 	}
 	return nil
 }
 func (s *Store) Bootstrap(ctx context.Context, username, password string) error {
 	var n int
-	if e := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&n); e != nil {
+	if e := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM PLATFORM_USER").Scan(&n); e != nil {
 		return e
 	}
 	if n > 0 {
@@ -225,13 +198,13 @@ func (s *Store) Bootstrap(ctx context.Context, username, password string) error 
 	}
 	return s.Change(ctx, "user.bootstrap", "", map[string]any{"username": username}, func(tx *sql.Tx) error {
 		var count int
-		if e := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM users").Scan(&count); e != nil {
+		if e := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM PLATFORM_USER").Scan(&count); e != nil {
 			return e
 		}
 		if count > 0 {
 			return nil
 		}
-		_, e := tx.ExecContext(ctx, "INSERT INTO users(username,name,password_hash,system_admin) VALUES(?,?,?,1)", username, username, hash)
+		_, e := tx.ExecContext(ctx, "INSERT INTO PLATFORM_USER(USERNAME_,NAME_,PASSWORD_HASH_,SYSTEM_ADMIN_) VALUES(?,?,?,1)", username, username, hash)
 		return e
 	})
 }
@@ -241,16 +214,16 @@ func scanUser(row interface{ Scan(...any) error }) (User, error) {
 	return u, e
 }
 
-const userColumns = "id,username,name,active,system_admin,auth_version"
+const userColumns = "ID_,USERNAME_,NAME_,ACTIVE_,SYSTEM_ADMIN_,AUTH_VERSION_"
 
 func (s *Store) User(ctx context.Context, id int64) (User, error) {
-	return scanUser(s.DB.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE id=?", id))
+	return scanUser(s.DB.QueryRowContext(ctx, "SELECT "+userColumns+" FROM PLATFORM_USER WHERE ID_=?", id))
 }
 func (s *Store) ByUsername(ctx context.Context, name string) (User, error) {
-	return scanUser(s.DB.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE username=?", name))
+	return scanUser(s.DB.QueryRowContext(ctx, "SELECT "+userColumns+" FROM PLATFORM_USER WHERE USERNAME_=?", name))
 }
 func (s *Store) Users(ctx context.Context) ([]User, error) {
-	rows, e := s.DB.QueryContext(ctx, "SELECT "+userColumns+" FROM users ORDER BY id")
+	rows, e := s.DB.QueryContext(ctx, "SELECT "+userColumns+" FROM PLATFORM_USER ORDER BY ID_")
 	if e != nil {
 		return nil, e
 	}
@@ -269,7 +242,7 @@ func (s *Store) Authenticate(ctx context.Context, name, password string) (User, 
 	var hash string
 	u, e := s.ByUsername(ctx, name)
 	if e == nil {
-		e = s.DB.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=?", u.ID).Scan(&hash)
+		e = s.DB.QueryRowContext(ctx, "SELECT PASSWORD_HASH_ FROM PLATFORM_USER WHERE ID_=?", u.ID).Scan(&hash)
 	}
 	if e != nil || !u.Active {
 		hash = "c29tZS1kdW1teS1zYWx0LTEyMw:qGxj+NkGIzvZOMz9ogEY5MWeSVvFY3krDkZ93HnTyf0"
@@ -290,7 +263,7 @@ func (s *Store) CreateUser(ctx context.Context, name, display, password string) 
 	}
 	var id int64
 	e = s.Change(ctx, "user.create", "", map[string]any{"username": name}, func(tx *sql.Tx) error {
-		r, e := tx.ExecContext(ctx, "INSERT INTO users(username,name,password_hash) VALUES(?,?,?)", name, display, hash)
+		r, e := tx.ExecContext(ctx, "INSERT INTO PLATFORM_USER(USERNAME_,NAME_,PASSWORD_HASH_) VALUES(?,?,?)", name, display, hash)
 		if e == nil {
 			id, e = r.LastInsertId()
 		}
@@ -303,7 +276,7 @@ func (s *Store) CreateUser(ctx context.Context, name, display, password string) 
 }
 func (s *Store) DisableUser(ctx context.Context, id int64) error {
 	return s.Change(ctx, "user.disable", "", map[string]any{"user_id": id}, func(tx *sql.Tx) error {
-		r, e := tx.ExecContext(ctx, "UPDATE users SET active=0,auth_version=auth_version+1 WHERE id=? AND system_admin=0", id)
+		r, e := tx.ExecContext(ctx, "UPDATE PLATFORM_USER SET ACTIVE_=0,AUTH_VERSION_=AUTH_VERSION_+1 WHERE ID_=? AND SYSTEM_ADMIN_=0", id)
 		if e != nil {
 			return e
 		}
@@ -314,8 +287,7 @@ func (s *Store) DisableUser(ctx context.Context, id int64) error {
 		if n != 1 {
 			return errors.New("用户不存在，或不能禁用初始化管理员")
 		}
-		_, e = tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", id)
-		return e
+		return nil
 	})
 }
 func (s *Store) ResetPassword(ctx context.Context, id int64, password string) error {
@@ -327,7 +299,7 @@ func (s *Store) ResetPassword(ctx context.Context, id int64, password string) er
 		return e
 	}
 	return s.Change(ctx, "user.password.reset", "", map[string]any{"user_id": id}, func(tx *sql.Tx) error {
-		r, e := tx.ExecContext(ctx, "UPDATE users SET password_hash=?,auth_version=auth_version+1 WHERE id=?", h, id)
+		r, e := tx.ExecContext(ctx, "UPDATE PLATFORM_USER SET PASSWORD_HASH_=?,AUTH_VERSION_=AUTH_VERSION_+1 WHERE ID_=?", h, id)
 		if e != nil {
 			return e
 		}
@@ -335,40 +307,67 @@ func (s *Store) ResetPassword(ctx context.Context, id int64, password string) er
 		if n != 1 {
 			return errors.New("用户不存在")
 		}
-		_, e = tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=?", id)
-		return e
+		return nil
 	})
 }
+
+type session struct {
+	UserID   int64
+	Version  int64
+	Resource string
+	Expires  int64
+	Policy   string
+}
+
 func (s *Store) NewSession(ctx context.Context, u User, resource string, duration time.Duration) (string, error) {
-	token := audit.ID() + audit.ID()
-	r, e := s.DB.ExecContext(ctx, "INSERT INTO sessions SELECT ?,id,?,? FROM users WHERE id=? AND active=1 AND auth_version=?", tokenHash(token), time.Now().Add(duration).Unix(), resource, u.ID, u.AuthVersion)
-	if e != nil {
-		return "", e
-	}
-	n, e := r.RowsAffected()
-	if e != nil {
-		return "", e
-	}
-	if n != 1 {
+	current, e := s.User(ctx, u.ID)
+	if e != nil || !current.Active || current.AuthVersion != u.AuthVersion {
 		return "", ErrDenied
 	}
+	p, e := s.ResolveAuth(ctx, "API", "platform")
+	if e != nil {
+		return "", e
+	}
+	token := audit.ID() + audit.ID()
+	s.mu.Lock()
+	for key, v := range s.sessions {
+		if v.Expires <= time.Now().Unix() {
+			delete(s.sessions, key)
+		}
+	}
+	if len(s.sessions) >= 10000 {
+		s.mu.Unlock()
+		return "", errors.New("会话数量已达到上限，请稍后重试")
+	}
+	s.sessions[tokenHash(token)] = session{u.ID, u.AuthVersion, resource, time.Now().Add(duration).Unix(), p.Fingerprint()}
+	s.mu.Unlock()
 	return token, nil
 }
 func (s *Store) Session(ctx context.Context, token, resource string) (User, error) {
-	var id int64
-	e := s.DB.QueryRowContext(ctx, "SELECT user_id FROM sessions WHERE token_hash=? AND resource=? AND expires>?", tokenHash(token), resource, time.Now().Unix()).Scan(&id)
-	if e != nil {
+	s.mu.Lock()
+	r, ok := s.sessions[tokenHash(token)]
+	if !ok || r.Expires <= time.Now().Unix() {
+		delete(s.sessions, tokenHash(token))
+	}
+	s.mu.Unlock()
+	if !ok || r.Resource != resource || r.Expires <= time.Now().Unix() {
 		return User{}, ErrDenied
 	}
-	u, e := s.User(ctx, id)
-	if e != nil || !u.Active {
+	p, e := s.ResolveAuth(ctx, "API", "platform")
+	if e != nil || p.Fingerprint() != r.Policy {
+		return User{}, ErrDenied
+	}
+	u, e := s.User(ctx, r.UserID)
+	if e != nil || !u.Active || u.AuthVersion != r.Version {
 		return User{}, ErrDenied
 	}
 	return u, nil
 }
 func (s *Store) Logout(ctx context.Context, token string) error {
-	_, e := s.DB.ExecContext(ctx, "DELETE FROM sessions WHERE token_hash=?", tokenHash(token))
-	return e
+	s.mu.Lock()
+	delete(s.sessions, tokenHash(token))
+	s.mu.Unlock()
+	return nil
 }
 func (s *Store) Can(ctx context.Context, id int64, database, permission string) bool {
 	u, e := s.User(ctx, id)
@@ -380,7 +379,7 @@ func (s *Store) Can(ctx context.Context, id int64, database, permission string) 
 	}
 	if database == "" {
 		var n int
-		return s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM user_system_permissions WHERE user_id=? AND permission=?", id, permission).Scan(&n) == nil && n > 0
+		return s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM PLATFORM_PERMISSION WHERE USER_ID_=? AND PERMISSION_=?", id, permission).Scan(&n) == nil && n > 0
 	}
 	g, e := s.Grant(ctx, id, database)
 	return e == nil && slices.Contains(g.Permissions, permission)
@@ -388,14 +387,14 @@ func (s *Store) Can(ctx context.Context, id int64, database, permission string) 
 func (s *Store) Grant(ctx context.Context, id int64, database string) (Grant, error) {
 	g := Grant{UserID: id, DatabaseID: database}
 	var raw string
-	e := s.DB.QueryRowContext(ctx, "SELECT permissions,business_user_id FROM database_grants WHERE user_id=? AND database_id=?", id, database).Scan(&raw, &g.BusinessUserID)
+	e := s.sourceDB(database).QueryRowContext(ctx, "SELECT PERMISSIONS_,BUSINESS_USER_ID_ FROM PLATFORM_GRANT WHERE USER_ID_=? AND DATABASE_ID_=?", id, database).Scan(&raw, &g.BusinessUserID)
 	if e == nil {
 		e = json.Unmarshal([]byte(raw), &g.Permissions)
 	}
 	return g, e
 }
 func (s *Store) Grants(ctx context.Context, database string) ([]Grant, error) {
-	rows, e := s.DB.QueryContext(ctx, "SELECT user_id,permissions,business_user_id FROM database_grants WHERE database_id=? ORDER BY user_id", database)
+	rows, e := s.sourceDB(database).QueryContext(ctx, "SELECT USER_ID_,PERMISSIONS_,BUSINESS_USER_ID_ FROM PLATFORM_GRANT WHERE DATABASE_ID_=? ORDER BY USER_ID_", database)
 	if e != nil {
 		return nil, e
 	}
@@ -449,8 +448,8 @@ func (s *Store) SaveGrant(ctx context.Context, actor int64, g Grant) error {
 		return errors.New("业务身份必须为非负编号")
 	}
 	raw, _ := json.Marshal(g.Permissions)
-	return s.Change(ctx, "database.grant", g.DatabaseID, map[string]any{"before": old, "after": g}, func(tx *sql.Tx) error {
-		_, e := tx.ExecContext(ctx, "INSERT INTO database_grants VALUES(?,?,?,?) ON CONFLICT(user_id,database_id) DO UPDATE SET permissions=excluded.permissions,business_user_id=excluded.business_user_id", g.UserID, g.DatabaseID, string(raw), g.BusinessUserID)
+	return s.sourceChange(ctx, g.DatabaseID, "database.grant", map[string]any{"before": old, "after": g}, func(tx *sql.Tx) error {
+		_, e := tx.ExecContext(ctx, "INSERT INTO PLATFORM_GRANT VALUES(?,?,?,?) ON CONFLICT(USER_ID_,DATABASE_ID_) DO UPDATE SET PERMISSIONS_=excluded.PERMISSIONS_,BUSINESS_USER_ID_=excluded.BUSINESS_USER_ID_", g.UserID, g.DatabaseID, string(raw), g.BusinessUserID)
 		return e
 	})
 }
@@ -465,7 +464,7 @@ func (s *Store) BusinessID(ctx context.Context, id int64, database string) (int6
 	return g.BusinessUserID, nil
 }
 func (s *Store) Records(ctx context.Context, bucket string) ([]Record, error) {
-	return readRecords(ctx, s.DB, bucket)
+	return s.records(ctx, bucket)
 }
 
 type queryer interface {
@@ -473,7 +472,7 @@ type queryer interface {
 }
 
 func readRecords(ctx context.Context, q queryer, bucket string) ([]Record, error) {
-	rows, e := q.QueryContext(ctx, "SELECT key,data FROM records WHERE bucket=? ORDER BY key", bucket)
+	rows, e := q.QueryContext(ctx, "SELECT KEY_,DATA_ FROM CONFIG_RECORD WHERE BUCKET_=? ORDER BY KEY_", bucket)
 	if e != nil {
 		return nil, e
 	}
@@ -489,66 +488,7 @@ func readRecords(ctx context.Context, q queryer, bucket string) ([]Record, error
 	return out, rows.Err()
 }
 func (s *Store) UpdateRecords(ctx context.Context, bucket, action, database string, fn func([]Record) ([]Record, error), credentials ...DatabaseCredential) error {
-	writeCredential := len(credentials) == 1 && bucket == "databases" && action == "database.update" && credentials[0].DatabaseID == WriteCredentialID(database)
-	if len(credentials) > 1 || (len(credentials) == 1 && !writeCredential && (bucket != "databases" || action != "database.create" || credentials[0].DatabaseID != database)) {
-		return errors.New("凭据只能随对应数据库创建或写入账号更新一同保存")
-	}
-	detail := map[string]any{"bucket": bucket, "changes": []any{}}
-	return s.Change(ctx, action, database, detail, func(tx *sql.Tx) error {
-		records, e := readRecords(ctx, tx, bucket)
-		if e != nil {
-			return e
-		}
-		updated, e := fn(records)
-		if e != nil {
-			return e
-		}
-		if len(credentials) == 1 {
-			found := false
-			for _, r := range updated {
-				if r.Key == database {
-					found = true
-				}
-			}
-			if !found {
-				return errors.New("缺少凭据所属的数据库配置")
-			}
-			credentialSQL := "INSERT INTO database_credentials(database_id,ciphertext) VALUES(?,?)"
-			if writeCredential {
-				credentialSQL += " ON CONFLICT(database_id) DO UPDATE SET ciphertext=excluded.ciphertext"
-			}
-			if _, e = tx.ExecContext(ctx, credentialSQL, credentials[0].DatabaseID, credentials[0].Ciphertext); e != nil {
-				return e
-			}
-		}
-		for _, r := range updated {
-			var old string
-			_ = tx.QueryRowContext(ctx, "SELECT data FROM records WHERE bucket=? AND key=?", bucket, r.Key).Scan(&old)
-			if old != r.Data {
-				before := any(nil)
-				if old != "" {
-					before = json.RawMessage(old)
-				}
-				detail["changes"] = append(detail["changes"].([]any), map[string]any{"key": r.Key, "before": before, "after": json.RawMessage(r.Data)})
-				if _, e = tx.ExecContext(ctx, "INSERT INTO record_versions(bucket,key,revision,data) SELECT ?,?,COALESCE(MAX(revision),0)+1,? FROM record_versions WHERE bucket=? AND key=?", bucket, r.Key, r.Data, bucket, r.Key); e != nil {
-					return e
-				}
-			}
-			if action == "database.create" && old == "" {
-				actor := audit.From(ctx).ActorID
-				if actor > 0 {
-					perms, _ := json.Marshal([]string{"config.read", "config.write", "policy.write", "mcp.write", "knowledge.write", "audit.read", "grant"})
-					if _, e = tx.ExecContext(ctx, "INSERT INTO database_grants VALUES(?,?,?,0)", actor, r.Key, string(perms)); e != nil {
-						return e
-					}
-				}
-			}
-			if _, e = tx.ExecContext(ctx, "INSERT INTO records VALUES(?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET data=excluded.data", bucket, r.Key, r.Data); e != nil {
-				return e
-			}
-		}
-		return nil
-	})
+	return s.updateRecords(ctx, bucket, action, database, fn, credentials...)
 }
 func (s *Store) ValidatePath(path string) error {
 	real, e := filepath.EvalSymlinks(path)
@@ -559,7 +499,7 @@ func (s *Store) ValidatePath(path string) error {
 	if e != nil {
 		return e
 	}
-	for _, p := range []string{s.Path, s.AuditPath()} {
+	for _, p := range s.internalPaths() {
 		if p == "" {
 			continue
 		}
@@ -589,10 +529,9 @@ func (s *Store) AuditPath() string {
 	}
 	return ""
 }
-
 func (s *Store) EnableUser(ctx context.Context, id int64) error {
 	return s.Change(ctx, "user.enable", "", map[string]any{"user_id": id}, func(tx *sql.Tx) error {
-		r, e := tx.ExecContext(ctx, "UPDATE users SET active=1,auth_version=auth_version+1 WHERE id=?", id)
+		r, e := tx.ExecContext(ctx, "UPDATE PLATFORM_USER SET ACTIVE_=1,AUTH_VERSION_=AUTH_VERSION_+1 WHERE ID_=?", id)
 		if e != nil {
 			return e
 		}

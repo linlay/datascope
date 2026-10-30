@@ -4,6 +4,7 @@ import (
 	"context"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
+	"datascope-server/internal/management"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
 	"encoding/json"
@@ -83,22 +84,32 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
 		}
 		endpointIssuer := issuer
+		authMode := mode
+		var selectedAuth *management.ResolvedAuth
 		if c.Management != nil {
-			if !d.LocalAuthentication() {
-				http.Error(w, "业务 MCP 仅支持独立业务账号", 503)
+			resolved, e := c.Management.ResolveAuth(r.Context(), "DATABASE", d.ID)
+			if e != nil {
+				http.Error(w, "认证配置不可用", 503)
 				return
 			}
-			endpointIssuer = d.AuthorizationIssuer(issuer)
+			selectedAuth = &resolved
+			if resolved.Provider.Type == "DEMO_OAUTH" {
+				endpointIssuer = d.AuthorizationIssuer(issuer)
+				authMode = "oauth"
+			} else {
+				authMode = "none"
+			}
 		}
-		if c.Management != nil && mode != "oauth" {
-			http.Error(w, "独立业务账号认证需要 OAuth 模式", 503)
-			return
-		}
-		h, err := HTTPHandlerWithManagement(New(svc, selected), svc.Store, mode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
+		selected.AuthMode = authMode
+		h, err := HTTPHandlerWithManagement(New(svc, selected), svc.Store, authMode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		if selectedAuth != nil && selectedAuth.Provider.Type != "DEMO_OAUTH" {
+			h = policyAuthentication(h, c, d, *selectedAuth, endpointResource, endpoint)
+		}
+
 		h.ServeHTTP(w, r)
 	})
 	return audit.HTTPHandler(c.Audit, "database-mcp", handler), nil

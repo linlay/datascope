@@ -1,4 +1,4 @@
-// Package oauth implements the demo OAuth authorization server and MCP JWT verification.
+// Package oauth implements demo OAuth and verification of demo MCP tokens.
 package oauth
 
 import (
@@ -10,11 +10,17 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"database/sql"
+	"datascope-server/internal/audit"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/management"
+	"datascope-server/internal/store"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/modelcontextprotocol/go-sdk/auth"
+	"golang.org/x/time/rate"
 	"html/template"
 	"io"
 	"math/big"
@@ -28,13 +34,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"datascope-server/internal/audit"
-	"datascope-server/internal/catalog"
-	"datascope-server/internal/management"
-	"datascope-server/internal/store"
-	"github.com/modelcontextprotocol/go-sdk/auth"
-	"golang.org/x/time/rate"
 )
 
 var b64 = base64.RawURLEncoding
@@ -46,7 +45,10 @@ func random() string {
 	}
 	return b64.EncodeToString(b)
 }
-func hash(s string) string { v := sha256.Sum256([]byte(s)); return b64.EncodeToString(v[:]) }
+func hash(s string) string {
+	v := sha256.Sum256([]byte(s))
+	return b64.EncodeToString(v[:])
+}
 
 type Config struct {
 	Catalog                                        *catalog.Catalog
@@ -55,9 +57,7 @@ type Config struct {
 	DatabaseForResource                            func(string) (string, error)
 	Issuer, Resource, KeyPath, StatePath, Password string
 	DebugLogin                                     bool
-	// ResourceAllowed validates exact configured endpoint URLs. Without it,
-	// this authorization server only issues tokens for Resource.
-	ResourceAllowed func(string) bool
+	ResourceAllowed                                func(string) bool
 }
 type Server struct {
 	cfg                       Config
@@ -103,30 +103,33 @@ func New(cfg Config, st *store.Store) (*Server, error) {
 	if e != nil {
 		return nil, e
 	}
-	if cfg.Management != nil {
-		cfg.StatePath = cfg.Management.Path
-	}
-	if e = os.MkdirAll(filepath.Dir(cfg.StatePath), 0700); e != nil {
-		return nil, e
-	}
-	f, e := os.OpenFile(cfg.StatePath, os.O_CREATE|os.O_RDWR, 0600)
-	if e != nil {
-		return nil, e
-	}
-	f.Close()
-	db, e := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: cfg.StatePath, RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"}).String())
+
+	db, e := sql.Open("sqlite", fmt.Sprintf("file:oauth-%s?mode=memory&cache=shared", random()))
 	if e != nil {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY,data TEXT NOT NULL);CREATE TABLE IF NOT EXISTS grants(id TEXT PRIMARY KEY,kind TEXT NOT NULL,data TEXT NOT NULL);`)
+	_, e = db.Exec("CREATE TABLE IF NOT EXISTS OAUTH_CLIENT(ID_ TEXT PRIMARY KEY,DATA_ TEXT NOT NULL);CREATE TABLE IF NOT EXISTS OAUTH_GRANT(ID_ TEXT PRIMARY KEY,KIND_ TEXT NOT NULL,DATA_ TEXT NOT NULL);")
 	if e != nil {
 		db.Close()
 		return nil, e
 	}
+	if cfg.Management != nil {
+		rows, err := cfg.Management.DB.Query("SELECT ID_,DATA_ FROM OAUTH_CLIENT")
+		if err == nil {
+			for rows.Next() {
+				var id, raw string
+				rows.Scan(&id, &raw)
+				db.Exec("INSERT OR REPLACE INTO OAUTH_CLIENT VALUES(?,?)", id, raw)
+			}
+			rows.Close()
+		}
+	}
 	return &Server{cfg: cfg, key: key, db: db, store: st, loginLimit: rate.NewLimiter(2, 10), registerLimit: rate.NewLimiter(1, 10)}, nil
 }
-func (s *Server) Close() error { return s.db.Close() }
+func (s *Server) Close() error {
+	return s.db.Close()
+}
 func loadKey(path string) (*rsa.PrivateKey, error) {
 	raw, e := os.ReadFile(path)
 	if errors.Is(e, os.ErrNotExist) {
@@ -181,7 +184,9 @@ func (s *Server) Handler(next http.Handler) http.Handler {
 		m.HandleFunc("GET /.well-known/oauth-authorization-server/auth/databases/{database}", s.realmMetadata)
 	}
 	m.HandleFunc("GET /.well-known/oauth-authorization-server", s.metadata)
-	m.HandleFunc("GET /oauth/jwks.json", func(w http.ResponseWriter, r *http.Request) { jsonOut(w, 200, s.JWKS()) })
+	m.HandleFunc("GET /oauth/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		jsonOut(w, 200, s.JWKS())
+	})
 	m.HandleFunc("POST /oauth/register", s.register)
 	m.HandleFunc("GET /oauth/authorize", s.authorize)
 	m.HandleFunc("POST /oauth/authorize", s.login)
@@ -220,24 +225,33 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	c.ID = random()
 	c.Method = "none"
 	raw, _ := json.Marshal(c)
-	if _, e := s.db.Exec("INSERT INTO clients VALUES (?,?)", c.ID, string(raw)); e != nil {
+	if _, e := s.db.Exec("INSERT INTO OAUTH_CLIENT VALUES (?,?)", c.ID, string(raw)); e != nil {
 		http.Error(w, "registration unavailable", 500)
 		return
+	}
+	if s.cfg.Management != nil {
+		if _, e := s.cfg.Management.DB.ExecContext(r.Context(), "INSERT INTO OAUTH_CLIENT VALUES(?,?)", c.ID, string(raw)); e != nil {
+			http.Error(w, "registration unavailable", 500)
+			return
+		}
 	}
 	jsonOut(w, 201, c)
 }
 func (s *Server) getClient(id string) (client, error) {
 	var c client
 	var raw string
-	e := s.db.QueryRow("SELECT data FROM clients WHERE id=?", id).Scan(&raw)
+	e := s.db.QueryRow("SELECT DATA_ FROM OAUTH_CLIENT WHERE ID_=?", id).Scan(&raw)
 	if e == nil {
 		e = json.Unmarshal([]byte(raw), &c)
 	}
 	return c, e
 }
 func (s *Server) putGrant(id, kind string, g grant) error {
+	if _, e := s.db.Exec("DELETE FROM OAUTH_GRANT WHERE CAST(json_extract(DATA_,'$.Expires') AS INTEGER) < ?", time.Now().Unix()); e != nil {
+		return e
+	}
 	raw, _ := json.Marshal(g)
-	_, e := s.db.Exec("INSERT INTO grants VALUES (?,?,?)", hash(id), kind, string(raw))
+	_, e := s.db.Exec("INSERT INTO OAUTH_GRANT VALUES (?,?,?)", hash(id), kind, string(raw))
 	return e
 }
 
@@ -260,7 +274,6 @@ func (s *Server) allowsResource(resource string) bool {
 	}
 	return resource == s.cfg.Resource
 }
-
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	c, e := s.getClient(q.Get("client_id"))
@@ -297,8 +310,6 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: loginCookieName(nonce), Value: nonce, Path: s.loginPath(), HttpOnly: true, Secure: strings.HasPrefix(s.cfg.Issuer, "https:"), SameSite: http.SameSiteLaxMode, MaxAge: 600})
 	w.Header().Set("Cache-Control", "no-store")
-	// Chromium applies form-action to the redirect following a form POST too.
-	// Permit only this already-validated client's callback origin alongside self.
 	callback, _ := url.Parse(g.Redirect)
 	callbackOrigin := callback.Scheme + "://" + callback.Host
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+callbackOrigin+"; frame-ancestors 'none'; base-uri 'none'")
@@ -316,10 +327,11 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	loginPage.Execute(w, map[string]any{"Heading": label, "LoginPath": s.loginPath(), "Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": g.Resource, "Debug": s.cfg.DebugLogin && s.cfg.Management == nil, "Users": users})
 }
+func loginCookieName(nonce string) string {
+	return "oauth_login_" + hash(nonce)[:16]
+}
 
-func loginCookieName(nonce string) string { return "oauth_login_" + hash(nonce)[:16] }
-
-var loginProblemPage = template.Must(template.New("loginProblem").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>请重新打开授权页</title><body><h1>请重新打开授权页</h1><p>{{.Message}}</p>{{if .Retry}}<p><a href="{{.Retry}}">重新打开授权页</a></p>{{end}}<p>也可以回到发起连接的客户端，重新发起账号授权。</p></body></html>`))
+var loginProblemPage = template.Must(template.New("loginProblem").Parse("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>请重新打开授权页</title><body><h1>请重新打开授权页</h1><p>{{.Message}}</p>{{if .Retry}}<p><a href=\"{{.Retry}}\">重新打开授权页</a></p>{{end}}<p>也可以回到发起连接的客户端，重新发起账号授权。</p></body></html>"))
 
 func loginProblem(w http.ResponseWriter, r *http.Request, message string) {
 	retry := ""
@@ -334,7 +346,7 @@ func loginProblem(w http.ResponseWriter, r *http.Request, message string) {
 	loginProblemPage.Execute(w, map[string]string{"Message": message, "Retry": retry})
 }
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DataScope · 账号授权</title><style>body{font:16px system-ui;background:#eef2f7;margin:8vh auto;max-width:460px;padding:24px}form{background:white;padding:28px;border-radius:14px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px}button{background:#1763ba;color:white;border:0;border-radius:6px}small{color:#526070;overflow-wrap:anywhere}</style><form method="post" action="{{.LoginPath}}"><h1>{{.Heading}}</h1><p>向 {{.Client}} 授权数据库代理访问</p><small>资源：{{.Resource}}<br>请求权限：{{.Scope}}</small><input type="hidden" name="nonce" value="{{.Nonce}}"><label>用户名<input name="emp_no" placeholder="用户名" autocomplete="username"></label><label>密码<input type="password" name="password" autocomplete="current-password"></label>{{if .Debug}}<label>调试：模拟员工<select name="debug_employee"><option value="">使用工号密码登录</option>{{range .Users}}{{if eq .Status "active"}}<option value="{{.EmpNo}}">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}<button type="submit">登录并同意授权</button><small>切换账号请重新发起授权。</small></form></html>`))
+var loginPage = template.Must(template.New("login").Parse("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>DataScope · 账号授权</title><style>body{font:16px system-ui;background:#eef2f7;margin:8vh auto;max-width:460px;padding:24px}form{background:white;padding:28px;border-radius:14px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px}button{background:#1763ba;color:white;border:0;border-radius:6px}small{color:#526070;overflow-wrap:anywhere}</style><form method=\"post\" action=\"{{.LoginPath}}\"><h1>{{.Heading}}</h1><p>向 {{.Client}} 授权数据库代理访问</p><small>资源：{{.Resource}}<br>请求权限：{{.Scope}}</small><input type=\"hidden\" name=\"nonce\" value=\"{{.Nonce}}\"><label>用户名<input name=\"emp_no\" placeholder=\"用户名\" autocomplete=\"username\"></label><label>密码<input type=\"password\" name=\"password\" autocomplete=\"current-password\"></label>{{if .Debug}}<label>调试：模拟员工<select name=\"debug_employee\"><option value=\"\">使用工号密码登录</option>{{range .Users}}{{if eq .Status \"active\"}}<option value=\"{{.EmpNo}}\">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}<button type=\"submit\">登录并同意授权</button><small>切换账号请重新发起授权。</small></form></html>"))
 
 func (s *Server) employee(ctx context.Context, emp string) (store.UserSummary, error) {
 	if s.cfg.AccountDatabase != "" {
@@ -374,8 +386,6 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	nonce := r.PostForm.Get("nonce")
 	cookie, e := r.Cookie(loginCookieName(nonce))
-	// Allow an already-open page from the previous release to finish if its
-	// legacy cookie is still present and matches exactly.
 	if e != nil {
 		cookie, e = r.Cookie("oauth_login")
 	}
@@ -385,7 +395,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var pendingRaw string
 	var pending grant
-	if s.db.QueryRowContext(r.Context(), "SELECT data FROM grants WHERE id=? AND kind='login'", hash(nonce)).Scan(&pendingRaw) != nil || json.Unmarshal([]byte(pendingRaw), &pending) != nil || pending.Expires <= time.Now().Unix() || !s.authConfigMatches(pending) || !s.allowsResource(pending.Resource) {
+	if s.db.QueryRowContext(r.Context(), "SELECT DATA_ FROM OAUTH_GRANT WHERE ID_=? AND KIND_='login'", hash(nonce)).Scan(&pendingRaw) != nil || json.Unmarshal([]byte(pendingRaw), &pending) != nil || pending.Expires <= time.Now().Unix() || !s.authConfigMatches(pending) || !s.allowsResource(pending.Resource) {
 		loginProblem(w, r, "授权页面已失效，请重新发起授权。")
 		return
 	}
@@ -413,7 +423,19 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
-			account, err = s.cfg.Management.Authenticate(r.Context(), emp, r.PostForm.Get("password"))
+			policy, pe := s.cfg.Management.ResolveAuth(r.Context(), "API", "platform")
+			err = pe
+			if err == nil {
+				if policy.Provider.Type == "PLATFORM_ACCOUNT" {
+					account, err = s.cfg.Management.Authenticate(r.Context(), emp, r.PostForm.Get("password"))
+				} else {
+					var a management.BusinessAccount
+					a, err = s.cfg.Management.VerifyAccount(r.Context(), policy, "", emp, r.PostForm.Get("password"))
+					if err == nil {
+						account, err = s.cfg.Management.PlatformIdentity(r.Context(), policy, a)
+					}
+				}
+			}
 		}
 		if ev != nil {
 			ev.ActorID = account.ID
@@ -450,7 +472,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	var raw string
 	var g grant
-	if tx.QueryRow("SELECT data FROM grants WHERE id=? AND kind='login'", hash(nonce)).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Expires <= time.Now().Unix() || !s.authConfigMatches(g) || !s.allowsResource(g.Resource) {
+	if tx.QueryRow("SELECT DATA_ FROM OAUTH_GRANT WHERE ID_=? AND KIND_='login'", hash(nonce)).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Expires <= time.Now().Unix() || !s.authConfigMatches(g) || !s.allowsResource(g.Resource) {
 		loginProblem(w, r, "授权页面已过期或已经提交过，请重新发起账号授权。")
 		return
 	}
@@ -468,8 +490,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	code := random()
 	rawBytes, _ := json.Marshal(g)
-	if _, e = tx.Exec("DELETE FROM grants WHERE id=?", hash(nonce)); e == nil {
-		_, e = tx.Exec("INSERT INTO grants VALUES (?,'code',?)", hash(code), string(rawBytes))
+	if _, e = tx.Exec("DELETE FROM OAUTH_GRANT WHERE ID_=?", hash(nonce)); e == nil {
+		_, e = tx.Exec("INSERT INTO OAUTH_GRANT VALUES (?,'code',?)", hash(code), string(rawBytes))
 	}
 	if e != nil || tx.Commit() != nil {
 		http.Error(w, "unavailable", 500)
@@ -482,15 +504,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	q.Set("iss", s.cfg.Issuer)
 	dest.RawQuery = q.Encode()
 	http.SetCookie(w, &http.Cookie{Name: loginCookieName(nonce), Value: "", Path: s.loginPath(), MaxAge: -1, HttpOnly: true, Secure: strings.HasPrefix(s.cfg.Issuer, "https:"), SameSite: http.SameSiteLaxMode})
-	// Retire the old shared cookie as well; unrelated new authorization flows
-	// keep their own cookies and remain usable.
 	http.SetCookie(w, &http.Cookie{Name: "oauth_login", Value: "", Path: s.loginPath(), MaxAge: -1, HttpOnly: true})
 	http.Redirect(w, r, dest.String(), http.StatusSeeOther)
 }
 func (s *Server) SignEmployee(ctx context.Context, id int64) (string, error) {
 	return s.SignEmployeeForResource(ctx, id, s.cfg.Resource)
 }
-
 func (s *Server) SignEmployeeForResource(ctx context.Context, id int64, resource string) (string, error) {
 	if !s.allowsResource(resource) {
 		return "", errors.New("unknown or disabled OAuth resource")
@@ -566,7 +585,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	var raw string
 	var g grant
-	if tx.QueryRow("SELECT data FROM grants WHERE id=? AND kind=?", hash(id), kind).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Client != c.ID || g.Resource != q.Get("resource") || !s.authConfigMatches(g) || g.Expires <= time.Now().Unix() {
+	if tx.QueryRow("SELECT DATA_ FROM OAUTH_GRANT WHERE ID_=? AND KIND_=?", hash(id), kind).Scan(&raw) != nil || json.Unmarshal([]byte(raw), &g) != nil || g.Client != c.ID || g.Resource != q.Get("resource") || !s.authConfigMatches(g) || g.Expires <= time.Now().Unix() {
 		oauthError(w, "invalid_grant")
 		return
 	}
@@ -576,7 +595,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.Used {
 		if kind == "refresh" {
-			tx.Exec("DELETE FROM grants WHERE kind='refresh' AND json_extract(data,'$.Family')=?", g.Family)
+			tx.Exec("DELETE FROM OAUTH_GRANT WHERE KIND_='refresh' AND json_extract(DATA_,'$.Family')=?", g.Family)
 			tx.Commit()
 		}
 		oauthError(w, "invalid_grant")
@@ -610,7 +629,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	g.Used = true
 	rawBytes, _ := json.Marshal(g)
-	if _, e = tx.Exec("UPDATE grants SET data=? WHERE id=?", string(rawBytes), hash(id)); e != nil {
+	if _, e = tx.Exec("UPDATE OAUTH_GRANT SET DATA_=? WHERE ID_=?", string(rawBytes), hash(id)); e != nil {
 		http.Error(w, "unavailable", 500)
 		return
 	}
@@ -621,7 +640,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		g.Family = random()
 	}
 	rawBytes, _ = json.Marshal(g)
-	if _, e = tx.Exec("INSERT INTO grants VALUES (?,'refresh',?)", hash(refresh), string(rawBytes)); e != nil {
+	if _, e = tx.Exec("INSERT INTO OAUTH_GRANT VALUES (?,'refresh',?)", hash(refresh), string(rawBytes)); e != nil {
 		http.Error(w, "unavailable", 500)
 		return
 	}
@@ -632,7 +651,6 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	jsonOut(w, 200, map[string]any{"access_token": access, "token_type": "Bearer", "expires_in": 3600, "refresh_token": refresh, "scope": g.Scope})
 }
 
-// Verifier uses only the remote JWKS public key; no signing key is shared with MCP.
 type Verifier struct {
 	Catalog          *catalog.Catalog
 	Management       *management.Store
@@ -689,6 +707,10 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 		return nil, bad
 	}
 	if v.Management != nil {
+		policy, pe := v.Management.ResolveAuth(ctx, "API", "platform")
+		if pe != nil || c.AuthConfig != policy.Fingerprint() {
+			return nil, bad
+		}
 		u, e := v.Management.ByUsername(ctx, c.Sub)
 		if e != nil || !u.Active || u.AuthVersion != c.Version || c.Identity != "platform" {
 			return nil, bad
@@ -726,7 +748,9 @@ func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) 
 	}
 	client := v.Client
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}
+		client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}
 	}
 	req, e := http.NewRequestWithContext(ctx, "GET", v.Issuer+"/oauth/jwks.json", nil)
 	if e != nil {
@@ -766,7 +790,6 @@ func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) 
 	}
 	return nil, errors.New("unknown kid")
 }
-
 func ctxWithOAuth(ctx context.Context) context.Context {
 	return audit.With(ctx, audit.Metadata{Source: "oauth", Tool: "login"})
 }
@@ -776,14 +799,13 @@ func (s *Server) userResourceAllowed(ctx context.Context, id int64, resource str
 		if e != nil || s.databaseForResource(resource) != d.ID {
 			return false
 		}
-		var username string
-		if s.cfg.Management.DB.QueryRowContext(ctx, "SELECT username FROM business_accounts WHERE id=? AND database_id=?", id, d.ID).Scan(&username) != nil {
+		account, err := s.cfg.Management.BusinessAccountID(ctx, d.ID, id)
+		if err != nil {
 			return false
 		}
-		a, e := s.cfg.Catalog.BusinessAccount(ctx, d, username)
+		a, e := s.cfg.Catalog.BusinessAccount(ctx, d, account.Username)
 		return e == nil && (slices.Contains(a.Permissions, "query") || slices.Contains(a.Permissions, "action"))
 	}
-
 	if s.cfg.Management == nil {
 		return true
 	}
@@ -798,7 +820,5 @@ func (s *Server) userResourceAllowed(ctx context.Context, id int64, resource str
 		u, e := s.cfg.Management.User(ctx, id)
 		return e == nil && u.Active
 	}
-	// Platform identities only authorize management resources. Business MCP
-	// authorization must be completed in the database's own account realm.
 	return false
 }

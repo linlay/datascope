@@ -60,7 +60,7 @@ func TestDatabaseCreationGeneratesStableIDs(t *testing.T) {
 		t.Fatal("unprivileged source creation accepted")
 	}
 	var count int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM database_credentials").Scan(&count))
+	must(t, sourceDB(t, f, "default").QueryRow("SELECT COUNT(*) FROM CONNECTION_CONFIG WHERE PASSWORD_CIPHERTEXT_ IS NOT NULL").Scan(&count))
 	if count != 0 {
 		t.Fatal("connection test stored a password")
 	}

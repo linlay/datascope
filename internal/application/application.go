@@ -18,11 +18,13 @@ import (
 type Service struct {
 	Management       *management.Store
 	Catalog          *catalog.Catalog
+	WebURL           string
 	ManagementMCPURL string
 	MCPBase          string
 	SecureCookies    bool
 }
 type Input struct {
+	AuthConfig     *management.AuthConfig         `json:"auth_config,omitempty"`
 	Arguments      map[string]any                 `json:"arguments,omitempty"`
 	WritePassword  string                         `json:"write_password,omitempty"`
 	ActorID        *int64                         `json:"actor_id,omitempty"`
@@ -73,6 +75,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	m := audit.From(ctx)
 	m.Tool = action
 	m.DatabaseID = in.DatabaseID
+	audit.UpdateRequest(ctx, in.DatabaseID, 0)
 	ctx = audit.With(ctx, m)
 	ev, e := s.Management.Audit.Start(ctx, "action."+action, "")
 	if e != nil {
@@ -91,6 +94,46 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "get_auth_config", "save_auth_config":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if action == "get_auth_config" {
+			return s.Management.AuthConfig(ctx)
+		}
+		if in.AuthConfig == nil {
+			return nil, errors.New("需要 auth_config")
+		}
+		if e := s.Management.SaveAuthConfig(ctx, *in.AuthConfig); e != nil {
+			return nil, e
+		}
+		return s.Management.AuthConfig(ctx)
+	case "configure_query_tools":
+		if e := require("policy.write"); e != nil {
+			return nil, e
+		}
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("数据源标识不一致")
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Revision != in.Database.Revision {
+			return nil, errors.New("配置已变更，请刷新")
+		}
+		d.BusinessTools = in.Database.BusinessTools
+		if e = s.Catalog.Save(ctx, *d); e != nil {
+			return nil, e
+		}
+		saved, e := s.Catalog.Get(d.ID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *saved), nil
 	case "try_action":
 		if e := require("action.write"); e != nil {
 			return nil, e
@@ -257,7 +300,6 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			d.MCPEnabled = in.Database.MCPEnabled
 			d.MCPPath = in.Database.MCPPath
 			d.Tools = in.Database.Tools
-			d.BusinessTools = in.Database.BusinessTools
 		}
 		if action == "validate_policy" {
 			svc, e := s.Catalog.Open(ctx, d)
@@ -601,7 +643,10 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 }
 
 type DatabaseView struct {
-	MCPEndpoint string `json:"mcp_endpoint"`
+	ManagementPath string                   `json:"management_path,omitempty"`
+	AuditPath      string                   `json:"audit_path,omitempty"`
+	Access         *management.ResolvedAuth `json:"access,omitempty"`
+	MCPEndpoint    string                   `json:"mcp_endpoint"`
 	catalog.Database
 	Permissions    []string `json:"permissions"`
 	BusinessUserID int64    `json:"business_user_id"`
@@ -628,5 +673,15 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	return DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		if source, e := s.Management.Source(ctx, d.ID); e == nil {
+			view.ManagementPath = source.Path
+			view.AuditPath = source.Audit.Path
+		}
+		if access, e := s.Management.ResolveAuth(ctx, "DATABASE", d.ID); e == nil {
+			view.Access = &access
+		}
+	}
+	return view
 }

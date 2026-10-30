@@ -17,25 +17,29 @@ func (s *Store) SearchKnowledge(ctx context.Context, query string) (map[string]b
 		terms[i] = "\"" + strings.ReplaceAll(t, "\"", "\"\"") + "\""
 	}
 	expression := strings.Join(terms, " AND ")
-	rows, e := s.DB.QueryContext(ctx, "SELECT key FROM knowledge_search WHERE knowledge_search MATCH ? LIMIT 500", expression)
+	out := map[string]bool{}
+	ids, e := s.sourceIDs()
 	if e != nil {
 		return nil, e
 	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var key string
-		if e = rows.Scan(&key); e != nil {
+	for _, id := range ids {
+		rows, e := s.sourceDB(id).QueryContext(ctx, "SELECT KEY_ FROM KNOWLEDGE_SEARCH WHERE KNOWLEDGE_SEARCH MATCH ? LIMIT 500", expression)
+		if e != nil {
 			return nil, e
 		}
-		out[key] = true
+		for rows.Next() {
+			var key string
+			if e = rows.Scan(&key); e != nil {
+				rows.Close()
+				return nil, e
+			}
+			out[key] = true
+		}
+		if e = rows.Err(); e != nil {
+			rows.Close()
+			return nil, e
+		}
+		rows.Close()
 	}
-	return out, rows.Err()
-}
-func (s *Store) initSearch() error {
-	_, e := s.DB.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_search USING fts5(key UNINDEXED,name,summary,content,tokenize='trigram');
- CREATE TRIGGER IF NOT EXISTS knowledge_search_insert AFTER INSERT ON records WHEN new.bucket='knowledge' BEGIN INSERT INTO knowledge_search VALUES(new.key,json_extract(new.data,'$.name'),json_extract(new.data,'$.summary'),json_extract(new.data,'$.content')); END;
- CREATE TRIGGER IF NOT EXISTS knowledge_search_update AFTER UPDATE ON records WHEN new.bucket='knowledge' BEGIN DELETE FROM knowledge_search WHERE key=old.key; INSERT INTO knowledge_search VALUES(new.key,json_extract(new.data,'$.name'),json_extract(new.data,'$.summary'),json_extract(new.data,'$.content')); END;
- INSERT INTO knowledge_search SELECT key,json_extract(data,'$.name'),json_extract(data,'$.summary'),json_extract(data,'$.content') FROM records WHERE bucket='knowledge' AND key NOT IN(SELECT key FROM knowledge_search);`)
-	return e
+	return out, nil
 }

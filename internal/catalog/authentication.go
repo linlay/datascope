@@ -25,7 +25,8 @@ func (d Database) AuthenticationVersion() string {
 	raw, _ := json.Marshal(struct {
 		Config   *Authentication
 		Revision int64
-	}{d.Authentication, d.AuthenticationRevision})
+		Policy   string
+	}{d.Authentication, d.AuthenticationRevision, d.AuthPolicyFingerprint})
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%x", sum[:])
 }

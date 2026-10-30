@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Tag } from 'antd';
-import { SettingOutlined } from '@ant-design/icons';
+import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ToolOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined } from '@ant-design/icons';
 import { SystemSettings } from './components/SystemSettings';
 import { usePreferences } from './ui/preferences';
-import { DiscoveryPage } from './pages/Discovery';
+import { QueryConfiguration } from './pages/QueryConfiguration';
+import { Actions } from './pages/Actions';
 import { DataBrowser } from './pages/DataBrowser';
 import { McpManagement } from './pages/McpManagement';
 import { DatabaseSettings } from './pages/DatabaseSettings';
@@ -14,7 +15,7 @@ import { KnowledgePage } from './pages/PlatformPages';
 import { useAuth } from './Auth';
 import { ConnectionFields } from './components/ConnectionFields';
 
-type Page = 'database' | 'tables' | 'knowledge' | 'sql' | 'table' | 'mcp' | 'audit';
+type Page = 'database' | 'tables' | 'actions' | 'knowledge' | 'sql' | 'table' | 'mcp' | 'audit';
 
 interface Route { page:Page;table?:string;tab?:string }
 function parseHash():Route{
@@ -24,12 +25,14 @@ function parseHash():Route{
  if(page==='access')return {page:'database'};
  if(page==='audit')return {page:'audit'};
  if(page==='database')return new URLSearchParams(query).get('tab')==='audit'?{page:'audit'}:{page};
+ if(page==='actions')return {page};
  if(page==='tables'||page==='knowledge'||page==='sql'||page==='mcp')return {page};
  if(page==='table'||table)return {page:'table',table:table?decodeURIComponent(table):undefined};
  return {page:'database'};
 }
 
-const titles:Record<Page,string>={database:'数据库配置',tables:'表配置与权限',knowledge:'业务知识',sql:'SQL 控制台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
+const icons={database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,sql:<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
+const titles:Record<Page,string>={database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识管理',sql:'SQL 工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
 
 export function App() {
  const {user,logout}=useAuth();
@@ -78,7 +81,7 @@ export function App() {
 
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
- const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):(can('mcp.write')||can('action.write')));
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):(can('mcp.write')||can('action.write')));
  const activePage=!current&&user.system_admin&&route.page!=='audit'?'database':visiblePages.includes(route.page)?route.page:visiblePages[0];
  const openTable = (table: string, filter?: { col: string; val: string }) => {
     const qs = filter ? `?${new URLSearchParams({ col: filter.col, val: filter.val })}` : '';
@@ -90,16 +93,16 @@ export function App() {
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
           <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
-          <Menu
-            mode="horizontal"
-            theme={dark ? 'dark' : 'light'}
-            selectedKeys={[activePage]}
-            style={{ flex: 1, minWidth: 0, background: 'transparent', borderBottom: 'none' }}
-            items={visiblePages.map((key) => ({ key, label: t(titles[key]) }))}
-            onClick={({ key }) => (window.location.hash = `#/${key}`)}
-          />
           <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>{t('退出')}</Button><Button aria-label={t('系统设置')} title={t('系统设置')} icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}/></Space>
         </Layout.Header>
+        <Layout className="workspace-layout" style={{background:'transparent'}}>
+        <Layout.Sider className="workspace-sidebar" theme={dark?'dark':'light'} width={208} breakpoint="lg" collapsedWidth={56}>
+         <div className="workspace-label">{current?.name||'数据库管理'}</div>
+         <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} defaultOpenKeys={['tools']} onClick={({key})=>window.location.hash=`#/${key}`} items={[
+          ...visiblePages.filter(key=>['database','tables','actions','knowledge'].includes(key)).map(key=>({key,icon:icons[key],label:t(titles[key])})),
+          ...(visiblePages.some(key=>['sql','table','audit','mcp'].includes(key))?[{key:'tools',icon:<ToolOutlined/>,label:'工具',children:visiblePages.filter(key=>['sql','table','audit','mcp'].includes(key)).map(key=>({key,icon:icons[key],label:t(titles[key])}))}]:[])
+         ]}/>
+        </Layout.Sider>
         <Layout.Content className="app-content" key={activePage==='audit'?'audit':dbID}>
  {activePage==='database'&&<DatabaseSettings db={current} onSaved={()=>void refresh()}/>}
  {activePage==='audit'&&<AuditPage databases={items}/>}
@@ -108,9 +111,11 @@ export function App() {
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}
           {activePage === 'sql' && <SqlWorkbench permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
-          {activePage === 'tables' && <DiscoveryPage id={dbID} onSaved={()=>{void refresh();}} />}
+          {activePage === 'actions' && current && <Actions db={current} onSaved={()=>void refresh()}/> }
+          {activePage === 'tables' && <QueryConfiguration id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
+        </Layout>
       </Layout>
       <Modal title={t("添加数据库")} centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText={t("添加数据库")} footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating}>{t("测试连接")}</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
        {error && <Alert type="error" title={error}/>}

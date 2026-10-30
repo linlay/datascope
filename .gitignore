@@ -28,3 +28,9 @@ coverage.out
 
 /data/*.credentials.key
 /data/.credential-key-*
+
+# Runtime metadata, per-source credentials and process coordination.
+/data/*.db
+/data/*.db-*
+/data/*.db.*
+/data/databases/

@@ -2,21 +2,10 @@ package management
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 )
-
-// A running receipt is never reclaimed automatically: the process may have
-// committed the business transaction before it could persist its result.
-func (s *Store) initActions() error {
-	_, e := s.DB.Exec(`CREATE TABLE IF NOT EXISTS action_requests(
- database_id TEXT NOT NULL, actor TEXT NOT NULL, request_id TEXT NOT NULL,
- fingerprint TEXT NOT NULL, revision INTEGER NOT NULL, state TEXT NOT NULL,
- data TEXT NOT NULL, token TEXT NOT NULL DEFAULT '', expires INTEGER NOT NULL DEFAULT 0,
- PRIMARY KEY(database_id,actor,request_id));
- CREATE UNIQUE INDEX IF NOT EXISTS action_confirmation_token ON action_requests(token) WHERE token<>'';`)
-	return e
-}
 
 type ActionRequest struct {
 	DatabaseID  string `json:"database_id"`
@@ -35,10 +24,10 @@ func scanAction(row interface{ Scan(...any) error }) (r ActionRequest, e error) 
 	return
 }
 
-const actionColumns = "database_id,actor,request_id,fingerprint,revision,state,data,token,expires"
+const actionColumns = "DATABASE_ID_,ACTOR_,REQUEST_ID_,FINGERPRINT_,REVISION_,STATE_,DATA_,TOKEN_,EXPIRES_"
 
 func (s *Store) ReserveAction(ctx context.Context, r ActionRequest) (ActionRequest, bool, error) {
-	result, e := s.DB.ExecContext(ctx, `INSERT OR IGNORE INTO action_requests(`+actionColumns+`) VALUES(?,?,?,?,?,?,?,?,?)`, r.DatabaseID, r.Actor, r.RequestID, r.Fingerprint, r.Revision, r.State, r.Data, r.Token, r.Expires)
+	result, e := s.sourceDB(r.DatabaseID).ExecContext(ctx, "INSERT OR IGNORE INTO ACTION_RECEIPT("+actionColumns+`) VALUES(?,?,?,?,?,?,?,?,?)`, r.DatabaseID, r.Actor, r.RequestID, r.Fingerprint, r.Revision, r.State, r.Data, r.Token, r.Expires)
 	if e != nil {
 		return r, false, e
 	}
@@ -46,17 +35,30 @@ func (s *Store) ReserveAction(ctx context.Context, r ActionRequest) (ActionReque
 	if e != nil {
 		return r, false, e
 	}
-	stored, e := scanAction(s.DB.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM action_requests WHERE database_id=? AND actor=? AND request_id=?`, r.DatabaseID, r.Actor, r.RequestID))
+	stored, e := scanAction(s.sourceDB(r.DatabaseID).QueryRowContext(ctx, "SELECT "+actionColumns+" FROM ACTION_RECEIPT WHERE DATABASE_ID_=? AND ACTOR_=? AND REQUEST_ID_=?", r.DatabaseID, r.Actor, r.RequestID))
 	return stored, n == 1, e
 }
 func (s *Store) ActionToken(ctx context.Context, token string) (ActionRequest, error) {
 	if len(token) != 64 {
 		return ActionRequest{}, ErrDenied
 	}
-	return scanAction(s.DB.QueryRowContext(ctx, `SELECT `+actionColumns+` FROM action_requests WHERE token=?`, token))
+	ids, e := s.sourceIDs()
+	if e != nil {
+		return ActionRequest{}, e
+	}
+	for _, id := range ids {
+		r, e := scanAction(s.sourceDB(id).QueryRowContext(ctx, `SELECT `+actionColumns+` FROM ACTION_RECEIPT WHERE TOKEN_=?`, token))
+		if e == nil {
+			return r, nil
+		}
+		if e != sql.ErrNoRows {
+			return r, e
+		}
+	}
+	return ActionRequest{}, sql.ErrNoRows
 }
 func (s *Store) TransitionAction(ctx context.Context, r ActionRequest, from, state, data, token string, expires int64) error {
-	result, e := s.DB.ExecContext(ctx, `UPDATE action_requests SET state=?,data=?,token=?,expires=? WHERE database_id=? AND actor=? AND request_id=? AND state=?`, state, data, token, expires, r.DatabaseID, r.Actor, r.RequestID, from)
+	result, e := s.sourceDB(r.DatabaseID).ExecContext(ctx, "UPDATE ACTION_RECEIPT SET STATE_=?,DATA_=?,TOKEN_=?,EXPIRES_=? WHERE DATABASE_ID_=? AND ACTOR_=? AND REQUEST_ID_=? AND STATE_=?", state, data, token, expires, r.DatabaseID, r.Actor, r.RequestID, from)
 	if e != nil {
 		return e
 	}
@@ -67,7 +69,8 @@ func (s *Store) TransitionAction(ctx context.Context, r ActionRequest, from, sta
 	return e
 }
 
-// Complete with an independent context even if the client disconnected.
+// FinishAction uses an independent context. Unresolved running receipts are
+// retained across restarts to prevent a second business commit.
 func (s *Store) FinishAction(r ActionRequest, from, state, data string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -84,8 +84,10 @@ request_id 按数据库和发起账号隔离。相同 ID、操作和参数只执
 
 管理库与业务库是独立数据库，无法跨库原子提交。进程可能在业务提交后、保存返回值前崩溃；这种请求持久保持 `running`，返回「执行中或结果未知」，绝不自动重新写入。管理员应结合 request_id 审计及业务数据人工核对，不能通过换 ID 盲目重试。备份管理库时须保留 action_requests，避免丢失幂等记录。
 
-每条 SQL 在执行前同步保存 SQL 和绑定参数，完成后记录影响/返回行数及错误；整体事件保存参数、结果、预览标志和拒绝原因。提交前同步保存结果审计，失败即回滚。提交结果或提交后审计结果不确定时保留未知状态。密码与确认令牌不进入 SQL/操作审计。
+每条 SQL 的内容、绑定参数、影响/返回行数及错误异步进入当前库 audit.db；整体事件记录参数、结果、预览标志和拒绝原因。审计不可写不阻止业务提交。Action 的幂等回执同步保存在当前库 management.db 的 ACTION_RECEIPT，提交结果或回执保存结果不确定时保留未知状态，禁止自动重放。密码与确认令牌不进入 SQL/操作审计。
 
 控制台「试运行」始终回滚，包括 confirm:false 的操作，显示 SQL 审计和执行预览。管理 MCP 使用 `datascope_manage` 的 `{action:"save",args:{resourceType:"action",database_id,database,write_password?}}` 保存 action、写连接和启用状态；使用 `datascope_inspect` 的 `{action:"try",args:{resourceType:"action",database_id,name,arguments,request_id,business_user_id}}` 试运行，始终回滚。读取当前配置与 revision 后再保存。
 
 SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络库使用共享连接和 AST 编译，并有各驱动 SQL 编译/绑定测试。接入真实 MySQL、PostgreSQL、Oracle、达梦写账号后，仍需在目标库验收其账号权限、字段精度、锁和超时行为；测试未配置实际写账号时不代表已做真实库写入验收。
+
+证券演示库已提供可显式安装的 18 个操作，见 [完整案例](securities-actions.md)；涉及的结构、状态值和发布步骤见 [发布清单](securities-actions-release.md)。

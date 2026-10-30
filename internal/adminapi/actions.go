@@ -9,10 +9,11 @@ import (
 
 	"datascope-server/internal/application"
 	"datascope-server/internal/audit"
+	"datascope-server/internal/guard"
 	"golang.org/x/time/rate"
 )
 
-var actionPage = template.Must(template.New("action").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DataScope · 确认业务操作</title><style>body{font:16px system-ui;max-width:760px;margin:5vh auto;padding:24px;background:#f5f7fa;color:#172b4d}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border-radius:8px}input,button{padding:12px;margin:8px 0;width:100%;box-sizing:border-box}button{background:#165dca;color:white;border:0;border-radius:6px}</style><h1>确认业务操作</h1>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .Result}}<pre>{{.Result}}</pre>{{else}}<p>预览已完整执行并回滚。确认后会重新检查权限和业务规则；结果或写入计划发生变化时拒绝提交。确认有效期为 10 分钟。</p><pre>{{.Preview}}</pre><form method="post"><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="nonce" value="{{.Nonce}}"><label>当前数据库业务账号<input readonly value="{{.Username}}" autocomplete="username"></label><label>业务账号密码<input required type="password" name="password" autocomplete="current-password"></label><button type="submit">确认并执行</button></form>{{end}}</html>`))
+var actionPage = template.Must(template.New("action").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DataScope · 确认业务操作</title><style>body{font:16px system-ui;max-width:760px;margin:5vh auto;padding:24px;background:#f5f7fa;color:#172b4d}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border-radius:8px}input,button{padding:12px;margin:8px 0;width:100%;box-sizing:border-box}button{background:#165dca;color:white;border:0;border-radius:6px}</style><h1>确认业务操作</h1>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .Result}}<pre>{{.Result}}</pre>{{else}}<p>预览已完整执行并回滚。确认后会重新检查权限和业务规则；结果或写入计划发生变化时拒绝提交。确认有效期为 10 分钟。</p><pre>{{.Preview}}</pre><form method="post"><input type="hidden" name="token" value="{{.Token}}"><input type="hidden" name="nonce" value="{{.Nonce}}"><label>当前数据库业务账号<input readonly value="{{.Username}}" autocomplete="username"></label>{{if .Enterprise}}{{if .Verified}}<p>企业身份已认证，点击确认后执行。</p><button type="submit">确认并执行</button>{{else}}<a href="/actions/auth/start?token={{.Token}}">使用企业身份认证</a>{{end}}{{else}}<label>业务账号密码<input required type="password" name="password" autocomplete="current-password"></label><button type="submit">确认并执行</button>{{end}}</form>{{end}}</html>`))
 
 // This route is deliberately outside both MCPs and the platform-session API.
 // A model possessing the preview token still cannot execute the operation.
@@ -66,6 +67,16 @@ func ActionConfirmationHandler(app *application.Service) http.Handler {
 			data["Preview"] = string(b)
 			data["Token"] = token
 			data["Username"] = username
+			rec, err := app.Management.ActionToken(ctx, token)
+			if err == nil {
+				policy, err := app.Management.ResolveAuth(ctx, "DATABASE", rec.DatabaseID)
+				if err == nil && policy.Provider.Type == "ENTERPRISE_OAUTH" {
+					data["Enterprise"] = true
+					a, ok := guard.Business(r.Context())
+					data["Verified"] = ok && a.DatabaseID == rec.DatabaseID && a.Username == username
+				}
+			}
+
 			data["Nonce"] = nonce
 			http.SetCookie(w, &http.Cookie{Name: "action_confirm_" + tokenPrefix(token), Value: nonce, Path: "/actions/confirm", HttpOnly: true, Secure: app.SecureCookies || r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: int((10 * time.Minute).Seconds())})
 		}

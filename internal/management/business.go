@@ -9,8 +9,7 @@ import (
 	"strings"
 )
 
-// BusinessAccount belongs to one database's simulated identity provider. It is
-// never a platform User and cannot obtain a management session or management grant.
+// BusinessAccount is a source-local demo identity, separate from platform users.
 type BusinessAccount struct {
 	ID             int64    `json:"id"`
 	DatabaseID     string   `json:"database_id"`
@@ -18,20 +17,13 @@ type BusinessAccount struct {
 	Name           string   `json:"name"`
 	BusinessUserID int64    `json:"business_user_id"`
 	Permissions    []string `json:"permissions"`
-	Active         bool     `json:"active"`
-	AuthVersion    int64    `json:"revision"`
+
+	Active      bool  `json:"active"`
+	AuthVersion int64 `json:"revision"`
 }
 
 var BusinessPermissions = []string{"query", "knowledge.read", "raw_query", "action"}
 
-func (s *Store) initBusinessAccounts() error {
-	_, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS business_accounts(
- id INTEGER PRIMARY KEY, database_id TEXT NOT NULL, username TEXT NOT NULL,
- name TEXT NOT NULL, business_user_id INTEGER NOT NULL CHECK(business_user_id>0),
- password_hash TEXT NOT NULL, permissions TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
- auth_version INTEGER NOT NULL DEFAULT 1, UNIQUE(database_id,username));`)
-	return err
-}
 func scanBusiness(row interface{ Scan(...any) error }) (BusinessAccount, error) {
 	var a BusinessAccount
 	var permissions string
@@ -42,13 +34,13 @@ func scanBusiness(row interface{ Scan(...any) error }) (BusinessAccount, error) 
 	return a, err
 }
 
-const businessColumns = "id,database_id,username,name,business_user_id,permissions,active,auth_version"
+const businessColumns = "ID_,DATABASE_ID_,USERNAME_,NAME_,BUSINESS_USER_ID_,PERMISSIONS_,ACTIVE_,AUTH_VERSION_"
 
 func (s *Store) BusinessAccount(ctx context.Context, database, username string) (BusinessAccount, error) {
-	return scanBusiness(s.DB.QueryRowContext(ctx, "SELECT "+businessColumns+" FROM business_accounts WHERE database_id=? AND username=?", database, username))
+	return scanBusiness(s.sourceDB(database).QueryRowContext(ctx, "SELECT "+businessColumns+" FROM BUSINESS_ACCOUNT WHERE DATABASE_ID_=? AND USERNAME_=?", database, username))
 }
 func (s *Store) BusinessAccounts(ctx context.Context, database string) ([]BusinessAccount, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT "+businessColumns+" FROM business_accounts WHERE database_id=? ORDER BY username", database)
+	rows, err := s.sourceDB(database).QueryContext(ctx, "SELECT "+businessColumns+" FROM BUSINESS_ACCOUNT WHERE DATABASE_ID_=? ORDER BY USERNAME_", database)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +58,7 @@ func (s *Store) BusinessAccounts(ctx context.Context, database string) ([]Busine
 func (s *Store) AuthenticateBusiness(ctx context.Context, database, username, password string) (BusinessAccount, error) {
 	var a BusinessAccount
 	var encoded, permissions string
-	err := s.DB.QueryRowContext(ctx, "SELECT "+businessColumns+",password_hash FROM business_accounts WHERE database_id=? AND username=?", database, username).Scan(&a.ID, &a.DatabaseID, &a.Username, &a.Name, &a.BusinessUserID, &permissions, &a.Active, &a.AuthVersion, &encoded)
+	err := s.sourceDB(database).QueryRowContext(ctx, "SELECT "+businessColumns+",PASSWORD_HASH_ FROM BUSINESS_ACCOUNT WHERE DATABASE_ID_=? AND USERNAME_=?", database, username).Scan(&a.ID, &a.DatabaseID, &a.Username, &a.Name, &a.BusinessUserID, &permissions, &a.Active, &a.AuthVersion, &encoded)
 	if err == nil {
 		err = json.Unmarshal([]byte(permissions), &a.Permissions)
 	}
@@ -76,8 +68,6 @@ func (s *Store) AuthenticateBusiness(ctx context.Context, database, username, pa
 	return a, nil
 }
 
-// SaveBusinessAccount uses auth_version as an optimistic lock. Every change
-// invalidates access tokens, pending authorization codes and refresh tokens.
 func (s *Store) SaveBusinessAccount(ctx context.Context, a BusinessAccount, password string, version int64) (BusinessAccount, error) {
 	if a.DatabaseID == "" || strings.TrimSpace(a.Username) == "" || len(a.Username) > 128 || a.Name == "" || a.BusinessUserID <= 0 {
 		return a, errors.New("需要数据库、账号、姓名和正整数业务身份")
@@ -102,13 +92,12 @@ func (s *Store) SaveBusinessAccount(ctx context.Context, a BusinessAccount, pass
 		}
 	}
 	permissions, _ := json.Marshal(a.Permissions)
-	// Password material is deliberately excluded from audit details.
-	err = s.Change(ctx, "business_account.save", a.DatabaseID, map[string]any{"username": a.Username, "business_user_id": a.BusinessUserID, "permissions": a.Permissions, "active": a.Active}, func(tx *sql.Tx) error {
+	err = s.sourceChange(ctx, a.DatabaseID, "business_account.save", map[string]any{"username": a.Username, "business_user_id": a.BusinessUserID, "permissions": a.Permissions, "active": a.Active}, func(tx *sql.Tx) error {
 		if version == 0 {
-			_, e := tx.ExecContext(ctx, `INSERT INTO business_accounts(database_id,username,name,business_user_id,password_hash,permissions,active) VALUES(?,?,?,?,?,?,?)`, a.DatabaseID, a.Username, a.Name, a.BusinessUserID, encoded, string(permissions), a.Active)
+			_, e := tx.ExecContext(ctx, "INSERT INTO BUSINESS_ACCOUNT(DATABASE_ID_,USERNAME_,NAME_,BUSINESS_USER_ID_,PASSWORD_HASH_,PERMISSIONS_,ACTIVE_) VALUES(?,?,?,?,?,?,?)", a.DatabaseID, a.Username, a.Name, a.BusinessUserID, encoded, string(permissions), a.Active)
 			return e
 		}
-		result, e := tx.ExecContext(ctx, `UPDATE business_accounts SET name=?,business_user_id=?,permissions=?,active=?,password_hash=CASE WHEN ?='' THEN password_hash ELSE ? END,auth_version=auth_version+1 WHERE database_id=? AND username=? AND auth_version=?`, a.Name, a.BusinessUserID, string(permissions), a.Active, encoded, encoded, a.DatabaseID, a.Username, version)
+		result, e := tx.ExecContext(ctx, "UPDATE BUSINESS_ACCOUNT SET NAME_=?,BUSINESS_USER_ID_=?,PERMISSIONS_=?,ACTIVE_=?,PASSWORD_HASH_=CASE WHEN ?='' THEN PASSWORD_HASH_ ELSE ? END,AUTH_VERSION_=AUTH_VERSION_+1 WHERE DATABASE_ID_=? AND USERNAME_=? AND AUTH_VERSION_=?", a.Name, a.BusinessUserID, string(permissions), a.Active, encoded, encoded, a.DatabaseID, a.Username, version)
 		if e != nil {
 			return e
 		}
@@ -122,4 +111,8 @@ func (s *Store) SaveBusinessAccount(ctx context.Context, a BusinessAccount, pass
 		return a, err
 	}
 	return s.BusinessAccount(ctx, a.DatabaseID, a.Username)
+}
+
+func (s *Store) BusinessAccountID(ctx context.Context, database string, id int64) (BusinessAccount, error) {
+	return scanBusiness(s.sourceDB(database).QueryRowContext(ctx, "SELECT "+businessColumns+" FROM BUSINESS_ACCOUNT WHERE DATABASE_ID_=? AND ID_=?", database, id))
 }

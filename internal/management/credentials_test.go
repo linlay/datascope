@@ -28,7 +28,9 @@ func TestDatabaseCredentialsAreSealedAndShareable(t *testing.T) {
 	if bytes.Contains(sealed.Ciphertext, []byte(password)) {
 		t.Fatal("password was not encrypted")
 	}
-	if err = m.UpdateRecords(ctx, "databases", "database.create", "source", func([]Record) ([]Record, error) { return []Record{{Key: "source", Data: `{"id":"source"}`}}, nil }, sealed); err != nil {
+	if err = m.UpdateRecords(ctx, "databases", "database.create", "source", func([]Record) ([]Record, error) {
+		return []Record{{Key: "source", Data: `{"id":"source","connection":{"credential_id":"source"}}`}}, nil
+	}, sealed); err != nil {
 		t.Fatal(err)
 	}
 	// A separate server process uses the shared management DB and key file.
@@ -41,12 +43,12 @@ func TestDatabaseCredentialsAreSealedAndShareable(t *testing.T) {
 	if err != nil || got != password {
 		t.Fatalf("shared credential could not be read: %v", err)
 	}
-	info, err := os.Stat(path + ".credentials.key")
+	info, err := os.Stat(filepath.Join(filepath.Dir(path), "databases", "source", "credentials.key"))
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("key permissions are not private")
 	}
-	for _, query := range []string{"SELECT data FROM records", "SELECT data FROM record_versions", "SELECT data FROM outbox_events"} {
-		rows, err := m.DB.Query(query)
+	for _, query := range []string{"SELECT DATA_ FROM SOURCE_CONFIG", "SELECT DATA_ FROM CONFIG_VERSION"} {
+		rows, err := m.sourceDB("source").Query(query)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +71,10 @@ func TestDatabaseCredentialsAreSealedAndShareable(t *testing.T) {
 		t.Fatal("credential was serialized")
 	}
 	// Moving ciphertext to another source cannot reveal the original password.
-	if _, err = m.DB.Exec("INSERT INTO database_credentials VALUES(?,?)", "other", sealed.Ciphertext); err != nil {
+	if _, err = m.SealDatabaseCredential("other", "other-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.sourceDB("other").Exec("INSERT INTO CONNECTION_CONFIG(PURPOSE_,PASSWORD_CIPHERTEXT_) VALUES('READ',?)", sealed.Ciphertext); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = other.DatabasePassword(ctx, "other"); err == nil {
@@ -77,16 +82,16 @@ func TestDatabaseCredentialsAreSealedAndShareable(t *testing.T) {
 	}
 	broken := append([]byte(nil), sealed.Ciphertext...)
 	broken[len(broken)-1] ^= 1
-	if _, err = m.DB.Exec("UPDATE database_credentials SET ciphertext=? WHERE database_id='source'", broken); err != nil {
+	if _, err = m.sourceDB("source").Exec("UPDATE CONNECTION_CONFIG SET PASSWORD_CIPHERTEXT_=? WHERE PURPOSE_='READ'", broken); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = other.DatabasePassword(ctx, "source"); err == nil {
 		t.Fatal("tampered ciphertext accepted")
 	}
-	if err = os.Rename(path+".credentials.key", path+".key-backup"); err != nil {
+	if err = os.Rename(filepath.Join(filepath.Dir(path), "databases", "source", "credentials.key"), path+".key-backup"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = other.SealDatabaseCredential("new", "new-password"); err == nil {
+	if _, err = other.SealDatabaseCredential("source", "new-password"); err == nil {
 		t.Fatal("missing key was silently replaced")
 	}
 }
@@ -124,7 +129,7 @@ func TestCredentialCreationIsAtomicAndKeyPublicationIsConcurrent(t *testing.T) {
 		t.Fatal("failed registration succeeded")
 	}
 	var count int
-	if err = m.DB.QueryRow("SELECT COUNT(*) FROM database_credentials").Scan(&count); err != nil || count != 0 {
+	if err = m.sourceDB("source").QueryRow("SELECT COUNT(*) FROM CONNECTION_CONFIG WHERE PASSWORD_CIPHERTEXT_ IS NOT NULL").Scan(&count); err != nil || count != 0 {
 		t.Fatal("failed registration left an orphan credential")
 	}
 	// Fail after credential insertion to check transaction rollback too.
@@ -132,7 +137,7 @@ func TestCredentialCreationIsAtomicAndKeyPublicationIsConcurrent(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid record committed")
 	}
-	if err = m.DB.QueryRow("SELECT COUNT(*) FROM database_credentials").Scan(&count); err != nil || count != 0 {
+	if err = m.sourceDB("source").QueryRow("SELECT COUNT(*) FROM CONNECTION_CONFIG WHERE PASSWORD_CIPHERTEXT_ IS NOT NULL").Scan(&count); err != nil || count != 0 {
 		t.Fatal("credential survived a rolled-back record write")
 	}
 }
@@ -145,7 +150,9 @@ func TestWriteCredentialsRotateWithoutChangingReadCredentials(t *testing.T) {
 	}
 	defer m.Close()
 	save := func(action string, c DatabaseCredential) error {
-		return m.UpdateRecords(ctx, "databases", action, "source", func([]Record) ([]Record, error) { return []Record{{Key: "source", Data: `{"id":"source"}`}}, nil }, c)
+		return m.UpdateRecords(ctx, "databases", action, "source", func([]Record) ([]Record, error) {
+			return []Record{{Key: "source", Data: `{"id":"source","connection":{"credential_id":"source"}}`}}, nil
+		}, c)
 	}
 	read, e := m.SealDatabaseCredential("source", "read-password")
 	if e != nil {
@@ -172,7 +179,13 @@ func TestWriteCredentialsRotateWithoutChangingReadCredentials(t *testing.T) {
 	if e != nil || got != "read-password" {
 		t.Fatal("query credential changed", e)
 	}
-	foreign, e := m.SealDatabaseCredential(WriteCredentialID("foreign"), "foreign-password")
+	_, e = m.SealDatabaseCredential("foreign", "foreign-read")
+	if e != nil {
+		t.Fatal(e)
+	}
+	// A staged foreign write reference is still rejected by registration.
+	foreign, e := m.SealDatabaseCredential("foreign", "foreign-password")
+	foreign.DatabaseID = WriteCredentialID("foreign")
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -34,6 +34,7 @@ var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "cus
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
+	AuthPolicyFingerprint  string              `json:"-" yaml:"-"`
 	Actions                []action.Definition `json:"actions,omitempty" yaml:"actions,omitempty"`
 	WriteEnabled           bool                `json:"write_enabled,omitempty" yaml:"write_enabled,omitempty"`
 	WriteConnection        *store.Connection   `json:"write_connection,omitempty" yaml:"write_connection,omitempty"`
@@ -244,6 +245,13 @@ func (c *Catalog) Get(id string) (*Database, error) {
 	}
 	for _, item := range items {
 		if item.ID == id {
+			if c.Management != nil {
+				p, e := c.Management.ResolveAuth(context.Background(), "DATABASE", id)
+				if e != nil {
+					return nil, e
+				}
+				item.AuthPolicyFingerprint = p.Fingerprint()
+			}
 			return &item, nil
 		}
 	}
@@ -291,9 +299,12 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	}
 	svc.Management = c.Management
 	svc.Audit = c.Audit
+	if c.Management != nil {
+		svc.Audit = c.Management.AuditFor(d.ID)
+	}
 	svc.DatabaseID = d.ID
 	svc.PolicyVersion = d.Revision
-	st.Audit = c.Audit
+	st.Audit = svc.Audit
 	return svc, nil
 }
 func (c *Catalog) Add(ctx context.Context, d Database) error {

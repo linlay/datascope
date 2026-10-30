@@ -83,7 +83,7 @@ func run() error {
 	}
 
 	adminResource := strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin"
-	app := &application.Service{ManagementMCPURL: adminResource, Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp"), SecureCookies: envflag.Bool("SESSION_COOKIE_SECURE", strings.HasPrefix(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "https://"))}
+	app := &application.Service{WebURL: envflag.String("WEB_PUBLIC_URL", "http://127.0.0.1:8082"), ManagementMCPURL: adminResource, Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp"), SecureCookies: envflag.Bool("SESSION_COOKIE_SECURE", strings.HasPrefix(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "https://"))}
 	handler := adminapi.PlatformHandler(app, adminapi.ManagedHandler(catalogue, inspector))
 	mode := envflag.String("MCP_AUTH_MODE", "oauth")
 	inspector.AuthMode = mode

@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/mcpserver"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func setup(t *testing.T) (*catalog.Catalog, string) {

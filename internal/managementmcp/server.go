@@ -32,6 +32,7 @@ type operation struct {
 // the application's per-action authorization, revision checks or audit.
 var operations = map[string][]operation{
 	"datascope_query": {
+		{"authentication", "get", "get_auth_config", "", ""},
 		{"discovery", "get", "get_discovery", "database_id", ""},
 		{"database", "list", "list_databases", "", ""},
 		{"database", "get", "get_database", "database_id", ""},
@@ -47,6 +48,8 @@ var operations = map[string][]operation{
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"authentication", "save", "save_auth_config", "auth_config", ""},
+		{"query_tool", "save", "configure_query_tools", "database_id database", ""},
 		{"action", "save", "configure_actions", "database_id database", "write_password"},
 		{"discovery", "refresh", "discover_database", "database_id", ""},
 		{"discovery", "apply", "apply_discovery", "database_id id revision", "resolutions"},

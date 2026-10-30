@@ -19,10 +19,14 @@ import (
 func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 	m := app.Management
 	limiter := rate.NewLimiter(2, 10)
+	external := newExternalAuth(app)
 	confirmation := ActionConfirmationHandler(app)
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if external.handle(w, r) {
+			return
+		}
 		if r.URL.Path == "/actions/confirm" {
-			confirmation.ServeHTTP(w, r)
+			confirmation.ServeHTTP(w, external.withIdentity(r))
 			return
 		}
 		if r.URL.Path == "/healthz" {
@@ -49,7 +53,19 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 				platformError(w, e)
 				return
 			}
-			u, e := m.Authenticate(ctx, in.Username, in.Password)
+			policy, e := m.ResolveAuth(ctx, "API", "platform")
+			var u management.User
+			if e == nil {
+				if policy.Provider.Type == "PLATFORM_ACCOUNT" {
+					u, e = m.Authenticate(ctx, in.Username, in.Password)
+				} else {
+					var a management.BusinessAccount
+					a, e = m.VerifyAccount(ctx, policy, "", in.Username, in.Password)
+					if e == nil {
+						u, e = m.PlatformIdentity(ctx, policy, a)
+					}
+				}
+			}
 			if ev != nil {
 				ev.ActorID = u.ID
 			}
