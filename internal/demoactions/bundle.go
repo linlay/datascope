@@ -147,7 +147,7 @@ func Install(ctx context.Context, app *application.Service, id string, accounts 
 	d.Actions = merged
 	d.WriteEnabled = true
 	d.MCPEnabled = true
-	for _, tool := range []string{"describe_action", "invoke_action"} {
+	for _, tool := range []string{"list_actions", "describe_action", "invoke_action"} {
 		if !slices.Contains(d.Tools, tool) {
 			d.Tools = append(d.Tools, tool)
 		}
@@ -206,12 +206,13 @@ func publishGuide(ctx context.Context, app *application.Service, id string, b Bu
 		}
 	}
 	var text strings.Builder
-	text.WriteString("证券演示库操作案例。先 describe_action 列出或查看参数，用 query 查询本人可见记录，再 invoke_action。所有操作 confirm:true，预览会回滚，只有本人打开确认页登录后才正式执行。金额单位为分，入金、出金、划转只修改合成数据，不连接银行。\n\nE0001 是客户经理，只能维护本人账户；客户共享资料要求全部账户归本人。E0121 主管可见范围更广，但查询权限不等于写权限。E0175 是证券业务管理员，可维护目录、调整经理并重估最新持仓。新增 action 能力后须重新 OAuth 授权。\n\n")
+	text.WriteString("证券演示库操作案例。先 list_actions 列出动作，describe_action(name) 查看参数，用 query 查询本人可见记录，再 invoke_action。所有操作 confirm:true，预览会回滚，只有本人打开确认页登录后才正式执行。金额单位为分，入金、出金、划转只修改合成数据，不连接银行。\n\nE0001 是客户经理，只能维护本人账户；客户共享资料要求全部账户归本人。E0121 主管可见范围更广，但查询权限不等于写权限。E0175 是证券业务管理员，可维护目录、调整经理并重估最新持仓。新增 action 能力后须重新 OAuth 授权。\n\n")
 	for _, a := range b.Actions {
 		schema, _ := json.Marshal(a.Schema())
 		fmt.Fprintf(&text, "## %s — %s\n%s\n参数：%s\n\n", a.Name, a.Title, a.Description, schema)
 	}
 	text.WriteString("最新演示账期以查询结果为准，初始数据为 2026-10-20。不要修改历史成交、角色、管理范围、交易日历；结构说明通过管理元数据维护。测试证券账户新增时先选择没有历史委托的账户删除，再新增，不能删除已被引用的账户。客户资料、冻结解冻、订单元数据不修改账务；资金操作同步维护流水与日结；价格更正同步重估该证券最新日全部持仓。")
-	_, e = app.Call(ctx, "save_knowledge", application.Input{DatabaseID: id, ID: key, Name: "证券演示 Action 操作案例", Summary: "18 种可修改操作、角色范围、参数格式、最新账期记账和人工确认流程", Content: text.String(), Tables: []string{"customers", "fund_accounts", "employees", "branches", "departments", "securities", "orders", "stock_accounts", "daily_balances", "cash_flows", "daily_quotes", "positions"}, Published: true})
+	knowledgeDescription1 := "18 种可修改操作、角色范围、参数格式、最新账期记账和人工确认流程"
+	_, e = app.Call(ctx, "save_knowledge", application.Input{DatabaseID: id, ID: key, Name: "证券演示 Action 操作案例", Description: &knowledgeDescription1, Content: text.String(), Tables: []string{"customers", "fund_accounts", "employees", "branches", "departments", "securities", "orders", "stock_accounts", "daily_balances", "cash_flows", "daily_quotes", "positions"}, Published: true})
 	return e
 }

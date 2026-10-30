@@ -1,63 +1,166 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Typography, message } from 'antd';
-import { managementCall, type Database, type ActionDefinition } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
+import { databases, managementCall, type Database, type ActionDefinition } from '../api';
+import { ActionExecutionSettings } from '../components/ActionExecutionSettings';
 import { CodeEditor } from '../components/CodeEditor';
+import { HelpTip } from '../components/HelpTip';
 import { ParameterEditor, parameterMap, parameterRows, type ParameterRow } from '../components/ParameterEditor';
 import { useI18n } from '../ui/preferences';
 
 const example: ActionDefinition = {
- name: 'update_record', title: '更新记录', description: '更新当前用户可见的记录', confirm: true,
+ name: '', title: '', description: '', confirm: true,
  parameters: { id: { type: 'integer', description: '记录编号' }, value: { type: 'string', description: '新值', max_length: 200 } },
  script: 'function run(args, ctx) {\n  const row = my.one`SELECT id FROM records WHERE id = ${args.id}`;\n  if (!row) deny("记录不存在或无权查看");\n  const n = db.exec`UPDATE records SET value = ${args.value} WHERE id = ${args.id}`;\n  if (n !== 1) deny("记录已变化，请重试");\n  return { id: args.id, updated: n };\n}',
 };
+type ActionFields = Omit<ActionDefinition, 'parameters'>;
+const fieldsOf = (action: ActionFields): ActionFields => ({ name: action.name, title: action.title, description: action.description, confirm: action.confirm, script: action.script });
+
 export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) {
  const t = useI18n();
- const canWrite = db.permissions?.includes('action.write');
- const [items, setItems] = useState<ActionDefinition[]>(db.actions || []);
- const [editing, setEditing] = useState<number>();
+ const [currentDB, setCurrentDB] = useState(db);
+ const [selectedName, setSelectedName] = useState<string>();
+ const [creating, setCreating] = useState(false);
+ const [draft, setDraft] = useState<ActionFields>();
+ const [parameters, setParameters] = useState<ParameterRow[]>([]);
+ const [search, setSearch] = useState('');
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState('');
- const [parameters, setParameters] = useState<ParameterRow[]>([]);
- const [search,setSearch]=useState('');
+ const [remoteChanged, setRemoteChanged] = useState(false);
  const [trialName, setTrialName] = useState<string>();
- const [identity, setIdentity] = useState<number>(db.business_user_id || 1);
+ const [trialBusy, setTrialBusy] = useState(false);
+ const [trialError, setTrialError] = useState('');
+ const [identity, setIdentity] = useState(db.business_user_id || 1);
  const [args, setArgs] = useState('{}');
  const [result, setResult] = useState<unknown>();
- const [form] = Form.useForm();
- useEffect(() => { setItems(db.actions || []); setResult(undefined); setTrialName(undefined); setEditing(undefined); setError(''); }, [db.id, db.revision]);
- const edit = (i: number) => { const a = items[i] || { ...example, name: '', title: '', description: '' }; form.setFieldsValue(a); setParameters(parameterRows(a.parameters)); setEditing(i); setError(''); };
- const apply = async () => { try { const v = await form.validateFields(); const p = parameterMap(parameters); if(items.some((a,i)=>a.name===v.name&&i!==editing))throw new Error(t("Action 名称重复")); const next = [...items]; next[editing!] = { ...v, parameters: p }; setItems(next); setEditing(undefined); } catch (e) { setError((e as Error).message); } };
- const save = async () => {
+ const [form] = Form.useForm<ActionFields>();
+ const listRef = useRef<HTMLUListElement>(null);
+ const items = currentDB.actions || [];
+ const selected = items.find(action => action.name === selectedName);
+ const canWrite = !!currentDB.permissions?.includes('action.write');
+ const dirty = !!draft && (creating || !selected || JSON.stringify(fieldsOf(draft)) !== JSON.stringify(fieldsOf(selected)) || JSON.stringify(parameters) !== JSON.stringify(parameterRows(selected.parameters)));
+ const locked = busy || trialBusy;
+
+ const edit = (action?: ActionDefinition, isNew = false) => {
+  setSelectedName(isNew ? undefined : action?.name); setCreating(isNew);
+  setDraft(action ? fieldsOf(action) : undefined); setParameters(parameterRows(action?.parameters || {}));
+  form.resetFields(); if (action) form.setFieldsValue(fieldsOf(action));
+  setError(''); setTrialName(undefined); setTrialError(''); setResult(undefined); setArgs('{}');
+ };
+ // A parent refresh must not erase an action being edited or replace the
+ // revision against which its draft was created.
+ useEffect(() => {
+  if (db.id !== currentDB.id || !draft && !creating && !selectedName) {
+   setCurrentDB(db); setRemoteChanged(false); edit(db.actions?.[0]); return;
+  }
+  if (db.revision <= currentDB.revision) return;
+  if (dirty) { setRemoteChanged(true); return; }
+  setCurrentDB(db); setRemoteChanged(false); edit(db.actions?.find(action => action.name === selectedName) || db.actions?.[0]);
+ }, [db.id, db.revision]);
+ useEffect(() => {
+  if (!dirty) return;
+  const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+  window.addEventListener('beforeunload', warn);
+  return () => window.removeEventListener('beforeunload', warn);
+ }, [dirty]);
+ useEffect(() => {
+  const frame = window.requestAnimationFrame(() => listRef.current?.querySelector('.selected')?.scrollIntoView({ block: 'nearest' }));
+  return () => window.cancelAnimationFrame(frame);
+ }, [selectedName, creating]);
+ const navigate = (work: () => void | Promise<void>) => {
+  if (locked) return;
+  if (dirty) Modal.confirm({ title: t('放弃当前动作的未保存修改？'), onOk: work });
+  else void work();
+ };
+ const persist = async (actions: ActionDefinition[], nextName?: string) => {
   setBusy(true); setError('');
   try {
-   await managementCall('configure_actions', { database_id: db.id, database: { ...db, actions: items, discovery: undefined } });
+   const next = await managementCall<Database>('configure_actions', { database_id: currentDB.id, database: { ...currentDB, actions, discovery: undefined } });
+   setCurrentDB(next); setRemoteChanged(false);
+   const active = next.actions?.find(action => action.name === nextName) || next.actions?.[0];
+   edit(active);
+   if (active && !`${active.name} ${active.title} ${active.description}`.toLowerCase().includes(search.toLowerCase())) setSearch('');
    onSaved(); message.success(t('业务操作配置已保存'));
   } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
  };
- const trial = async () => {
-  setBusy(true); setError(''); setResult(undefined);
-  try { const arguments_ = JSON.parse(args); if (!arguments_ || Array.isArray(arguments_) || typeof arguments_ !== 'object') throw new Error(t('调用参数必须是 JSON 对象')); setResult(await managementCall('try_action', { database_id: db.id, name: trialName, business_user_id: identity, arguments: arguments_, request_id: crypto.randomUUID() })); }
-  catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+ const save = async () => {
+  try {
+   const values = await form.validateFields();
+   const definition: ActionDefinition = { ...values, parameters: parameterMap(parameters) };
+   if (items.some(action => action.name === values.name && (creating || action.name !== selectedName))) throw new Error(t('Action 名称重复'));
+   const next = creating ? [...items, definition] : items.map(action => action.name === selectedName ? definition : action);
+   await persist(next, definition.name);
+  } catch (e) { if (e instanceof Error) setError(e.message); }
  };
- const dirty = JSON.stringify(items) !== JSON.stringify(db.actions || []);
- return <Card title={t('业务操作 Action')} extra={<Button type="primary" loading={busy} disabled={!canWrite || !dirty} onClick={() => void save()}>{t('保存业务操作')}</Button>}>
-  <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-   {error && <Alert type="error" showIcon title={error} />}
-   {!db.write_enabled&&<Alert type="info" title="写入连接尚未启用" description={<a href="#/database">在数据库配置中启用写入连接后，才能试运行与执行 Action。</a>}/>}
-   <Input.Search aria-label="搜索 Action" placeholder="搜索名称、标题、说明" allowClear value={search} onChange={e=>setSearch(e.target.value)}/>
-   <Typography.Paragraph type="secondary">{t('每次操作在独立事务中执行。my.one / my.all 沿用查询权限；db.one / db.all 读取可信数据，db.exec 写入。SQL 只接受模板写法。确认操作先预览并回滚，再由业务账号本人打开确认页登录执行。')}</Typography.Paragraph>
-   <Button disabled={!canWrite} onClick={() => edit(items.length)}>{t('新增业务操作')}</Button>
-   <Table rowKey="name" scroll={{x:900}} pagination={{pageSize:12,showSizeChanger:true,showTotal:n=>`共 ${n} 个 Action`}} dataSource={items.filter(a=>`${a.name} ${a.title} ${a.description}`.toLowerCase().includes(search.toLowerCase()))} columns={[
-    { title: t('名称'), dataIndex: 'name' }, { title: t('标题'), dataIndex: 'title' }, { title: t('说明'), dataIndex: 'description' }, { title: t('人工确认'), render: (_, a: ActionDefinition) => a.confirm ? t('是') : t('否') },
-    { title: t('操作'), render: (_, a: ActionDefinition) => {const i=items.indexOf(a);return <Space><Button disabled={!canWrite} onClick={() => edit(i)}>{t('编辑')}</Button><Button disabled={!canWrite} onClick={()=>{const copy={...a,name:a.name+'_copy',title:a.title+' 副本'};form.setFieldsValue(copy);setParameters(parameterRows(a.parameters));setEditing(items.length);}}>复制</Button><Button danger disabled={!canWrite} onClick={() => Modal.confirm({ title: t('删除业务操作？'), onOk: () => setItems(items.filter((_, j) => j !== i)) })}>{t('删除')}</Button><Button disabled={dirty || !db.write_enabled || !db.permissions?.includes('impersonate') || !canWrite} onClick={() => { setTrialName(a.name); setResult(undefined); }}>{t('试运行')}</Button></Space>} },
-   ]} />
-   <Modal className="action-dialog" styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }} title={t('编辑业务操作')} open={editing !== undefined} width={900} onCancel={() => setEditing(undefined)} onOk={() => void apply()}>
-    {error && <Alert type="error" title={error} />}
-    <Form form={form} layout="vertical"><Form.Item name="name" label={t('名称')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/ }]}><Input /></Form.Item><Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="description" label={t('说明')} rules={[{ required: true }]}><Input /></Form.Item><Form.Item name="confirm" label={t('人工确认')} valuePropName="checked"><Switch /></Form.Item><Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters}/></Form.Item><Form.Item name="script" label="JavaScript · run(args, ctx)" rules={[{ required: true }]}><CodeEditor/></Form.Item></Form>
-   </Modal>
-   <Modal className="action-dialog" styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }} title={t('试运行（始终回滚）')} open={!!trialName} width={900} onCancel={() => setTrialName(undefined)} onOk={() => void trial()} confirmLoading={busy} okText={t('执行预览')}>
-    {error && <Alert type="error" title={error} />}<Space orientation="vertical" style={{ width: '100%' }}><Select style={{ width: 320 }} value={trialName} onChange={setTrialName} options={db.actions?.map(a => ({ value: a.name, label: a.title }))} /><Typography.Text>{t('业务身份编号')}</Typography.Text><InputNumber min={1} precision={0} value={identity} onChange={v => setIdentity(v || 1)} /><Typography.Text>{t('调用参数 JSON')}</Typography.Text><CodeEditor language="json" height="180px" value={args} onChange={setArgs}/>{result !== undefined && <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 400, overflow: 'auto' }}>{JSON.stringify(result, null, 2)}</pre>}</Space>
-   </Modal>
-  </Space>
- </Card>;
+ const copy = () => {
+  if (!selected) return;
+  let index = 1; let name: string;
+  do { const suffix = `_copy${index === 1 ? '' : index}`; name = selected.name.slice(0, 64 - suffix.length) + suffix; index++; } while (items.some(action => action.name === name));
+  setSearch(''); edit({ ...selected, name, title: `${selected.title} ${t('副本')}` }, true);
+ };
+ const remove = () => Modal.confirm({
+  title: t('删除动作 {0}？', { '0': draft?.title || draft?.name || t('未命名动作') }),
+  content: dirty ? t('当前未保存的修改也会放弃。') : undefined,
+  onOk: () => creating ? edit(items[0]) : persist(items.filter(action => action.name !== selectedName), items.find(action => action.name !== selectedName)?.name),
+ });
+ const reload = () => navigate(async () => {
+  setBusy(true); setError('');
+  try { const next = await databases.get(currentDB.id); setCurrentDB(next); setRemoteChanged(false); edit(next.actions?.find(action => action.name === selectedName) || next.actions?.[0]); onSaved(); }
+  catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+ });
+ const trial = async () => {
+  setTrialBusy(true); setTrialError(''); setResult(undefined);
+  try {
+   const arguments_ = JSON.parse(args);
+   if (!arguments_ || Array.isArray(arguments_) || typeof arguments_ !== 'object') throw new Error(t('调用参数必须是 JSON 对象'));
+   setResult(await managementCall('try_action', { database_id: currentDB.id, name: trialName, business_user_id: identity, arguments: arguments_, request_id: crypto.randomUUID() }));
+  } catch (e) { setTrialError((e as Error).message); } finally { setTrialBusy(false); }
+ };
+ const visible = items.filter(action => `${action.name} ${action.title} ${action.description}`.toLowerCase().includes(search.toLowerCase()));
+ const canTrial = !!selected && !creating && !dirty && !!currentDB.write_enabled && !!currentDB.permissions?.includes('impersonate') && canWrite;
+ return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+  <div className="action-workspace">
+   <Card className="action-list-panel" title={<Space>{t('动作列表')}<Tag>{items.length}</Tag></Space>} extra={<Button size="small" type="primary" disabled={!canWrite || locked || creating} onClick={() => navigate(() => { setSearch(''); edit(example, true); })}>{t('新增动作')}</Button>}>
+    <Input.Search aria-label={t('搜索动作')} placeholder={t('搜索名称、标题、说明')} value={search} allowClear onChange={event => setSearch(event.target.value)} />
+    <ul ref={listRef} className="action-list" aria-label={t('动作列表')}>
+     {creating && <li><button type="button" className="action-list-item selected" aria-current="true"><strong>{draft?.title || t('未命名动作')}</strong><span>{draft?.name || t('新动作')}</span><Tag color="orange">{t('未保存')}</Tag></button></li>}
+     {visible.map(action => <li key={action.name}><button type="button" className={`action-list-item${!creating && selectedName === action.name ? ' selected' : ''}`} aria-current={!creating && selectedName === action.name ? 'true' : undefined} disabled={locked} onClick={() => { if (creating || action.name !== selectedName) navigate(() => edit(action)); }}>
+      <strong>{action.title}</strong><span>{action.name}</span>
+     </button></li>)}
+     {!visible.length && !creating && <li><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无动作')} /></li>}
+    </ul>
+   </Card>
+   <Card className="action-editor-panel" title={<Space>{creating ? t('新增动作') : selected?.title || t('选择动作')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
+    <ActionExecutionSettings db={currentDB} dirty={dirty || locked} onSaved={onSaved} onError={setError} />
+    {draft && <Space wrap>
+    <Tooltip title={dirty ? t('保存后可试运行') : undefined}><Button disabled={!canTrial || locked} onClick={() => { setTrialName(selectedName); setResult(undefined); setTrialError(''); }}>{t('试运行')}</Button></Tooltip>
+    <Button disabled={!canWrite || dirty || creating || locked} onClick={copy}>{t('复制')}</Button>
+    <Button danger disabled={!canWrite || locked} onClick={remove}>{t('删除')}</Button>
+    <Button type="primary" loading={busy} disabled={!canWrite || !dirty || trialBusy || remoteChanged} onClick={() => void save()}>{t('保存动作')}</Button>
+    </Space>}
+   </Space>}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+     {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<Button size="small" onClick={reload}>{t('重新载入')}</Button>} />}
+     {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
+      <div className="action-fields-grid">
+       <Form.Item name="name" label={t('名称')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/ }]}><Input /></Form.Item>
+       <Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item>
+       <Form.Item name="description" label={t('说明')} rules={[{ required: true }]}><Input /></Form.Item>
+       <Form.Item name="confirm" label={t('人工确认')} valuePropName="checked"><Switch /></Form.Item>
+      </div>
+      <Form.Item name="script" label={<Space size={4}>JavaScript · run(args, ctx)<HelpTip label={t('动作代码')}>{t('my.one / my.all 按查询权限读取，db.exec 使用 SQL 模板写入。人工确认动作先预览，再由用户确认执行。')}</HelpTip></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
+      <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
+     </Form> : <Empty description={t('从左侧选择动作，或新增一个动作。')} />}
+    </Space>
+   </Card>
+  </div>
+  <Modal className="action-dialog" title={t('试运行（始终回滚）')} open={!!trialName} width={900} onCancel={() => { if (!trialBusy) setTrialName(undefined); }} onOk={() => void trial()} confirmLoading={trialBusy} okText={t('执行预览')} styles={{ body: { maxHeight: '72vh', overflowY: 'auto' } }}>
+   {trialError && <Alert type="error" title={trialError} style={{ marginBottom: 12 }} />}
+   <Space orientation="vertical" style={{ width: '100%' }}>
+    <Typography.Text strong>{items.find(action => action.name === trialName)?.title}</Typography.Text>
+    <div><Typography.Text>{t('业务身份编号')}</Typography.Text><InputNumber aria-label={t('业务身份编号')} style={{ marginLeft: 12 }} min={1} precision={0} value={identity} disabled={trialBusy} onChange={value => setIdentity(value || 1)} /></div>
+    <Typography.Text>{t('调用参数 JSON')}</Typography.Text><CodeEditor language="json" height="180px" value={args} onChange={setArgs} readOnly={trialBusy} />
+    {result !== undefined && <pre className="audit-detail">{JSON.stringify(result, null, 2)}</pre>}
+   </Space>
+  </Modal>
+ </Space>;
 }

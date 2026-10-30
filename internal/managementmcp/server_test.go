@@ -54,6 +54,33 @@ func TestExplicitEmptyReplacementValues(t *testing.T) {
 	}
 }
 
+func TestActionDescriptionRoute(t *testing.T) {
+	for _, name := range []string{"", "rename_item"} {
+		op := "describe"
+		domainName := "describe_action"
+		argsIn := map[string]any{"resourceType": "action", "database_id": "default"}
+		if name == "" {
+			op = "list"
+			domainName = "list_actions"
+		} else {
+			argsIn["name"] = name
+		}
+		var in input
+		raw, _ := json.Marshal(map[string]any{"action": op, "args": argsIn})
+		if err := json.Unmarshal(raw, &in); err != nil {
+			t.Fatal(err)
+		}
+		domain, args, err := decode("datascope_query", in)
+		if err != nil || domain != domainName || args.DatabaseID != "default" || args.Name != name {
+			t.Fatalf("action description route: %s %+v %v", domain, args, err)
+		}
+		in.Args["script"] = json.RawMessage(`"injected"`)
+		if _, _, err = decode("datascope_query", in); err == nil {
+			t.Fatal("read-only description accepted script mutation")
+		}
+	}
+}
+
 func TestCreationAndConnectionTestAcceptPasswordWithoutAnID(t *testing.T) {
 	for _, tool := range []string{"datascope_manage", "datascope_inspect"} {
 		action, resource := "create", "database"
@@ -94,6 +121,26 @@ func TestAuditPageAcceptsFiltersAndRejectsInvalidTypes(t *testing.T) {
 		}
 		if _, _, err := decode("datascope_query", in); err == nil {
 			t.Fatal("invalid audit filter accepted", raw)
+		}
+	}
+}
+
+func TestKnowledgeDescriptionArgumentsAndLegacyAlias(t *testing.T) {
+	for _, text := range []string{`"description":"first\nsecond\nthird"`, `"summary":"first\nsecond\nthird"`, `"description":"","summary":"legacy"`} {
+		var in input
+		raw := `{"action":"save","args":{"resourceType":"knowledge","database_id":"default","id":"guide","name":"Guide",` + text + `,"content":"Body","tables":[],"published":true,"revision":0}}`
+		if err := json.Unmarshal([]byte(raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		_, out, err := decode("datascope_manage", in)
+		if err != nil || out.Description == nil {
+			t.Fatalf("description rejected: %+v %v", out, err)
+		}
+		if text == `"description":"","summary":"legacy"` && *out.Description != "" {
+			t.Fatal("explicit empty description overwritten")
+		}
+		if text != `"description":"","summary":"legacy"` && *out.Description != "first\nsecond\nthird" {
+			t.Fatal(*out.Description)
 		}
 	}
 }

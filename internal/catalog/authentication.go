@@ -10,14 +10,20 @@ import (
 	"strings"
 )
 
-// Authentication configures this database's business accounts. An absent
-// value uses the same independent account realm with default settings.
+// Authentication keeps local login options and an optional database-owned
+// access policy. An absent access policy preserves the global binding/default.
 type Authentication struct {
-	Type              string `json:"type" yaml:"type"`
-	Label             string `json:"label,omitempty" yaml:"label,omitempty"`
-	EmployeeDirectory bool   `json:"employee_directory,omitempty" yaml:"employee_directory,omitempty"`
+	Type              string                   `json:"type" yaml:"type"`
+	Label             string                   `json:"label,omitempty" yaml:"label,omitempty"`
+	EmployeeDirectory bool                     `json:"employee_directory,omitempty" yaml:"employee_directory,omitempty"`
+	Source            string                   `json:"source,omitempty" yaml:"source,omitempty"`
+	Provider          *management.AuthProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Access            *management.AuthPolicy   `json:"access,omitempty" yaml:"access,omitempty"`
 }
 
+func (a Authentication) Connection() management.DatabaseAuthConnection {
+	return management.DatabaseAuthConnection{Source: a.Source, Access: a.Access, Provider: a.Provider}
+}
 func (d Database) LocalAuthentication() bool {
 	return d.Authentication == nil || d.Authentication.Type == "local"
 }

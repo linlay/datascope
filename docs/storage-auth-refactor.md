@@ -2,6 +2,8 @@
 
 本轮同时改造界面、管理存储与认证。业务库表结构与业务数据保持原状；DataScope 自有管理表发生了迁移，发布时必须携带新的管理目录。
 
+本文记录当前实现。后续仅业务管理配置 YAML 化、knowledges/ 目录、Prompts 复用、克隆及取消模板/公共片段的最新约定见 [下一阶段方案](management-storage-plan.md)，尚未切换运行时存储。
+
 ## 文件布局与发布
 
 ```text
@@ -77,7 +79,7 @@ API / MCP 启动也会自动执行迁移。先生成旧库的一致性快照，�
 | QUERY_TOOL | NAME_, DESCRIPTION_, SQL_, PARAMETER_JSON_，命名查询 |
 | ACTION_DEFINITION | NAME_, TITLE_, DESCRIPTION_, CONFIRM_, PARAMETER_JSON_, SCRIPT_ |
 | KNOWLEDGE | KEY_, DATA_，知识 / Skill |
-| KNOWLEDGE_SEARCH | KEY_, NAME_, SUMMARY_, CONTENT_，由知识维护的 FTS 索引 |
+| KNOWLEDGE_SEARCH | KEY_, NAME_, DESCRIPTION_, CONTENT_，由知识维护的 FTS 索引 |
 | CONFIG_RECORD | BUCKET_, KEY_, DATA_，待确认结构扫描等辅助记录 |
 | CONFIG_VERSION | BUCKET_, KEY_, REVISION_, DATA_, CREATED_AT_ |
 | ACTION_RECEIPT | DATABASE_ID_, ACTOR_, REQUEST_ID_, FINGERPRINT_, REVISION_, STATE_, DATA_, TOKEN_, EXPIRES_ |
@@ -142,10 +144,53 @@ SQL 改写、执行、权限拒绝、超时、管理变更、认证及 Action �
 
 ## 界面职责
 
-- 数据库配置：整体连接信息与测试、显示名、管理 / 审计路径、认证来源、独立 Action 写连接、平台授权与演示业务账号。
-- 查询配置：表映射与字段 / 行权限、SELECT 改写、复用片段、命名查询 SQL 与参数。
-- 动作配置：独立 Action 列表、搜索分页、复制、结构化参数约束、JavaScript 高亮编辑、始终回滚的试运行及结果 / SQL。
-- 知识管理：知识 / Skill 摘要、关联表、Markdown 正文编辑、草稿发布。
-- 工具：SQL 工作台、表数据查询、操作日志、MCP 开关 / 路径 / 工具开放范围。
+- 数据库配置：基本信息与连接测试；业务认证直接展示。选择本库用户名密码或演示 OAuth 后，在认证设置下方直接显示“本地账号”卡片及完整账号列表；选择无需认证或企业提供方时隐藏。登录选项和单个账号编辑使用弹框，账号列表无需弹框。管理 / 审计路径收进基本信息的存储详情。
+- 查询配置：直接展示表与字段权限，不保留页面级工具栏。重新载入、结构检查、变更记录、查询模板、SQL 片段和保存移入左侧“数据表”卡片标题区，以图标和悬停 / 聚焦提示呈现；全部开放 / 关闭合并为“开放”列头的总开关，支持部分开放状态；操作始终作用于全部已登记表，不受搜索过滤影响。表数量移到“数据表 / 名称”列头右侧，搜索时显示匹配数 / 总数。“重新载入配置”只读取已保存设置，“检查表结构”检查业务库的表、字段和注释。“查询模板”为可选弹框入口，将常用 SELECT 保存为独立 MCP 查询工具。
+
+- 动作配置：左侧搜索与选择动作，右侧直接编辑代码和参数并保存；支持新增、复制、删除与始终回滚的试运行。切换动作时保护未保存修改。动作执行开关和网络数据库写入账号放入右侧编辑器标题栏，不单独占一行；没有动作时也保留开关。
+- 动作工作台：工具区平铺入口 `#/action-workbench`，先调用 list_actions 获取列表，再选择动作调用 describe_action 查看参数 Schema，填写参数、业务身份和 request_id 后调用 try_action。分别展示说明与试运行的参数、JSON 和耗时，结果包含返回值和 SQL 写入计划，事务始终回滚。查看需要 action.write，试运行另需 impersonate 与已启用写入；不提供平台代替业务账号正式提交的通道。
+- 知识管理：左侧选择知识，右侧直接编辑描述、关联表和 Markdown 正文，支持正文预览与草稿发布。列表项固定为标题和 ID 两行，发布 / 草稿 / 未保存状态放在右上角，长标题与 ID 省略显示并可悬停查看全文。
+- 工具：独立 SQL 工作台与知识工作台、表数据查询、操作日志、MCP 开关 / 路径 / 工具开放范围。知识工作台模拟 search_knowledge → 选择 ID → read_knowledge 两步流程，各自展示参数、实际返回数据和耗时，正文另可预览；不会自动检索或预读正文。调用复用业务 MCP 的应用操作，按当前平台账号的 query 与 knowledge.read 权限过滤已发布知识；实际业务账号需单独登录业务 MCP 验证。
+
+查询配置页的表和字段只展示最终生效的名称及注释，不展示来源对比或人工覆盖标签；点击“编辑”时才显示数据库原名称和原注释，并可恢复使用数据库注释。数据表列表、字段列表和主页面权限 SQL 编辑器按内容自然展开，共用页面外层纵向滚动；窄屏表格保留横向滚动。行权限区直接展开，过滤方式与行数限制横向排列；配置了前置检查时，检查 SQL 同样直接显示。方案分类、说明等通过“其他设置”维护。工具栏的“SQL 片段”打开复用片段编辑器；多个表的规则可以用 `{{片段名称}}` 引用同一段 SQL，片段本身不是可独立调用的查询工具。片段修改先应用到当前草稿，再与表权限一起保存。
 
 全局认证入口在右上角系统设置中；查询模板和 Action 代码已从 MCP 配置移出。已有书签 `#/tables` 等继续有效。
+
+左侧导航为单层平铺，用横线分隔管理入口、查询工具、日志和配置，不使用二级或折叠菜单；空权限分组不显示分隔线。
+
+平台用户的数据库授权统一在“系统设置 → 用户管理 → 数据库权限”维护，按平台用户选择数据库和权限；业务库页面不提供平台用户授权入口。此处仅调整界面入口，授权记录仍按逐库管理存储。
+
+## 逐库认证方式切换与 Token 登录
+
+“数据库配置 → 业务认证”直接选择无需认证、账号密码（Token）、OAuth，并保存到当前库 `management.db` 的 `SOURCE_CONFIG.DATA_` 中的 `authentication.access`。无需新增表或字段；业务数据库结构不变。修改仅当前库生效，不修改其他库的策略，不使平台管理会话退出。未单独设置的旧库继续沿用原全局绑定 / 默认策略。
+
+认证连接支持两种来源：复用系统设置中的全局提供方，或在当前库独立配置。账号密码可选择本库 `BUSINESS_ACCOUNT` 或企业账号接口；OAuth 可选择演示 OAuth 或企业 OAuth。无需认证时配置匿名业务身份及可用业务能力，查询仍执行表、字段和行权限。业务账号权限来自账号本身，企业身份权限来自当前库配置。业务认证设置仍由平台系统管理员修改。
+
+账号密码登录接口：`POST <OAUTH_ISSUER>/auth/databases/<database_id>/token`，JSON 请求为 `{"username":"员工账号","password":"密码"}`，可选 `resource` 必须对应当前库的 MCP 地址。返回 `access_token`、`token_type: "Bearer"`、`expires_in: 3600`；后续 MCP 请求携带 `Authorization: Bearer <access_token>`。此接口独立于 OAuth 授权码流程；保留旧客户端的 HTTP Basic 兼容。Token 绑定数据库、认证配置和有效期，本库账号密码重置或停用立即使原 Token 失效；企业账号接口签发的 Token 在一小时内有效，修改本库认证设置可使其失效。Token 不落运行时实体表，不记录密码。
+
+切换方式或登录选项后，业务客户端重新连接；来回切换不会恢复旧 Token。发布时继续携带各库完整 `management.db`、全局提供方配置及 `data/oauth/signing.pem`。
+
+查询配置的权限编辑区与字段表格采用不同组件标识，反复切换数据表时保持只有一个“行权限与查询限制”区块。
+
+## 全局提供方与本库独立认证连接
+
+“数据库配置 → 业务认证”在账号密码 / OAuth 下提供两种配置来源：
+
+- `GLOBAL`：按 `authentication.access.provider_id` 引用全局 `AUTH_PROVIDER`；旧配置省略 `source` 时按此方式兼容。
+- `DATABASE`：在 `authentication.provider` 保存本库完整连接，并由 `authentication.access.provider_id` 明确引用其 ID。不读取或覆盖同名全局提供方；缺少提供方或验证失败直接拒绝，不回退到全局。
+
+本库连接保存在当前库 `management.db` 已有 `SOURCE_CONFIG.DATA_`，无需新增表或字段。平台管理入口的认证不受本库编辑影响。界面支持本地业务账号、演示 OAuth、企业 OAuth 和企业账号 API；两种本地方式仍在下方直接显示完整账号列表。
+
+企业 OAuth 配置 `issuer`、`authorize_url`、`token_url`、`userinfo_url`、`client_id`；企业账号 API 配置 `account_url`。`subject_claim` 默认 `sub`，`business_id_claim` 默认 `employee_id`，可额外指定 `username_claim`。密钥仍只使用 `DATASCOPE_AUTH_*` 服务端环境变量引用，不保存密钥明文；发布时配置对应环境变量。
+
+MCP 的 `/.well-known/oauth-protected-resource/<MCP路径>` 在每次请求时解析当前库已保存的认证连接，OAuth 的 `authorization_servers` 返回该连接的 `issuer`。切换全局 / 本库连接保存后立即影响发现结果。企业服务自行提供其授权服务器发现文档，DataScope 不代理或伪造外部发现文档。界面中的“已生效的发现地址”指向当前 MCP 资源元数据；未保存草稿不影响发现结果。
+
+独立企业身份按数据库及提供方划分主体标识，防止同名提供方或相同 `sub` 在不同库之间混用。修改本库连接使本库旧认证版本失效；已有来源不做自动切换。
+
+## 知识 description 字段升级
+
+知识编辑使用三行“描述”输入框，HTTP 和 MCP 的列表、搜索、读取与保存均以 `description` 为正式字段。列表 / 搜索完整返回描述（保留换行），不返回正文；每次最多 50 条。描述用于模型判断知识的用途和适用问题，正文仍按需读取。列表项仍保持标题与 ID 两行。
+
+旧请求的 `summary` 作为兼容别名继续接收，同时提供两者时 `description` 优先，包括显式空字符串。旧记录也可读取；启动时将当前 `KNOWLEDGE.DATA_` 中的 `summary` 自动转成 `description`，保留知识 ID、发布状态、权限关联与 revision。历史 `CONFIG_VERSION` 快照不改写。
+
+**管理库结构变化：** 每个业务管理库的 `KNOWLEDGE_SEARCH` 索引列 `SUMMARY_` 改为 `DESCRIPTION_`，相关插入 / 更新 / 删除触发器更新，来源库 `SCHEMA_VERSION` 记录版本 2。迁移以 SQLite 事务串行执行，并自动重建派生搜索索引；业务数据库表结构不变。发布携带升级后的各库 `management.db`，回退时使用升级前管理库快照。

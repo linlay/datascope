@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Tag } from 'antd';
-import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ToolOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined } from '@ant-design/icons';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Spin, Tag, type MenuProps } from 'antd';
+import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { SystemSettings } from './components/SystemSettings';
 import { usePreferences } from './ui/preferences';
 import { QueryConfiguration } from './pages/QueryConfiguration';
@@ -11,11 +11,14 @@ import { DatabaseSettings } from './pages/DatabaseSettings';
 import { databases, selectDatabase, selectedDatabase, type Database } from './api';
 import { SqlWorkbench } from './pages/SqlWorkbench';
 import { AuditPage } from './pages/Audit';
-import { KnowledgePage } from './pages/PlatformPages';
 import { useAuth } from './Auth';
 import { ConnectionFields } from './components/ConnectionFields';
 
-type Page = 'database' | 'tables' | 'actions' | 'knowledge' | 'sql' | 'table' | 'mcp' | 'audit';
+const KnowledgeWorkbench = lazy(() => import('./pages/KnowledgeWorkbench'));
+const ActionWorkbench = lazy(() => import('./pages/ActionWorkbench'));
+const KnowledgePage = lazy(() => import('./pages/KnowledgeManagement').then(module => ({ default: module.KnowledgePage })));
+
+type Page = 'database' | 'tables' | 'actions' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'sql' | 'table' | 'mcp' | 'audit';
 
 interface Route { page:Page;table?:string;tab?:string }
 function parseHash():Route{
@@ -26,13 +29,20 @@ function parseHash():Route{
  if(page==='audit')return {page:'audit'};
  if(page==='database')return new URLSearchParams(query).get('tab')==='audit'?{page:'audit'}:{page};
  if(page==='actions')return {page};
+ if(page==='knowledge-workbench')return {page};
+ if(page==='action-workbench')return {page};
  if(page==='tables'||page==='knowledge'||page==='sql'||page==='mcp')return {page};
  if(page==='table'||table)return {page:'table',table:table?decodeURIComponent(table):undefined};
  return {page:'database'};
 }
 
-const icons={database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,sql:<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
-const titles:Record<Page,string>={database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识管理',sql:'SQL 工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
+const icons={database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,'knowledge-workbench':<FileSearchOutlined/>,'action-workbench':<PlayCircleOutlined/>,sql:<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
+const titles:Record<Page,string>={database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识管理',sql:'SQL 工作台','knowledge-workbench':'知识工作台','action-workbench':'动作工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
+const navigationGroups: Page[][] = [
+ ['database', 'tables', 'actions', 'knowledge'],
+ ['sql', 'knowledge-workbench', 'action-workbench', 'table'],
+ ['audit', 'mcp'],
+];
 
 export function App() {
  const {user,logout}=useAuth();
@@ -81,7 +91,14 @@ export function App() {
 
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
- const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='knowledge'?can('knowledge.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):(can('mcp.write')||can('action.write')));
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='knowledge'?can('knowledge.write'):p==='knowledge-workbench'?can('query')&&can('knowledge.read'):p==='action-workbench'?can('action.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):(can('mcp.write')||can('action.write')));
+ const navigationItems: NonNullable<MenuProps['items']> = [];
+ navigationGroups.forEach((group, index) => {
+  const pages = group.filter(page => visiblePages.includes(page));
+  if (!pages.length) return;
+  if (navigationItems.length) navigationItems.push({ type: 'divider', key: `section-${index}` });
+  navigationItems.push(...pages.map(key => ({ key, icon: icons[key], label: t(titles[key]) })));
+ });
  const activePage=!current&&user.system_admin&&route.page!=='audit'?'database':visiblePages.includes(route.page)?route.page:visiblePages[0];
  const openTable = (table: string, filter?: { col: string; val: string }) => {
     const qs = filter ? `?${new URLSearchParams({ col: filter.col, val: filter.val })}` : '';
@@ -98,15 +115,14 @@ export function App() {
         <Layout className="workspace-layout" style={{background:'transparent'}}>
         <Layout.Sider className="workspace-sidebar" theme={dark?'dark':'light'} width={208} breakpoint="lg" collapsedWidth={56}>
          <div className="workspace-label">{current?.name||'数据库管理'}</div>
-         <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} defaultOpenKeys={['tools']} onClick={({key})=>window.location.hash=`#/${key}`} items={[
-          ...visiblePages.filter(key=>['database','tables','actions','knowledge'].includes(key)).map(key=>({key,icon:icons[key],label:t(titles[key])})),
-          ...(visiblePages.some(key=>['sql','table','audit','mcp'].includes(key))?[{key:'tools',icon:<ToolOutlined/>,label:'工具',children:visiblePages.filter(key=>['sql','table','audit','mcp'].includes(key)).map(key=>({key,icon:icons[key],label:t(titles[key])}))}]:[])
-         ]}/>
+         <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} onClick={({key})=>window.location.hash=`#/${key}`} items={navigationItems}/>
         </Layout.Sider>
         <Layout.Content className="app-content" key={activePage==='audit'?'audit':dbID}>
  {activePage==='database'&&<DatabaseSettings db={current} onSaved={()=>void refresh()}/>}
  {activePage==='audit'&&<AuditPage databases={items}/>}
- {activePage==='knowledge'&&current&&<KnowledgePage databaseID={dbID}/>}
+ {activePage==='knowledge'&&current&&<Suspense fallback={<Spin/>}><KnowledgePage db={current}/></Suspense>}
+ {activePage==='knowledge-workbench'&&current&&<Suspense fallback={<Spin/>}><KnowledgeWorkbench databaseID={dbID}/></Suspense>}
+ {activePage==='action-workbench'&&current&&<Suspense fallback={<Spin/>}><ActionWorkbench db={current}/></Suspense>}
  {!activePage&&<Alert type="info" title={t("当前账号尚未获得数据库权限，请联系系统管理员。")}/>}
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.table} onOpenTable={openTable} />}

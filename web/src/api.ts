@@ -208,17 +208,20 @@ export interface PendingDiscovery {id:string;base_version:number;detected_at:str
 export interface Discovery { pending?:PendingDiscovery;version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
 export interface ActionParameter { type: "string"|"integer"|"number"|"boolean"; description: string; optional?: boolean; enum?: unknown[]; min?: number; max?: number; max_length?: number; pattern?: string }
 export interface ActionDefinition { name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
+export interface ActionSchema { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, {type:string;description?:string;enum?:unknown[];minimum?:number;maximum?:number;maxLength?:number;pattern?:string}> }
+export interface ActionDescription { name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }
+export interface ActionPreview { status:string;message?:string;result?:unknown;preview?:{result:unknown;writes:{sql:string;rows:number;binds:unknown[]}[]};sql?:unknown[] }
 export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string}
 export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE';provider_id?:string;permissions?:string[];business_user_id?:number}
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface Database {
- management_path?:string; audit_path?:string; access?:{policy:AuthPolicy;provider:AuthProvider;revision:number};
+ management_path?:string; audit_path?:string; access?:{policy:AuthPolicy;provider:AuthProvider;revision:number;source?:'DATABASE'};
  actions?: ActionDefinition[];
  write_enabled?: boolean;
  write_connection?: DatabaseConnection;
  discovery?:Discovery;
  connection?:DatabaseConnection;
- authentication?: {type:"local";label?:string;employee_directory?:boolean};
+ authentication?: {type:"local";label?:string;employee_directory?:boolean;access?:AuthPolicy;source?:'GLOBAL'|'DATABASE';provider?:AuthProvider};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
@@ -293,6 +296,8 @@ export const api = {
     post<CallResult>('/api/mcp/call', { name, arguments: args }),
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
+
+export interface Knowledge {id:string;database_id:string;name:string;description:string;content?:string;tables:string[];published:boolean;revision:number}
 
 export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
 export interface AuditFilters {database_id?:string;platform_only?:boolean;request_id?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;query?:string;started_from?:string;started_to?:string}

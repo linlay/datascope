@@ -35,7 +35,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS action_confirmation_token
 
 | 位置 | 保存内容 |
 | --- | --- |
-| records，bucket=databases | default 数据库的18个 Action、write_enabled、describe_action/invoke_action 启用状态及配置版本 |
+| records，bucket=databases | default 数据库的18个 Action、write_enabled、list_actions/describe_action/invoke_action 启用状态及配置版本 |
 | records，bucket=knowledge | 证券 Action 业务知识指南，ID 为 securities-actions-guide |
 | record_versions | 上述配置和知识的历史版本 |
 | business_accounts | E0001、E0121、E0175 追加 action 能力并增加账号版本，密码不变 |

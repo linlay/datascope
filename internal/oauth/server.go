@@ -180,6 +180,7 @@ func oauthError(w http.ResponseWriter, code string) {
 func (s *Server) Handler(next http.Handler) http.Handler {
 	m := http.NewServeMux()
 	if s.cfg.AccountDatabase == "" && s.cfg.Catalog != nil {
+		m.HandleFunc("POST /auth/databases/{database}/token", s.accountToken)
 		m.HandleFunc("/auth/databases/{database}/", s.realmHandler)
 		m.HandleFunc("GET /.well-known/oauth-authorization-server/auth/databases/{database}", s.realmMetadata)
 	}
@@ -544,8 +545,11 @@ func (s *Server) sign(sub, scope, resource string) (string, error) {
 	return s.signVersion(sub, scope, resource, 0)
 }
 func (s *Server) signVersion(sub, scope, resource string, version int64) (string, error) {
+	return s.signClaims(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random(), "version": version, "identity": s.identity(), "auth_config": s.authConfig()})
+}
+func (s *Server) signClaims(values map[string]any) (string, error) {
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "at+jwt", "kid": "demo-rsa-1"})
-	claims, _ := json.Marshal(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random(), "version": version, "identity": s.identity(), "auth_config": s.authConfig()})
+	claims, _ := json.Marshal(values)
 	body := b64.EncodeToString(header) + "." + b64.EncodeToString(claims)
 	h := sha256.Sum256([]byte(body))
 	sig, e := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, h[:])
@@ -688,7 +692,8 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 		Exp, Iat             int64
 		Version              int64
 		Identity             string
-		AuthConfig           string `json:"auth_config"`
+		AuthConfig           string                      `json:"auth_config"`
+		Business             *management.BusinessAccount `json:"business,omitempty"`
 	}
 	raw, e := b64.DecodeString(parts[1])
 	if e != nil || json.Unmarshal(raw, &c) != nil || c.Iss != v.Issuer || c.Aud != v.Resource || c.Exp <= time.Now().Unix() || c.Iat > time.Now().Add(30*time.Second).Unix() {
@@ -696,12 +701,18 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 	}
 	if v.DatabaseID != "" && (v.Management != nil || v.Catalog != nil && v.Catalog.Management != nil) {
 		scopes := strings.Fields(c.Scope)
-		a, err := v.businessToken(ctx, c.Sub, c.Identity, c.AuthConfig, c.Version, scopes)
+		var a management.BusinessAccount
+		var err error
+		if c.Business != nil {
+			a, err = v.accountIdentity(ctx, *c.Business, c.Identity, c.AuthConfig)
+		} else {
+			a, err = v.businessToken(ctx, c.Sub, c.Identity, c.AuthConfig, c.Version, scopes)
+		}
 		if err != nil {
 			return nil, bad
 		}
 		audit.UpdateRequest(ctx, v.DatabaseID, 0)
-		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID}}, nil
+		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID, "business_account": a}}, nil
 	}
 	if databaseIdentity(c.Identity) {
 		return nil, bad

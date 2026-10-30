@@ -131,7 +131,11 @@ func (s *Store) migrateSources() error {
 					continue
 				}
 				if bucket == "knowledge" {
-					_, e = x.DB.Exec("INSERT OR REPLACE INTO KNOWLEDGE VALUES(?,?)", v.Key, v.Data)
+					data, err := canonicalKnowledgeJSON(v.Data)
+					if err != nil {
+						return err
+					}
+					_, e = x.DB.Exec("INSERT OR REPLACE INTO KNOWLEDGE VALUES(?,?)", v.Key, data)
 				} else {
 					_, e = x.DB.Exec("INSERT OR REPLACE INTO CONFIG_RECORD VALUES(?,?,?)", bucket, v.Key, v.Data)
 				}

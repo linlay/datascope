@@ -56,7 +56,7 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			}
 			ctx = audit.With(ctx, audit.Metadata{RequestID: audit.From(ctx).RequestID, DatabaseID: d.ID, SubjectID: a.BusinessUserID, Source: "business-mcp", Tool: tool, PolicyVersion: d.Revision})
 			permission := "query"
-			if tool == "describe_action" || tool == "invoke_action" {
+			if tool == "list_actions" || tool == "describe_action" || tool == "invoke_action" {
 				permission = "action"
 			}
 			if tool == "raw_query" || tool == "customer_scope" {
@@ -77,7 +77,7 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 				list := res.(*mcp.ListToolsResult)
 				allowed := []*mcp.Tool{}
 				for _, t := range list.Tools {
-					if t.Name == "describe_action" || t.Name == "invoke_action" {
+					if t.Name == "list_actions" || t.Name == "describe_action" || t.Name == "invoke_action" {
 						if !d.WriteEnabled || !slices.Contains(a.Permissions, "action") {
 							continue
 						}

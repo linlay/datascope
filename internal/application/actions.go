@@ -38,6 +38,10 @@ type actionPayload struct {
 	Response              *ActionResponse `json:"response,omitempty"`
 }
 
+func (s *Service) ListActions(ctx context.Context, database string) (any, error) {
+	return s.DescribeAction(ctx, database, "")
+}
+
 func (s *Service) DescribeAction(ctx context.Context, database, name string) (any, error) {
 	if e := guard.Require(ctx, s.Management, database, "action"); e != nil {
 		return nil, e
@@ -49,8 +53,25 @@ func (s *Service) DescribeAction(ctx context.Context, database, name string) (an
 	if !d.MCPEnabled || !d.WriteEnabled {
 		return nil, management.ErrDenied
 	}
+	return describeActions(d.Actions, name)
+}
+
+// InspectAction exposes the same public metadata to platform action editors,
+// including before MCP or writes are enabled. It never exposes JavaScript.
+func (s *Service) InspectAction(ctx context.Context, database, name string) (any, error) {
+	if e := guard.Require(ctx, s.Management, database, "action.write"); e != nil {
+		return nil, e
+	}
+	d, e := s.Catalog.Get(database)
+	if e != nil {
+		return nil, e
+	}
+	return describeActions(d.Actions, name)
+}
+
+func describeActions(definitions []action.Definition, name string) (any, error) {
 	actions := []map[string]any{}
-	for _, a := range d.Actions {
+	for _, a := range definitions {
 		v := map[string]any{"name": a.Name, "title": a.Title, "description": a.Description, "confirm": a.Confirm}
 		if name != "" {
 			if name != a.Name {

@@ -30,7 +30,7 @@ import (
 )
 
 var DefaultTools = []string{"list_tables", "describe_table", "query"}
-var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "describe_action", "invoke_action"}
+var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "list_actions", "describe_action", "invoke_action"}
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 type Database struct {
@@ -329,6 +329,15 @@ func (c *Catalog) Create(ctx context.Context, d Database, password string) (*Dat
 }
 
 func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) error {
+	if d.Authentication != nil {
+		if c.Management == nil {
+			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
+				return fmt.Errorf("逐库认证需要管理存储")
+			}
+		} else if err := c.Management.ValidateDatabaseAuth(ctx, d.Authentication.Connection()); err != nil {
+			return err
+		}
+	}
 	var credentials []management.DatabaseCredential
 	if password != "" {
 		if c.Management == nil {
@@ -419,6 +428,15 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 }
 
 func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, password string) error {
+	if d.Authentication != nil {
+		if c.Management == nil {
+			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
+				return fmt.Errorf("逐库认证需要管理存储")
+			}
+		} else if err := c.Management.ValidateDatabaseAuth(ctx, d.Authentication.Connection()); err != nil {
+			return err
+		}
+	}
 	var credentials []management.DatabaseCredential
 	if password != "" {
 		if c.Management == nil || d.Driver == "sqlite" || d.WriteConnection == nil {

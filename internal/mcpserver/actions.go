@@ -7,8 +7,17 @@ import (
 )
 
 type describeActionInput struct {
-	Name string `json:"name,omitempty"`
+	Name string `json:"name"`
 }
+
+func (h handlers) listActions(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, any, error) {
+	if h.opts.Application == nil {
+		return nil, nil, fmt.Errorf("action 服务未配置")
+	}
+	out, e := h.opts.Application.ListActions(ctx, h.opts.DatabaseID)
+	return nil, out, e
+}
+
 type invokeActionInput struct {
 	Name      string         `json:"name"`
 	Arguments map[string]any `json:"arguments"`
@@ -16,6 +25,9 @@ type invokeActionInput struct {
 }
 
 func (h handlers) describeAction(ctx context.Context, _ *mcp.CallToolRequest, in describeActionInput) (*mcp.CallToolResult, any, error) {
+	if in.Name == "" {
+		return nil, nil, fmt.Errorf("需要 action 名称，请先调用 list_actions")
+	}
 	if h.opts.Application == nil {
 		return nil, nil, fmt.Errorf("action 服务未配置")
 	}

@@ -54,7 +54,16 @@ type AuthConfig struct {
 	Policies        []AuthPolicy   `json:"policies"`
 	Bindings        []AuthBinding  `json:"bindings"`
 }
+
+// DatabaseAuthConnection is stored in the owning source's SOURCE_CONFIG.
+// Empty Source preserves the legacy shared-provider behavior.
+type DatabaseAuthConnection struct {
+	Source   string        `json:"source,omitempty" yaml:"source,omitempty"`
+	Access   *AuthPolicy   `json:"access,omitempty" yaml:"access,omitempty"`
+	Provider *AuthProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+}
 type ResolvedAuth struct {
+	Source   string       `json:"source,omitempty"`
 	Policy   AuthPolicy   `json:"policy"`
 	Provider AuthProvider `json:"provider"`
 	Revision int          `json:"revision"`
@@ -132,30 +141,36 @@ func authURL(raw string) bool {
 	u, e := url.Parse(raw)
 	return e == nil && u.Host != "" && u.User == nil && u.Fragment == "" && (u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1"))
 }
+func validateAuthProvider(p AuthProvider) error {
+	if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "DEMO_OAUTH", "ENTERPRISE_OAUTH", "ENTERPRISE_ACCOUNT_API"}, p.Type) {
+		return fmt.Errorf("认证提供方无效: %s", p.ID)
+	}
+	if p.Type == "ENTERPRISE_OAUTH" {
+		for _, u := range []string{p.Issuer, p.AuthorizeURL, p.TokenURL, p.UserInfoURL} {
+			if !authURL(u) {
+				return fmt.Errorf("企业 OAuth 需要 HTTPS 或本机测试的 issuer/授权/令牌/用户信息地址")
+			}
+		}
+		if p.ClientID == "" {
+			return fmt.Errorf("企业 OAuth 需要 client_id")
+		}
+	}
+	if p.Type == "ENTERPRISE_ACCOUNT_API" && !authURL(p.AccountURL) {
+		return fmt.Errorf("企业账号认证接口地址无效")
+	}
+	if p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) {
+		return fmt.Errorf("认证密钥需使用 DATASCOPE_AUTH_ 开头的环境变量")
+	}
+	return nil
+}
 func validateAuth(cfg AuthConfig) error {
 	providers := map[string]AuthProvider{}
 	for _, p := range cfg.Providers {
-		if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "DEMO_OAUTH", "ENTERPRISE_OAUTH", "ENTERPRISE_ACCOUNT_API"}, p.Type) {
-			return fmt.Errorf("认证提供方无效: %s", p.ID)
+		if err := validateAuthProvider(p); err != nil {
+			return err
 		}
 		if _, ok := providers[p.ID]; ok {
 			return fmt.Errorf("认证提供方重复")
-		}
-		if p.Type == "ENTERPRISE_OAUTH" {
-			for _, u := range []string{p.Issuer, p.AuthorizeURL, p.TokenURL, p.UserInfoURL} {
-				if !authURL(u) {
-					return fmt.Errorf("企业 OAuth 需要 HTTPS 或本机测试的 issuer/授权/令牌/用户信息地址")
-				}
-			}
-			if p.ClientID == "" {
-				return fmt.Errorf("企业 OAuth 需要 client_id")
-			}
-		}
-		if p.Type == "ENTERPRISE_ACCOUNT_API" && !authURL(p.AccountURL) {
-			return fmt.Errorf("企业账号认证接口地址无效")
-		}
-		if p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) {
-			return fmt.Errorf("认证密钥需使用 DATASCOPE_AUTH_ 开头的环境变量")
 		}
 		providers[p.ID] = p
 	}
@@ -280,6 +295,38 @@ func (s *Store) ResolveAuth(ctx context.Context, kind, id string) (ResolvedAuth,
 			break
 		}
 	}
+	if kind == "DATABASE" {
+		x, err := s.Source(ctx, id)
+		if err != nil && err != sql.ErrNoRows {
+			return out, err
+		}
+		if err == nil {
+			var raw string
+			if err = x.DB.QueryRowContext(ctx, "SELECT DATA_ FROM SOURCE_CONFIG WHERE ID_=?", id).Scan(&raw); err != nil {
+				return out, err
+			}
+			var source struct {
+				Authentication *DatabaseAuthConnection `json:"authentication"`
+			}
+			if err = json.Unmarshal([]byte(raw), &source); err != nil {
+				return out, err
+			}
+			if source.Authentication != nil {
+				connection := *source.Authentication
+				if err = validateDatabaseAuth(connection, cfg.Providers); err != nil {
+					return out, err
+				}
+				if connection.Access != nil {
+					out.Policy = *connection.Access
+				}
+				if connection.Source == "DATABASE" {
+					out.Provider = *connection.Provider
+					out.Source = "DATABASE"
+					return out, nil
+				}
+			}
+		}
+	}
 	for _, p := range cfg.Providers {
 		if out.Policy.Mode != "NONE" && p.ID == out.Policy.ProviderID {
 			out.Provider = p
@@ -290,6 +337,68 @@ func (s *Store) ResolveAuth(ctx context.Context, kind, id string) (ResolvedAuth,
 		return out, ErrDenied
 	}
 	return out, nil
+}
+
+// Database policies may reuse global providers or own a complete connection.
+// Editing a database never rewrites global auth or expires platform sessions.
+func (s *Store) ValidateDatabaseAuth(ctx context.Context, connection DatabaseAuthConnection) error {
+	if connection.Source == "DATABASE" {
+		return validateDatabaseAuth(connection, nil)
+	}
+	cfg, err := s.AuthConfig(ctx)
+	if err != nil {
+		return err
+	}
+	return validateDatabaseAuth(connection, cfg.Providers)
+}
+func validateDatabaseAuth(connection DatabaseAuthConnection, providers []AuthProvider) error {
+	if connection.Source != "" && connection.Source != "GLOBAL" && connection.Source != "DATABASE" {
+		return fmt.Errorf("认证配置来源无效")
+	}
+	if connection.Source == "DATABASE" {
+		if connection.Provider == nil || connection.Access == nil || connection.Access.Mode == "NONE" {
+			return fmt.Errorf("本库独立认证需要提供方和账号密码或 OAuth 策略")
+		}
+		if err := validateAuthProvider(*connection.Provider); err != nil {
+			return err
+		}
+		providers = []AuthProvider{*connection.Provider}
+	} else if connection.Provider != nil {
+		return fmt.Errorf("使用全局提供方时不能保存本库独立连接")
+	}
+	if connection.Access == nil {
+		return nil
+	}
+	return validateBusinessAuth(*connection.Access, providers)
+}
+func validateBusinessAuth(p AuthPolicy, providers []AuthProvider) error {
+	if !slices.Contains([]string{"NONE", "ACCOUNT", "OAUTH"}, p.Mode) {
+		return fmt.Errorf("认证方式无效")
+	}
+	if p.ID == "" || p.Name == "" || p.BusinessUserID < 0 {
+		return fmt.Errorf("业务认证策略无效")
+	}
+	if p.Mode == "NONE" && p.ProviderID != "" {
+		return fmt.Errorf("无需认证时不能指定提供方")
+	}
+	if p.Mode != "NONE" {
+		valid := false
+		for _, provider := range providers {
+			if provider.ID != p.ProviderID || !provider.Enabled {
+				continue
+			}
+			valid = p.Mode == "ACCOUNT" && slices.Contains([]string{"BUSINESS_ACCOUNT", "ENTERPRISE_ACCOUNT_API"}, provider.Type) || p.Mode == "OAUTH" && slices.Contains([]string{"DEMO_OAUTH", "ENTERPRISE_OAUTH"}, provider.Type)
+		}
+		if !valid {
+			return fmt.Errorf("请选择与认证方式匹配且已启用的业务认证提供方")
+		}
+	}
+	for _, permission := range p.Permissions {
+		if !slices.Contains(BusinessPermissions, permission) {
+			return fmt.Errorf("未知业务能力 %s", permission)
+		}
+	}
+	return nil
 }
 func (r ResolvedAuth) Fingerprint() string {
 	b, _ := json.Marshal(r)
@@ -324,7 +433,11 @@ func (r ResolvedAuth) Identity(database string, claims map[string]any) (Business
 		return BusinessAccount{}, fmt.Errorf("企业身份缺少有效业务员工编号")
 	}
 	name := claimString(claims["name"])
-	a := BusinessAccount{ID: externalID(r.Provider.ID, subject), DatabaseID: database, Username: subject, Name: name, BusinessUserID: business, Permissions: r.Policy.Permissions, Active: true, AuthVersion: int64(r.Revision)}
+	providerKey := r.Provider.ID
+	if r.Source == "DATABASE" {
+		providerKey = "database:" + database + ":" + providerKey
+	}
+	a := BusinessAccount{ID: externalID(providerKey, subject), DatabaseID: database, Username: subject, Name: name, BusinessUserID: business, Permissions: r.Policy.Permissions, Active: true, AuthVersion: int64(r.Revision)}
 	if r.Provider.UsernameClaim != "" {
 		name := claimString(claims[r.Provider.UsernameClaim])
 		if name == "" {

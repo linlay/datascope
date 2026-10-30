@@ -9,9 +9,10 @@ import (
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"datascope-server/internal/oauth"
 )
 
-func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Database, p management.ResolvedAuth, resource, path string) http.Handler {
+func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Database, p management.ResolvedAuth, resource, issuer, path string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/.well-known/oauth-protected-resource") {
 			w.Header().Set("Content-Type", "application/json")
@@ -33,6 +34,20 @@ func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Data
 		case "NONE":
 			a = management.BusinessAccount{DatabaseID: d.ID, Username: "anonymous", BusinessUserID: p.Policy.BusinessUserID, Permissions: p.Policy.Permissions, Active: true, AuthVersion: int64(p.Revision)}
 		case "ACCOUNT":
+			parts := strings.Fields(r.Header.Get("Authorization"))
+			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+				v := &oauth.Verifier{Catalog: c, Management: c.Management, DatabaseID: d.ID, Issuer: d.AuthorizationIssuer(issuer), Resource: resource}
+				info, err := v.Verify(r.Context(), parts[1], r)
+				e = err
+				if err == nil {
+					var ok bool
+					a, ok = info.Extra["business_account"].(management.BusinessAccount)
+					if !ok {
+						e = management.ErrDenied
+					}
+				}
+				break
+			}
 			username, password, ok := r.BasicAuth()
 			if !ok {
 				w.Header().Set("WWW-Authenticate", `Basic realm="DataScope"`)

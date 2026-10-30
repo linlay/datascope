@@ -26,7 +26,7 @@ func setupAction(t *testing.T, confirm bool) (*fixture, context.Context) {
 	d, e := f.c.Get("default")
 	must(t, e)
 	d.WriteEnabled = true
-	d.Tools = append(d.Tools, "describe_action", "invoke_action")
+	d.Tools = append(d.Tools, "list_actions", "describe_action", "invoke_action")
 	d.Actions = []action.Definition{{Name: "rename_item", Title: "Rename", Description: "Rename owned item", Confirm: confirm, Parameters: map[string]action.Parameter{"id": {Type: "integer"}, "name": {Type: "string"}}, Script: "function run(args,ctx){if(!my.one`SELECT id FROM items WHERE id=${args.id}`)deny('invisible');const n=db.exec`UPDATE items SET name=${args.name} WHERE id=${args.id} AND owner_id=${ctx.userId}`;if(n!==1)deny('changed');return {id:args.id,name:args.name}}"}}
 	must(t, f.c.Save(f.ctx, *d))
 	a, e := f.m.SaveBusinessAccount(f.ctx, management.BusinessAccount{DatabaseID: "default", Username: "E1", Name: "Employee", BusinessUserID: 10, Active: true, Permissions: []string{"action"}}, "business-password", 0)
@@ -225,7 +225,7 @@ func TestActionMCPToolsAndLiveRevocation(t *testing.T) {
 	d, e := f.c.Get("default")
 	must(t, e)
 	d.WriteEnabled = true
-	d.Tools = append(d.Tools, "describe_action", "invoke_action")
+	d.Tools = append(d.Tools, "list_actions", "describe_action", "invoke_action")
 	d.Actions = []action.Definition{{Name: "noop", Title: "Noop", Description: "Noop", Parameters: map[string]action.Parameter{}, Script: "function run(){return {ok:true}}"}}
 	must(t, f.c.Save(f.ctx, *d))
 	a := env.accounts["default"]
@@ -242,8 +242,17 @@ func TestActionMCPToolsAndLiveRevocation(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names = append(names, tool.Name)
 	}
-	if len(names) != 2 {
+	if len(names) != 3 {
 		t.Fatal(names)
+	}
+	list, e := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_actions", Arguments: map[string]any{}})
+	must(t, e)
+	listRaw, _ := json.Marshal(list)
+	if list.IsError || !strings.Contains(string(listRaw), "noop") || strings.Contains(string(listRaw), "additionalProperties") {
+		t.Fatal(string(listRaw))
+	}
+	if out, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "describe_action", Arguments: map[string]any{}}); err == nil && !out.IsError {
+		t.Fatal("describe_action must require a name; use list_actions for the list")
 	}
 	res, e := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "describe_action", Arguments: map[string]any{"name": "noop"}})
 	must(t, e)
@@ -262,6 +271,9 @@ func TestActionMCPToolsAndLiveRevocation(t *testing.T) {
 	must(t, e)
 	if res, e = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "describe_action", Arguments: map[string]any{}}); e == nil && !res.IsError {
 		t.Fatal("revoked action still callable")
+	}
+	if res, e = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_actions", Arguments: map[string]any{}}); e == nil && !res.IsError {
+		t.Fatal("revoked action list still callable")
 	}
 }
 

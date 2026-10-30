@@ -153,7 +153,7 @@ Web 与管理 MCP 共用管理动作：`get_discovery`（`config.read`）、`dis
 
 默认地址为 `http://127.0.0.1:8080/mcp/{mcp_path}`，保留原有分库地址及默认库 `/mcp` 入口。`admin` 为保留路径后缀。
 
-每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`search_knowledge`、`read_knowledge`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
+每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`search_knowledge`、`read_knowledge`、`list_actions`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
 
 HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数据库的令牌不能混用。业务 MCP 按数据库认证来源重新检查当前业务账号、能力和工具启停；管理 MCP 检查平台账号及管理授权。已有连接不能保留已撤销权限。
 
@@ -161,7 +161,7 @@ HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数�
 
 ## 配置生成业务查询工具
 
-在“MCP 配置与测试”的业务工具 JSON 中设置，或通过管理 MCP 的 `datascope_manage`（`action:"save"`、`args.resourceType:"mcp"`）更新 `args.database.business_tools`：
+在“查询配置 → 查询模板”中配置。这是可选功能：将常用 SELECT 封装为独立的 MCP 查询工具，不配置也可正常使用 `query`。管理 MCP 使用 `datascope_manage`（`action:"save"`、`args.resourceType:"query_tool"`）更新 `args.database.business_tools`：
 
 ```json
 [
@@ -182,22 +182,28 @@ HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数�
 
 ## 业务操作 Action
 
-「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、持久幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券演示库可运行 `make install-demo-actions` 安装 18 种现成操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](docs/securities-actions.md)，数据库结构和发布方式见 [发布清单](docs/securities-actions-release.md)。
+「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `list_actions` / `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、持久幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券演示库可运行 `make install-demo-actions` 安装 18 种现成操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](docs/securities-actions.md)，数据库结构和发布方式见 [发布清单](docs/securities-actions-release.md)。
 
 ## 业务知识与渐进式披露
 
-“业务知识”中编辑名称、摘要、正文、关联表与发布状态。建议正文记录表关联、关联基数、金额单位、统计口径、去重方式、查询步骤与示例 SQL。
+后续业务 YAML 分文件、知识统一复用 MCP Prompts、配置克隆及取消查询模板/公共片段的已确认方案见 [业务管理配置下一阶段方案](docs/management-storage-plan.md)。该文档明确区分规划与当前实现，以下介绍当前可运行功能。
+
+工具区另提供「动作工作台」：获取动作列表 → 选择动作查看参数 Schema → 填写参数与业务身份 → 试运行。各步显示请求、响应和耗时，试运行展示结果及 SQL 写入计划并始终回滚；同一 request_id 重用结果。查看需要 `action.write`，试运行另需 `impersonate` 和已启用写入。工作台使用平台权限模拟，正式提交仍通过业务 MCP 的 `invoke_action` 和人工确认流程，详见 [业务操作 Action](docs/actions.md)。
+
+“知识管理”采用左侧列表、右侧编辑和保存，支持 Markdown 预览。工具菜单分为“SQL 工作台”和“知识工作台”：前者执行数据库只读查询，后者模拟 MCP 的两步取知识流程：手动调用 `search_knowledge` 查看名称、ID 和完整 description，选择或输入 ID 后，再点击调用 `read_knowledge` 获取正文。两步分别显示调用参数、实际返回 JSON 与往返耗时，正文可切换 Markdown 预览；进入页面或选择 ID 不会自动读取正文。工作台复用业务 MCP 的知识检索逻辑，以当前平台账号的 `query` 和 `knowledge.read` 权限模拟；业务账号的实际可见范围仍需登录业务 MCP 验证，草稿仅在知识管理中可见。
+
+“业务知识”中编辑名称、描述、正文、关联表与发布状态。建议正文记录表关联、关联基数、金额单位、统计口径、去重方式、查询步骤与示例 SQL。
 
 模型使用过程：
 
 ```text
-search_knowledge("客户月末资产") → 名称、摘要、ID、版本
+search_knowledge("客户月末资产") → 名称、description、ID、版本
 read_knowledge(id)              → 业务口径、关联说明与 SQL 示例
 describe_table(...)            → 按需查看字段
 query(...)                     → 权限改写并执行
 ```
 
-检索采用 SQLite FTS5 trigram，并补充短文本子串匹配。每次最多返回 50 条摘要，避免一次加载全部正文。草稿不对查询用户公开。关联表被禁用或设置字段白名单时，查询侧保守隐藏该知识，避免正文泄露受限结构。知识只提供业务指导，不能扩大数据库访问权限。
+检索采用 SQLite FTS5 trigram，并补充短文本子串匹配。每次最多返回 50 条描述，避免一次加载全部正文。草稿不对查询用户公开。关联表被禁用或设置字段白名单时，查询侧保守隐藏该知识，避免正文泄露受限结构。知识只提供业务指导，不能扩大数据库访问权限。
 
 ## 审计与一致性
 
@@ -224,7 +230,7 @@ make test          # 连接器 VIEW 回归测试 + Go 全部测试 + 前端 Type
 make build         # 两个服务器、数据生成器与前端构建
 ```
 
-新增集成测试使用隔离临时库，覆盖后台登录、越权与身份冒用、跨资源令牌、权限即时撤销、密码重置撤销 JWT、真实管理 MCP、业务工具参数注入、知识摘要与全文披露、并发版本冲突、内部库隔离、逐库迁移、企业认证、内存运行状态与审计故障隔离。旧证券演示验收通过独立测试运行，不作为后台公共接口开放。
+新增集成测试使用隔离临时库，覆盖后台登录、越权与身份冒用、跨资源令牌、权限即时撤销、密码重置撤销 JWT、真实管理 MCP、业务工具参数注入、知识描述与全文披露、并发版本冲突、内部库隔离、逐库迁移、企业认证、内存运行状态与审计故障隔离。旧证券演示验收通过独立测试运行，不作为后台公共接口开放。
 
 ## 标准连接器
 

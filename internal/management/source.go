@@ -46,9 +46,7 @@ CREATE TABLE IF NOT EXISTS CONFIG_RECORD(BUCKET_ TEXT NOT NULL,KEY_ TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS CONFIG_VERSION(BUCKET_ TEXT NOT NULL,KEY_ TEXT NOT NULL,REVISION_ INTEGER NOT NULL,DATA_ TEXT NOT NULL,CREATED_AT_ TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(BUCKET_,KEY_,REVISION_));
 CREATE TABLE IF NOT EXISTS SCHEMA_VERSION(VERSION_ INTEGER PRIMARY KEY,APPLIED_AT_ TEXT NOT NULL);
 INSERT OR IGNORE INTO SCHEMA_VERSION VALUES(1,CURRENT_TIMESTAMP);
-CREATE VIRTUAL TABLE IF NOT EXISTS KNOWLEDGE_SEARCH USING fts5(KEY_ UNINDEXED,NAME_,SUMMARY_,CONTENT_,tokenize='trigram');
-CREATE TRIGGER IF NOT EXISTS TR_KNOWLEDGE_INSERT AFTER INSERT ON KNOWLEDGE BEGIN INSERT INTO KNOWLEDGE_SEARCH VALUES(new.KEY_,json_extract(new.DATA_,'$.name'),json_extract(new.DATA_,'$.summary'),json_extract(new.DATA_,'$.content'));END;
-CREATE TRIGGER IF NOT EXISTS TR_KNOWLEDGE_UPDATE AFTER UPDATE ON KNOWLEDGE BEGIN DELETE FROM KNOWLEDGE_SEARCH WHERE KEY_=old.KEY_;INSERT INTO KNOWLEDGE_SEARCH VALUES(new.KEY_,json_extract(new.DATA_,'$.name'),json_extract(new.DATA_,'$.summary'),json_extract(new.DATA_,'$.content'));END;
+
 `
 
 func (s *Store) source(ctx context.Context, id string, create bool) (*Source, error) {
@@ -87,6 +85,10 @@ func (s *Store) source(ctx context.Context, id string, create bool) (*Source, er
 	}
 	db.SetMaxOpenConns(4)
 	if _, e = db.ExecContext(ctx, sourceDDL); e != nil {
+		db.Close()
+		return nil, e
+	}
+	if e = migrateKnowledgeDescriptions(ctx, db); e != nil {
 		db.Close()
 		return nil, e
 	}
@@ -536,6 +538,12 @@ func (s *Store) updateRecords(ctx context.Context, bucket, kind, database string
 		}
 		defer tx.Rollback()
 		for _, r := range updated {
+			if bucket == "knowledge" {
+				r.Data, e = canonicalKnowledgeJSON(r.Data)
+				if e != nil {
+					return e
+				}
+			}
 			if _, e = tx.ExecContext(ctx, "INSERT INTO CONFIG_VERSION(BUCKET_,KEY_,REVISION_,DATA_) SELECT ?,?,COALESCE(MAX(REVISION_),0)+1,? FROM CONFIG_VERSION WHERE BUCKET_=? AND KEY_=?", bucket, r.Key, r.Data, bucket, r.Key); e != nil {
 				return e
 			}
@@ -558,7 +566,7 @@ func (s *Store) updateRecords(ctx context.Context, bucket, kind, database string
 }
 func (s *Store) internalPaths() []string {
 	root := filepath.Dir(s.Path)
-	paths := []string{s.Path, s.AuditPath(), s.Path + ".credentials.key", filepath.Join(root, "management.sqlite"), filepath.Join(root, "management.sqlite.credentials.key"), filepath.Join(root, "audit.sqlite")}
+	paths := []string{s.Path, s.AuditPath(), s.Path + ".credentials.key", filepath.Join(root, "management.db"), filepath.Join(root, "management.db.credentials.key"), filepath.Join(root, "management.sqlite"), filepath.Join(root, "management.sqlite.credentials.key"), filepath.Join(root, "audit.sqlite")}
 	// Retained backups contain the same private data as live metadata. Include
 	// their file identities too, so a hard link cannot bypass path exclusion.
 	for _, dir := range []string{"databases", "legacy", "oauth"} {

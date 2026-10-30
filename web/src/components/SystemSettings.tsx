@@ -24,7 +24,7 @@ export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
     <Typography.Text type="secondary">{t('设置应用于此浏览器的整个网站。')}</Typography.Text>
    </Space>
    {user.system_admin&&<Card size="small" title={t('平台用户')}>
-    <Typography.Paragraph>{t('创建平台账号、重置密码并控制启用状态。')}</Typography.Paragraph>
+    <Typography.Paragraph>{t('管理平台账号、密码和数据库访问权限。')}</Typography.Paragraph>
     <Button type="primary" onClick={()=>setUsersOpen(true)}>{t('用户管理')}</Button>
    </Card>}
    {user.system_admin&&<Card size="small" title="全局认证"><p>配置普通账号、企业认证、演示 OAuth 与接口绑定。</p><Button onClick={()=>setAuthOpen(true)}>认证配置</Button></Card>}

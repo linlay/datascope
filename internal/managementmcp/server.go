@@ -44,6 +44,8 @@ var operations = map[string][]operation{
 		{"knowledge", "get", "get_knowledge", "database_id id", ""},
 		{"knowledge", "search", "search_knowledge", "database_id query", ""},
 		{"knowledge", "read", "read_knowledge", "database_id id", ""},
+		{"action", "list", "list_actions", "database_id", ""},
+		{"action", "describe", "describe_action", "database_id name", ""},
 		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
@@ -66,7 +68,7 @@ var operations = map[string][]operation{
 		{"user", "enable", "enable_user", "user_id", ""},
 		{"user", "disable", "disable_user", "user_id", ""},
 		{"user", "reset_password", "reset_password", "user_id password", ""},
-		{"knowledge", "save", "save_knowledge", "database_id id name summary content tables published revision", ""},
+		{"knowledge", "save", "save_knowledge", "database_id id name description content tables published revision", "summary"},
 	},
 	"datascope_inspect": {
 		{"action", "try", "try_action", "database_id name arguments request_id business_user_id", ""},
@@ -100,6 +102,14 @@ func decode(tool string, in input) (string, application.Input, error) {
 				return "", out, fmt.Errorf("参数 %s 不能为 null", key)
 			}
 			args[key] = value
+		}
+		if op.domain == "save_knowledge" {
+			if _, ok := args["description"]; !ok {
+				if legacy, exists := args["summary"]; exists {
+					args["description"] = legacy
+				}
+			}
+			delete(args, "summary")
 		}
 		for _, key := range strings.Fields(op.required) {
 			value, exists := args[key]

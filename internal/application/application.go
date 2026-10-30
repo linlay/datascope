@@ -51,7 +51,8 @@ type Input struct {
 	SQL            string                         `json:"sql,omitempty"`
 	Query          string                         `json:"query,omitempty"`
 	ID             string                         `json:"id,omitempty"`
-	Summary        string                         `json:"summary,omitempty"`
+	Description    *string                        `json:"description,omitempty"`
+	Summary        *string                        `json:"summary,omitempty"` // Legacy request alias.
 	Content        string                         `json:"content,omitempty"`
 	Tables         []string                       `json:"tables,omitempty"`
 	Published      bool                           `json:"published,omitempty"`
@@ -61,14 +62,35 @@ type Input struct {
 	RequestID      string                         `json:"request_id,omitempty"`
 }
 type Knowledge struct {
-	ID         string   `json:"id"`
-	DatabaseID string   `json:"database_id"`
-	Name       string   `json:"name"`
-	Summary    string   `json:"summary"`
-	Content    string   `json:"content,omitempty"`
-	Tables     []string `json:"tables"`
-	Published  bool     `json:"published"`
-	Revision   int      `json:"revision"`
+	ID          string   `json:"id"`
+	DatabaseID  string   `json:"database_id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Content     string   `json:"content,omitempty"`
+	Tables      []string `json:"tables"`
+	Published   bool     `json:"published"`
+	Revision    int      `json:"revision"`
+}
+
+// Stored records and old clients may still use summary; responses always use description.
+func (k *Knowledge) UnmarshalJSON(raw []byte) error {
+	type plain Knowledge
+	var value struct {
+		*plain
+		Description *string `json:"description"`
+		Summary     *string `json:"summary"`
+	}
+	*k = Knowledge{}
+	value.plain = (*plain)(k)
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	if value.Description != nil {
+		k.Description = *value.Description
+	} else if value.Summary != nil {
+		k.Description = *value.Summary
+	}
+	return nil
 }
 
 func (s *Service) Call(ctx context.Context, action string, in Input) (out any, err error) {
@@ -134,6 +156,13 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
+	case "list_actions":
+		return s.InspectAction(ctx, in.DatabaseID, "")
+	case "describe_action":
+		if in.Name == "" {
+			return nil, errors.New("需要 action 名称，请先调用 list_actions")
+		}
+		return s.InspectAction(ctx, in.DatabaseID, in.Name)
 	case "try_action":
 		if e := require("action.write"); e != nil {
 			return nil, e
@@ -560,7 +589,15 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			if old.Revision != in.Revision {
 				return nil, errors.New("知识已更新，请刷新后重试")
 			}
-			saved = Knowledge{ID: in.ID, DatabaseID: in.DatabaseID, Name: in.Name, Summary: in.Summary, Content: in.Content, Tables: in.Tables, Published: in.Published, Revision: old.Revision + 1}
+			description := in.Description
+			if description == nil {
+				description = in.Summary
+			}
+			text := ""
+			if description != nil {
+				text = *description
+			}
+			saved = Knowledge{ID: in.ID, DatabaseID: in.DatabaseID, Name: in.Name, Description: text, Content: in.Content, Tables: in.Tables, Published: in.Published, Revision: old.Revision + 1}
 			raw, e := json.Marshal(saved)
 			return []management.Record{{Key: key, Data: string(raw)}}, e
 		})
@@ -622,7 +659,7 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 		if !drafts && !visible {
 			continue
 		}
-		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Summary+" "+k.Content), strings.ToLower(in.Query)) {
+		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Description+" "+k.Content), strings.ToLower(in.Query)) {
 			continue
 		}
 		if !full {

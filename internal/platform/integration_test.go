@@ -397,13 +397,14 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	if e == nil && !out.IsError {
 		t.Fatal("accepted unknown parameter")
 	}
-	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Summary: "Ownership rules", Content: "Query items by owner_id; never sum duplicated joins.", Tables: []string{"items"}, Published: true})
+	knowledgeDescription1 := "Ownership rules\nScope and applicable questions\nDetailed model guidance"
+	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Description: &knowledgeDescription1, Content: "Query items by owner_id; never sum duplicated joins.", Tables: []string{"items"}, Published: true})
 	must(t, e)
 	out, e = callMCP(t, session, "search_knowledge", map[string]any{"query": "Ownership"})
 	must(t, e)
 	raw, _ = json.Marshal(out.StructuredContent)
-	if out.IsError || bytes.Contains(raw, []byte("never sum")) {
-		t.Fatalf("summary disclosure %+v", out)
+	if out.IsError || bytes.Contains(raw, []byte("never sum")) || !bytes.Contains(raw, []byte(`"description"`)) || bytes.Contains(raw, []byte(`"summary"`)) || !bytes.Contains(raw, []byte(`Ownership rules\nScope and applicable questions\nDetailed model guidance`)) {
+		t.Fatalf("description disclosure %+v", out)
 	}
 	out, e = callMCP(t, session, "read_knowledge", map[string]any{"id": "items"})
 	must(t, e)
@@ -606,7 +607,8 @@ func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
 }
 func TestKnowledgeVisibilityAndConflict(t *testing.T) {
 	f := setup(t)
-	in := application.Input{DatabaseID: "default", ID: "owner-guide", Name: "Owner guide", Summary: "Only owned items", Content: "Query owner_id in items", Tables: []string{"items"}}
+	knowledgeDescription2 := "Only owned items"
+	in := application.Input{DatabaseID: "default", ID: "owner-guide", Name: "Owner guide", Description: &knowledgeDescription2, Content: "Query owner_id in items", Tables: []string{"items"}}
 	_, e := f.app.Call(f.ctx, "save_knowledge", in)
 	must(t, e)
 	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})

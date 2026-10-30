@@ -107,7 +107,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			return
 		}
 		if selectedAuth != nil && selectedAuth.Provider.Type != "DEMO_OAUTH" {
-			h = policyAuthentication(h, c, d, *selectedAuth, endpointResource, endpoint)
+			h = policyAuthentication(h, c, d, *selectedAuth, endpointResource, issuer, endpoint)
 		}
 
 		h.ServeHTTP(w, r)

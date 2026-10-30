@@ -37,7 +37,7 @@
 保存后重新 database.get 核对 revision 和目标字段。test_connection 检查保存配置下的数据库连接，不证明 OAuth 登录、所有业务 SQL 或数据库 MCP 均可用。管理地址的授权不能复用于数据库地址。
 
 
-数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；省略配置时也使用本库独立业务账号，不支持平台账号登录业务 MCP。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。外部企业认证尚未接入。
+数据库 authentication 可设为 `{type:"local",label:"员工认证",employee_directory:false}`，由 DataScope 为本库模拟独立的员工账号认证；省略配置时也使用本库独立业务账号，不支持平台账号登录业务 MCP。通过 database.save 保存完整数据库配置及最新 revision，authentication 只能由系统管理员修改。authentication_revision 由服务端维护，不要自行设置或回退。每个数据库有各自 issuer，MCP 资源发现自动返回相应登录入口；账号通过 business_account.list/save 单独维护，不创建平台用户。企业认证提供方由全局系统设置维护；`authentication.access` 可为本库单独指定认证策略：`{id:"database-auth",name:"本库业务认证",mode:"NONE"|"ACCOUNT"|"OAUTH",provider_id:"提供方ID",permissions:["query"],business_user_id:0}`。NONE 不指定 provider_id；ACCOUNT 支持 BUSINESS_ACCOUNT / ENTERPRISE_ACCOUNT_API；OAUTH 支持 DEMO_OAUTH / ENTERPRISE_OAUTH。策略保存在本库 management.db，未设置时沿用全局绑定。账号密码可经 `POST /auth/databases/<database_id>/token` 换取一小时有效的 Bearer Token。
 
 
 ## 网络数据库
@@ -58,3 +58,6 @@
 - 保存映射：`datascope_manage`，action=`save`，args=`{"resourceType":"annotation","database_id":"目标 ID","table":"物理表名","column":"物理字段名","revision":当前数据库版本,"annotation":{"display_name":"展示名称","comment":"人工说明"}}`。column 省略或为空表示表。comment=null 表示跟随源注释，comment="" 表示明确清空说明。需要 config.read + config.write；整项替换当前对象的映射，保留既有值时需带回 display_name 和 comment。
 
 结构快照和人工覆盖不能通过 database.save 修改。扫描会保留人工覆盖，源注释变化导致冲突时展示旧值、新值和人工值；取消该项 comment 覆盖即可采用数据库新说明。扫描不自动修复行过滤 SQL 或业务工具，也不比较业务记录内容。
+
+
+认证连接来源：`authentication.source` 为 `GLOBAL`（或省略）时引用全局提供方；为 `DATABASE` 时必须同时给出 `authentication.provider` 和 `authentication.access`，且 `access.provider_id` 与本库提供方 ID 一致。独立提供方字段与全局 AuthProvider 相同，支持 BUSINESS_ACCOUNT、DEMO_OAUTH、ENTERPRISE_ACCOUNT_API、ENTERPRISE_OAUTH，禁止 PLATFORM_ACCOUNT。无需认证时使用 GLOBAL 且省略 provider / provider_id。本库连接只保存在该库的 management.db，失败不回退；企业密钥使用 DATASCOPE_AUTH_* 环境变量名。保存仍需要系统管理员和最新数据库版本。OAuth 资源发现自动发布最终选定的 issuer。

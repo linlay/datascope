@@ -6,9 +6,10 @@ import { HelpTip } from '../components/HelpTip';
 
 const { Text } = Typography;
 const toolOptions = [
- {name:"describe_action",label:"查看业务操作",help:"列出 Action 并按需读取参数格式，需要业务账号 action 能力。"},
+ {name:"list_actions",label:"动作列表",help:"列出可用 Action 的名称与说明，需要业务账号 action 能力。"},
+ {name:"describe_action",label:"查看业务操作",help:"按名称读取单个 Action 的参数格式，需要业务账号 action 能力。"},
  {name:"invoke_action",label:"执行业务操作",help:"在独立事务中执行业务 Action。需要启用写入连接和业务账号 action 能力；人工确认在独立确认页完成。"},
-  { name:'search_knowledge',label:'检索知识摘要',help:'按业务问题检索知识的名称、摘要和 ID。' },
+  { name:'search_knowledge',label:'检索知识描述',help:'按业务问题检索知识的名称、描述和 ID。' },
  { name:'read_knowledge',label:'按需读取知识',help:'通过 ID 读取业务知识正文，支持渐进式披露。' },
  { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
   { name: 'describe_table', label: '表结构', help: '查看指定表允许访问的字段、类型和访问方案。' },
@@ -100,7 +101,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
         </Space>
       </Card>
       {error && <Alert type="error" showIcon title={t("MCP 配置保存失败")} description={error} closable onClose={() => setError(undefined)} />}
-      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={`${db.access?.policy.name||'演示 OAuth'} · ${db.access?.provider.name||'数据源业务账号'}`} /> : (
+      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={db.access?.policy.mode === 'NONE' ? t('无需认证') : `${db.access?.policy.mode === 'ACCOUNT' ? t('账号密码（Token）') : 'OAuth'} · ${db.access?.provider.name || t('本库业务账号')}`}  /> : (
         <Alert type="info" showIcon title={t("MCP 已关闭，开启并保存后可测试。")} />
       )}
     </Space>

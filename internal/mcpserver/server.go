@@ -73,7 +73,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		}
 	}
 	if opts.Management != nil && (slices.Contains(opts.Tools, "search_knowledge") || slices.Contains(opts.Tools, "read_knowledge")) {
-		guidance += " 遇到业务口径、表关联、指标计算等问题时，先 search_knowledge 检索摘要，再 read_knowledge 按需读取正文。优先使用匹配的命名业务工具；知识和示例不会扩大访问权限。"
+		guidance += " 遇到业务口径、表关联、指标计算等问题时，先 search_knowledge 检索描述，再 read_knowledge 按需读取正文。优先使用匹配的命名业务工具；知识和示例不会扩大访问权限。"
 	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    Name,
@@ -88,9 +88,10 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	businessMiddleware(server, h)
 	registerBusinessTools(server, h, opts.BusinessTools)
 	if opts.Management != nil {
-		mcp.AddTool(server, &mcp.Tool{Name: "describe_action", Description: "列出可用业务 action；传 name 获取完整参数 JSON Schema。", Annotations: readOnly("查看业务操作")}, h.describeAction)
+		mcp.AddTool(server, &mcp.Tool{Name: "list_actions", Description: "列出可用业务 action 的名称、说明和人工确认要求；再用 describe_action(name) 获取完整参数格式。", Annotations: readOnly("列出业务操作")}, h.listActions)
+		mcp.AddTool(server, &mcp.Tool{Name: "describe_action", Description: "按 name 查看单个业务 action 的说明和完整参数 JSON Schema。先用 list_actions 获取名称。", Annotations: readOnly("查看业务操作")}, h.describeAction)
 		mcp.AddTool(server, &mcp.Tool{Name: "invoke_action", Description: "执行业务 action。request_id 必须唯一，重试使用同一值。confirm_required 时向人展示 preview 和 confirmation_url；由本人打开页面登录确认后，使用相同 request_id 查询结果。模型不能代替人确认。", Annotations: &mcp.ToolAnnotations{Title: "执行业务操作", IdempotentHint: true}}, h.invokeAction)
-		mcp.AddTool(server, &mcp.Tool{Name: "search_knowledge", Description: "先按业务问题检索知识摘要，再按需 read_knowledge 获取业务口径、关联关系和示例 SQL。", Annotations: readOnly("搜索业务知识")}, h.searchKnowledge)
+		mcp.AddTool(server, &mcp.Tool{Name: "search_knowledge", Description: "先按业务问题检索知识描述，再按需 read_knowledge 获取业务口径、关联关系和示例 SQL。", Annotations: readOnly("搜索业务知识")}, h.searchKnowledge)
 		mcp.AddTool(server, &mcp.Tool{Name: "read_knowledge", Description: "通过 id 按需读取业务知识正文。知识是查询指导，执行仍应用当前权限。", Annotations: readOnly("读取业务知识")}, h.readKnowledge)
 	}
 
@@ -136,7 +137,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	}
 
 	if opts.Managed {
-		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "describe_action", "invoke_action"} {
+		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "list_actions", "describe_action", "invoke_action"} {
 			if !slices.Contains(opts.Tools, name) {
 				server.RemoveTools(name)
 			}
