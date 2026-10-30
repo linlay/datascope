@@ -1,5 +1,8 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "筛选已加载的知识描述":"Filter loaded knowledge descriptions",
+ "加载下一页":"Load next page",
+ "知识 Prompts":"Knowledge Prompts",
  "动作工作台": "Action workbench",
  "动作列表 → 参数说明 → 试运行": "Action list → parameters → trial run",
  "始终回滚": "Always rolls back",

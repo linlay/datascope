@@ -44,6 +44,8 @@ var operations = map[string][]operation{
 		{"knowledge", "get", "get_knowledge", "database_id id", ""},
 		{"knowledge", "search", "search_knowledge", "database_id query", ""},
 		{"knowledge", "read", "read_knowledge", "database_id id", ""},
+		{"knowledge_prompt", "list", "list_knowledge_prompts", "database_id", "cursor"},
+		{"knowledge_prompt", "get", "get_knowledge_prompt", "database_id name", ""},
 		{"action", "list", "list_actions", "database_id", ""},
 		{"action", "describe", "describe_action", "database_id name", ""},
 		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
@@ -51,7 +53,6 @@ var operations = map[string][]operation{
 	},
 	"datascope_manage": {
 		{"authentication", "save", "save_auth_config", "auth_config", ""},
-		{"query_tool", "save", "configure_query_tools", "database_id database", ""},
 		{"action", "save", "configure_actions", "database_id database", "write_password"},
 		{"discovery", "refresh", "discover_database", "database_id", ""},
 		{"discovery", "apply", "apply_discovery", "database_id id revision", "resolutions"},

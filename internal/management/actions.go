@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"time"
 )
 
@@ -19,60 +20,116 @@ type ActionRequest struct {
 	Expires     int64  `json:"-"`
 }
 
-func scanAction(row interface{ Scan(...any) error }) (r ActionRequest, e error) {
-	e = row.Scan(&r.DatabaseID, &r.Actor, &r.RequestID, &r.Fingerprint, &r.Revision, &r.State, &r.Data, &r.Token, &r.Expires)
-	return
+type ActionState interface {
+	Reserve(context.Context, ActionRequest) (ActionRequest, bool, error)
+	Token(context.Context, string) (ActionRequest, error)
+	Transition(context.Context, ActionRequest, string, string, string, string, int64) error
 }
-
-const actionColumns = "DATABASE_ID_,ACTOR_,REQUEST_ID_,FINGERPRINT_,REVISION_,STATE_,DATA_,TOKEN_,EXPIRES_"
 
 func (s *Store) ReserveAction(ctx context.Context, r ActionRequest) (ActionRequest, bool, error) {
-	result, e := s.sourceDB(r.DatabaseID).ExecContext(ctx, "INSERT OR IGNORE INTO ACTION_RECEIPT("+actionColumns+`) VALUES(?,?,?,?,?,?,?,?,?)`, r.DatabaseID, r.Actor, r.RequestID, r.Fingerprint, r.Revision, r.State, r.Data, r.Token, r.Expires)
-	if e != nil {
-		return r, false, e
-	}
-	n, e := result.RowsAffected()
-	if e != nil {
-		return r, false, e
-	}
-	stored, e := scanAction(s.sourceDB(r.DatabaseID).QueryRowContext(ctx, "SELECT "+actionColumns+" FROM ACTION_RECEIPT WHERE DATABASE_ID_=? AND ACTOR_=? AND REQUEST_ID_=?", r.DatabaseID, r.Actor, r.RequestID))
-	return stored, n == 1, e
+	return s.Actions.Reserve(ctx, r)
 }
 func (s *Store) ActionToken(ctx context.Context, token string) (ActionRequest, error) {
-	if len(token) != 64 {
-		return ActionRequest{}, ErrDenied
-	}
-	ids, e := s.sourceIDs()
-	if e != nil {
-		return ActionRequest{}, e
-	}
-	for _, id := range ids {
-		r, e := scanAction(s.sourceDB(id).QueryRowContext(ctx, `SELECT `+actionColumns+` FROM ACTION_RECEIPT WHERE TOKEN_=?`, token))
-		if e == nil {
-			return r, nil
-		}
-		if e != sql.ErrNoRows {
-			return r, e
-		}
-	}
-	return ActionRequest{}, sql.ErrNoRows
+	return s.Actions.Token(ctx, token)
 }
 func (s *Store) TransitionAction(ctx context.Context, r ActionRequest, from, state, data, token string, expires int64) error {
-	result, e := s.sourceDB(r.DatabaseID).ExecContext(ctx, "UPDATE ACTION_RECEIPT SET STATE_=?,DATA_=?,TOKEN_=?,EXPIRES_=? WHERE DATABASE_ID_=? AND ACTOR_=? AND REQUEST_ID_=? AND STATE_=?", state, data, token, expires, r.DatabaseID, r.Actor, r.RequestID, from)
-	if e != nil {
-		return e
-	}
-	n, e := result.RowsAffected()
-	if e == nil && n != 1 {
-		return errors.New("action 请求已被处理或正在执行")
-	}
-	return e
+	return s.Actions.Transition(ctx, r, from, state, data, token, expires)
 }
 
-// FinishAction uses an independent context. Unresolved running receipts are
-// retained across restarts to prevent a second business commit.
+// FinishAction uses an independent context. Receipts live only until the owning
+// MCP process restarts; unresolved requests are never reclaimed in that lifetime.
 func (s *Store) FinishAction(r ActionRequest, from, state, data string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.TransitionAction(ctx, r, from, state, data, "", 0)
+}
+
+type actionKey struct{ database, actor, request string }
+
+func keyOf(r ActionRequest) actionKey { return actionKey{r.DatabaseID, r.Actor, r.RequestID} }
+
+type MemoryActions struct {
+	mu      sync.Mutex
+	records map[actionKey]ActionRequest
+	tokens  map[string]actionKey
+	bytes   int
+}
+
+func NewMemoryActions() *MemoryActions {
+	return &MemoryActions{records: map[actionKey]ActionRequest{}, tokens: map[string]actionKey{}}
+}
+func actionSize(r ActionRequest) int {
+	return len(r.DatabaseID) + len(r.Actor) + len(r.RequestID) + len(r.Fingerprint) + len(r.State) + len(r.Data) + len(r.Token) + 256
+}
+func (m *MemoryActions) Reserve(ctx context.Context, r ActionRequest) (ActionRequest, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return ActionRequest{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := keyOf(r)
+	if old, ok := m.records[key]; ok {
+		return old, false, nil
+	}
+	if r.DatabaseID == "" || r.Actor == "" || r.RequestID == "" || r.State != "running" || r.Token != "" {
+		return ActionRequest{}, false, errors.New("非法 action 内存登记")
+	}
+	if len(m.records) >= 10000 || m.bytes+actionSize(r) > 64<<20 {
+		return ActionRequest{}, false, errors.New("Action 内存回执已达容量上限")
+	}
+	m.records[key] = r
+	m.bytes += actionSize(r)
+	return r, true, nil
+}
+func (m *MemoryActions) Token(ctx context.Context, token string) (ActionRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return ActionRequest{}, err
+	}
+	if len(token) != 64 {
+		return ActionRequest{}, ErrDenied
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key, ok := m.tokens[token]
+	if !ok {
+		return ActionRequest{}, sql.ErrNoRows
+	}
+	return m.records[key], nil
+}
+func (m *MemoryActions) Transition(ctx context.Context, r ActionRequest, from, state, data, token string, expires int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := keyOf(r)
+	old, ok := m.records[key]
+	if !ok || old.State != from {
+		return errors.New("action 请求已被处理或正在执行")
+	}
+	if token != "" {
+		if len(token) != 64 {
+			return ErrDenied
+		}
+		if other, exists := m.tokens[token]; exists && other != key {
+			return errors.New("确认令牌重复")
+		}
+	}
+	next := old
+	next.State = state
+	next.Data = data
+	next.Token = token
+	next.Expires = expires
+	if m.bytes-actionSize(old)+actionSize(next) > 64<<20 {
+		return errors.New("Action 内存回执已达容量上限")
+	}
+	if old.Token != "" {
+		delete(m.tokens, old.Token)
+	}
+	if token != "" {
+		m.tokens[token] = key
+	}
+	m.bytes += actionSize(next) - actionSize(old)
+	m.records[key] = next
+	return nil
 }

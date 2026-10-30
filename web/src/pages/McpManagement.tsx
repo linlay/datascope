@@ -9,8 +9,6 @@ const toolOptions = [
  {name:"list_actions",label:"动作列表",help:"列出可用 Action 的名称与说明，需要业务账号 action 能力。"},
  {name:"describe_action",label:"查看业务操作",help:"按名称读取单个 Action 的参数格式，需要业务账号 action 能力。"},
  {name:"invoke_action",label:"执行业务操作",help:"在独立事务中执行业务 Action。需要启用写入连接和业务账号 action 能力；人工确认在独立确认页完成。"},
-  { name:'search_knowledge',label:'检索知识描述',help:'按业务问题检索知识的名称、描述和 ID。' },
- { name:'read_knowledge',label:'按需读取知识',help:'通过 ID 读取业务知识正文，支持渐进式披露。' },
  { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
   { name: 'describe_table', label: '表结构', help: '查看指定表允许访问的字段、类型和访问方案。' },
   { name: 'query', label: '权限查询', help: '只读查询，应用表、字段、行权限和返回行数限制。规则在“查询配置”中配置。' },
@@ -22,6 +20,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
  const t=useI18n();
   const [db, setDB] = useState<Database>();
   const [enabled, setEnabled] = useState(false);
+ const [knowledgeEnabled,setKnowledgeEnabled]=useState(false);
   const [tools, setTools] = useState<string[]>([]);
   const [mcpPath, setMcpPath] = useState('');
 
@@ -34,7 +33,8 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
       if (!live) return;
       setDB(item);
       setEnabled(item.mcp_enabled);
-      setTools(item.tools);
+      setTools(item.tools.filter(name=>!['search_knowledge','read_knowledge'].includes(name)));
+ setKnowledgeEnabled(item.knowledge_enabled??item.tools.some(name=>['search_knowledge','read_knowledge'].includes(name)));
       setMcpPath(item.mcp_path || item.id);
     }).catch((e: Error) => { if (live) setError(e.message); });
     return () => { live = false; };
@@ -46,16 +46,17 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   const endpoint = new URL(db.mcp_endpoint || `/mcp/${db.mcp_path || db.id}`, window.location.origin);
   const prefix = endpoint.pathname.slice(0, endpoint.pathname.lastIndexOf('/') + 1);
   const previewEndpoint = `${endpoint.origin}${prefix}${mcpPath}`;
-  const dirty = mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== db.tools.length || tools.some((tool) => !db.tools.includes(tool));
+  const originalTools=db.tools.filter(name=>!['search_knowledge','read_knowledge'].includes(name));
+ const dirty = knowledgeEnabled!==(db.knowledge_enabled??db.tools.some(name=>['search_knowledge','read_knowledge'].includes(name))) || mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== originalTools.length || tools.some((tool) => !originalTools.includes(tool));
   const save = async () => {
     setSaving(true);
     setError(undefined);
     try {
 
- const saved = await databases.save({ ...db, mcp_enabled: enabled, mcp_path: mcpPath, tools });
+ const saved = await databases.save({ ...db, mcp_enabled: enabled, mcp_path: mcpPath, tools, knowledge_enabled:knowledgeEnabled });
       setDB(saved);
       setEnabled(saved.mcp_enabled);
-      setTools(saved.tools);
+      setTools(saved.tools);setKnowledgeEnabled(saved.knowledge_enabled??false);
       setMcpPath(saved.mcp_path || saved.id);
       message.success(t("MCP 配置已保存"));
       onSaved();
@@ -85,6 +86,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
             {!pathValid && <Text type="danger">{t("请输入字母或数字开头的路径，仅允许字母、数字、下划线和连字符，最多 64 位。")}</Text>}
             <Text copyable={pathValid ? { text: previewEndpoint } : false} className="mono">{previewEndpoint}</Text>
           </Space>
+          <Space><Switch aria-label={t('知识 Prompts')} checked={knowledgeEnabled} onChange={setKnowledgeEnabled}/><Text>{t('知识 Prompts')}</Text><Text type="secondary">prompts/list · prompts/get</Text></Space>
           <Space orientation="vertical" style={{ width: '100%' }}>
             <Space size={4}><Text strong>{t("开放工具")}</Text><HelpTip label={t("开放工具")}>{t("按当前数据库独立启停。保存后工具目录与调用权限立即更新，下方测试会显示实际开放的工具。")}</HelpTip></Space>
             <Checkbox.Group value={tools} onChange={(values) => setTools(values as string[])} className="mcp-tool-options">

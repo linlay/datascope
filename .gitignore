@@ -34,3 +34,4 @@ coverage.out
 /data/*.db-*
 /data/*.db.*
 /data/databases/
+/data/runtime/

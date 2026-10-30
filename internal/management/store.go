@@ -35,6 +35,7 @@ type Store struct {
 	Path         string
 	Audit        *audit.Store
 	AllowedRoots []string
+	Actions      ActionState
 	mu           sync.Mutex
 	sources      map[string]*Source
 	sessions     map[string]session
@@ -103,7 +104,7 @@ func Open(path string, a *audit.Store) (*Store, error) {
 		db.Close()
 		return nil, e
 	}
-	m := &Store{DB: db, Path: abs, Audit: a, sources: map[string]*Source{}, sessions: map[string]session{}}
+	m := &Store{DB: db, Path: abs, Audit: a, Actions: NewMemoryActions(), sources: map[string]*Source{}, sessions: map[string]session{}}
 	if e = m.initSources(); e != nil {
 		db.Close()
 		return nil, e

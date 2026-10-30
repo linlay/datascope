@@ -7,13 +7,11 @@ import (
 	"datascope-server/internal/management"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
-	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // ManagedHTTPHandler resolves current configuration on every request. Stateless
@@ -123,8 +121,6 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 	opts.DatabaseID = id
 	opts.Tools = catalog.Tools
 	server := New(svc, opts)
-	var toolsMu sync.Mutex
-	var toolsFingerprint string
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			d, err := c.Get(id)
@@ -134,21 +130,8 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 			if !d.MCPEnabled {
 				return nil, fmt.Errorf("该数据库未开启 MCP")
 			}
-			ctx = context.WithValue(ctx, businessContextKey{}, d.BusinessTools)
-			if method == "tools/list" || method == "tools/call" {
-				raw, _ := json.Marshal(d.BusinessTools)
-				toolsMu.Lock()
-				if string(raw) != toolsFingerprint {
-					registerBusinessTools(server, handlers{svc: svc, opts: opts}, d.BusinessTools)
-					toolsFingerprint = string(raw)
-				}
-				toolsMu.Unlock()
-			}
 			enabled := func(name string) bool {
-				if slices.Contains(d.Tools, name) {
-					return true
-				}
-				return slices.ContainsFunc(d.BusinessTools, func(t catalog.BusinessTool) bool { return t.Name == name })
+				return name != "search_knowledge" && name != "read_knowledge" && slices.Contains(d.Tools, name)
 			}
 			switch method {
 			case "tools/list":

@@ -48,7 +48,7 @@ internal/
 | --- | --- |
 | `data/management.db` | 平台用户、系统授权、数据源目录、认证提供方 / 策略 / 绑定、OAuth 客户端注册 |
 | `data/audit.db` | 全局管理与认证审计 |
-| `data/databases/<ID>/management.db` | 逐库配置、查询改写、命名查询、Action、知识、业务账号、管理授权、配置版本、Action 幂等回执 |
+| `data/databases/<ID>/management.db` | 逐库配置、查询改写、Action、知识、业务账号、管理授权、配置版本 |
 | `data/databases/<ID>/audit.db` | 此库的查询、SQL 改写、Action 与管理审计，异步写入 |
 | `data/databases/<ID>/credentials.key` | 此库连接密码的 AES-256-GCM 密钥，与业务管理库一起备份 |
 | `data/oauth/signing.pem` | 演示 OAuth 私钥，独立文件保存 |
@@ -153,57 +153,35 @@ Web 与管理 MCP 共用管理动作：`get_discovery`（`config.read`）、`dis
 
 默认地址为 `http://127.0.0.1:8080/mcp/{mcp_path}`，保留原有分库地址及默认库 `/mcp` 入口。`admin` 为保留路径后缀。
 
-每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`search_knowledge`、`read_knowledge`、`list_actions`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
+每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`list_actions`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
 
 HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数据库的令牌不能混用。业务 MCP 按数据库认证来源重新检查当前业务账号、能力和工具启停；管理 MCP 检查平台账号及管理授权。已有连接不能保留已撤销权限。
 
 管理端登记的业务 MCP 统一要求 HTTP OAuth，使用当前数据库的独立业务账号。`header`、`none` 及 stdio 不提供平台账号访问业务 MCP 的替代入口。底层独立演示测试仍可使用无管理库的传输模式。
 
-## 配置生成业务查询工具
+## SELECT 与绑定变量
 
-在“查询配置 → 查询模板”中配置。这是可选功能：将常用 SELECT 封装为独立的 MCP 查询工具，不配置也可正常使用 `query`。管理 MCP 使用 `datascope_manage`（`action:"save"`、`args.resourceType:"query_tool"`）更新 `args.database.business_tools`：
+SELECT 直接调用 query，使用当前数据库的表、字段与行权限。可同时提供 parameters 绑定 SQL 中的 :arg_名称，身份参数由服务端提供。例如：
 
 ```json
-[
-  {
-    "name": "find_customer",
-    "description": "按客户编号查询当前用户可见的客户",
-    "sql": "SELECT customer_no,name FROM customers WHERE customer_no=:arg_customer_no",
-    "parameters": {
-      "customer_no": {"type": "string", "description": "客户编号"}
-    }
-  }
-]
+{"sql":"SELECT customer_no,name FROM customers WHERE customer_no=:arg_customer_no","parameters":{"arg_customer_no":"C0001"}}
 ```
 
-调用参数为 `{"customer_no":"C000001"}`。支持 string、integer、number、boolean，参数必须与定义完全匹配。模板中的业务参数必须使用 `:arg_名称`，与 `${userId}`、`${asOf}` 等可信上下文变量隔离。SQL 经过 AST 权限改写后，以数据库绑定参数执行；不会将参数拼入 SQL。
-
-工具定义保存时验证名称、参数与 SQL。业务工具自动出现在对应数据库 MCP 中，删除定义即停用；MCP 总开关继续生效。
+不再提供命名查询、查询模板或公共 SQL 片段编辑器。旧命名查询不再注册为 MCP 工具；旧片段在读取配置时展开为每张表完整 SQL，保留身份绑定。
 
 ## 业务操作 Action
 
-「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `list_actions` / `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、持久幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券演示库可运行 `make install-demo-actions` 安装 18 种现成操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](docs/securities-actions.md)，数据库结构和发布方式见 [发布清单](docs/securities-actions-release.md)。
+「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `list_actions` / `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、运行期内存幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券演示库可运行 `make install-demo-actions` 安装 18 种现成操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](docs/securities-actions.md)，数据库结构和发布方式见 [发布清单](docs/securities-actions-release.md)。
 
 ## 业务知识与渐进式披露
 
-后续业务 YAML 分文件、知识统一复用 MCP Prompts、配置克隆及取消查询模板/公共片段的已确认方案见 [业务管理配置下一阶段方案](docs/management-storage-plan.md)。该文档明确区分规划与当前实现，以下介绍当前可运行功能。
+后续业务 YAML 分文件与配置克隆的已确认方案见 [业务管理配置下一阶段方案](docs/management-storage-plan.md)。该文档明确区分规划与当前实现，以下介绍当前可运行功能。
 
 工具区另提供「动作工作台」：获取动作列表 → 选择动作查看参数 Schema → 填写参数与业务身份 → 试运行。各步显示请求、响应和耗时，试运行展示结果及 SQL 写入计划并始终回滚；同一 request_id 重用结果。查看需要 `action.write`，试运行另需 `impersonate` 和已启用写入。工作台使用平台权限模拟，正式提交仍通过业务 MCP 的 `invoke_action` 和人工确认流程，详见 [业务操作 Action](docs/actions.md)。
 
-“知识管理”采用左侧列表、右侧编辑和保存，支持 Markdown 预览。工具菜单分为“SQL 工作台”和“知识工作台”：前者执行数据库只读查询，后者模拟 MCP 的两步取知识流程：手动调用 `search_knowledge` 查看名称、ID 和完整 description，选择或输入 ID 后，再点击调用 `read_knowledge` 获取正文。两步分别显示调用参数、实际返回 JSON 与往返耗时，正文可切换 Markdown 预览；进入页面或选择 ID 不会自动读取正文。工作台复用业务 MCP 的知识检索逻辑，以当前平台账号的 `query` 和 `knowledge.read` 权限模拟；业务账号的实际可见范围仍需登录业务 MCP 验证，草稿仅在知识管理中可见。
+“知识管理”采用左侧列表、右侧编辑和保存，description 使用三行编辑，正文支持 Markdown 预览。业务知识统一通过标准 MCP Prompts 提供：prompts/list 分页返回名称、ID 和完整 description，prompts/get(name) 将同一正文包装为 user 文本消息；无提示词模板参数，不向业务 MCP 发布 search_knowledge/read_knowledge 工具。Resources 留给后续 view。
 
-“业务知识”中编辑名称、描述、正文、关联表与发布状态。建议正文记录表关联、关联基数、金额单位、统计口径、去重方式、查询步骤与示例 SQL。
-
-模型使用过程：
-
-```text
-search_knowledge("客户月末资产") → 名称、description、ID、版本
-read_knowledge(id)              → 业务口径、关联说明与 SQL 示例
-describe_table(...)            → 按需查看字段
-query(...)                     → 权限改写并执行
-```
-
-检索采用 SQLite FTS5 trigram，并补充短文本子串匹配。每次最多返回 50 条描述，避免一次加载全部正文。草稿不对查询用户公开。关联表被禁用或设置字段白名单时，查询侧保守隐藏该知识，避免正文泄露受限结构。知识只提供业务指导，不能扩大数据库访问权限。
+知识工作台按 prompts/list → 选择 name → prompts/get 展示参数、JSON 与耗时，并支持加载下一页及正文预览。工作台以当前平台的 query 与 knowledge.read 权限模拟；业务 MCP 使用本库业务身份执行同样的发布状态和可见性检查。知识 Prompts 开关与工具开关分别配置。旧知识工具开关兼容映射到知识开关，保存时清理旧工具项。
 
 ## 审计与一致性
 
@@ -211,7 +189,7 @@ query(...)                     → 权限改写并执行
 
 覆盖普通查询、改写预览、全量只读查询、分页浏览自动生成的 SQL，以及 `deny_unless` 的前置检查。SQL 解析失败、权限拒绝、超时也有记录。MCP HTTP 层在认证前记录 SQL 请求，因此撤销令牌后的拒绝请求仍可追踪。普通查询结果数据正文不保存；Action 另记录脚本返回值和写入计划；密码、会话令牌和 OAuth 凭据不进入操作审计。
 
-管理变更提交后投递审计事件；事件 ID 去重。数据库配置和知识保留历史版本。审计写入失败会记录服务端警告和丢弃计数；进程异常退出时队列中的事件可能丢失。Action 幂等回执独立保存在业务管理库，保证跨进程与重启后不会自动重放未知结果的写操作。当前不自动删除审计，备份和保留周期由部署方安排。
+管理变更提交后投递审计事件；事件 ID 去重。数据库配置和知识保留历史版本。审计写入失败会记录服务端警告和丢弃计数；进程异常退出时队列中的事件可能丢失。Action 幂等回执只保存在 MCP 进程内存，API 通过本地 Unix socket 访问同一运行实例的回执；同一实例存活期间防重复，MCP 重启后全部清空，独立实例不共享。重启后重试旧 request_id 可能重新执行，必须先核对业务数据。当前不自动删除审计，备份和保留周期由部署方安排。
 
 ## 旧版本迁移与备份
 

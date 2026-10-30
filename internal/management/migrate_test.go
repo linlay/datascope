@@ -12,7 +12,7 @@ import (
 	"datascope-server/internal/audit"
 )
 
-func TestLegacySourceMigrationPreservesDurableState(t *testing.T) {
+func TestLegacySourceMigrationPreservesConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "management.sqlite")
 	db, e := sql.Open("sqlite", old)
@@ -69,9 +69,9 @@ func TestLegacySourceMigrationPreservesDurableState(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	var state string
-	if e = x.DB.QueryRow("SELECT STATE_ FROM ACTION_RECEIPT WHERE REQUEST_ID_='durable'").Scan(&state); e != nil || state != "running" {
-		t.Fatalf("lost idempotency receipt: %s %v", state, e)
+	var receipts int
+	if e = x.DB.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name='ACTION_RECEIPT'").Scan(&receipts); e != nil || receipts != 0 {
+		t.Fatalf("runtime receipt table created: %d %v", receipts, e)
 	}
 	var original string
 	if e = x.DB.QueryRow("SELECT DATA_ FROM CONFIG_VERSION WHERE BUCKET_='databases' AND KEY_='source' AND REVISION_=1").Scan(&original); e != nil || !strings.Contains(original, "original version") {

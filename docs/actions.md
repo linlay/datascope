@@ -80,11 +80,13 @@ UPDATE / DELETE 必须有 WHERE，并建议再次包含所有关键权限和状�
 
 ## 幂等、审计和故障恢复
 
-request_id 按数据库和发起账号隔离。相同 ID、操作和参数只执行一次，已完成调用直接返回历史结果；同一 ID 换操作、参数或身份会拒绝。预览和完成记录存于管理 SQLite，重启不丢失；并发调用和重复点击由数据库唯一键及状态转换保护。
+request_id 在同一 MCP 运行实例内按数据库、发起账号隔离。相同 ID、操作和参数复用结果；同一 ID 换操作、参数或身份会拒绝。内存互斥锁与状态比较保护并发请求，结果未知的请求在该实例内不会自动重放。
 
-管理库与业务库是独立数据库，无法跨库原子提交。进程可能在业务提交后、保存返回值前崩溃；这种请求持久保持 `running`，返回「执行中或结果未知」，绝不自动重新写入。管理员应结合 request_id 审计及业务数据人工核对，不能通过换 ID 盲目重试。备份管理库时须保留 action_requests，避免丢失幂等记录。
+回执、确认令牌及执行结果只保存在内存，不写入管理库、YAML 或 audit 表。MCP 重启即清空，不提供跨重启防重保证；重启后重试旧请求可能重新执行，应先核对业务数据。缓存上限为 10000 条、64 MiB，达到上限拒绝新增，不通过自动淘汰回执破坏运行期防重。
 
-每条 SQL 的内容、绑定参数、影响/返回行数及错误异步进入当前库 audit.db；整体事件记录参数、结果、预览标志和拒绝原因。审计不可写不阻止业务提交。Action 的幂等回执同步保存在当前库 management.db 的 ACTION_RECEIPT，提交结果或回执保存结果不确定时保留未知状态，禁止自动重放。密码与确认令牌不进入 SQL/操作审计。
+MCP 进程持有唯一内存缓存，API 的确认页和平台试运行通过权限为 0600 的本机 Unix socket 访问它。两个服务的 ACTION_STATE_SOCKET 必须一致，默认是全局管理库同级 runtime/actions.sock；多个独立部署使用各自路径。socket 不包含回执数据。MCP 内存服务不可用时，Action 操作报错，不回退到另一个独立缓存。平台账号仍不能代替业务账号正式执行或确认。
+
+每条 SQL 的内容、绑定参数、影响行数及错误继续异步进入 audit.db。审计不可写不阻止业务提交；它只用于追踪，不承担幂等控制。旧版本 ACTION_RECEIPT 表不再读取或写入，新库不创建该表；已有逐库表保留作历史备份。
 
 控制台「试运行」始终回滚，包括 confirm:false 的操作，显示 SQL 审计和执行预览。管理 MCP 使用 `datascope_manage` 的 `{action:"save",args:{resourceType:"action",database_id,database,write_password?}}` 保存 action、写连接和启用状态；使用 `datascope_inspect` 的 `{action:"try",args:{resourceType:"action",database_id,name,arguments,request_id,business_user_id}}` 试运行，始终回滚。读取当前配置与 revision 后再保存。
 

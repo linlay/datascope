@@ -48,6 +48,7 @@ type Database struct {
 	Path                   string              `json:"path" yaml:"path"`
 	Connection             *store.Connection   `json:"connection,omitempty" yaml:"connection,omitempty"`
 	MCPEnabled             bool                `json:"mcp_enabled" yaml:"mcp_enabled"`
+	KnowledgeEnabled       *bool               `json:"knowledge_enabled,omitempty" yaml:"knowledge_enabled,omitempty"`
 	MCPPath                string              `json:"mcp_path" yaml:"mcp_path,omitempty"`
 	Tools                  []string            `json:"tools" yaml:"tools"`
 	Config                 *rewrite.Config     `json:"config" yaml:"config"`
@@ -290,10 +291,6 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 		return nil, err
 	}
 	if err := validateActions(*d); err != nil {
-		st.Close()
-		return nil, err
-	}
-	if err := validateBusinessTools(*d, svc.Rewriter, st); err != nil {
 		st.Close()
 		return nil, err
 	}

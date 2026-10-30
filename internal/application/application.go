@@ -60,6 +60,7 @@ type Input struct {
 	Limit          int                            `json:"limit,omitempty"`
 	Offset         int                            `json:"offset,omitempty"`
 	RequestID      string                         `json:"request_id,omitempty"`
+	Cursor         string                         `json:"cursor,omitempty"`
 }
 type Knowledge struct {
 	ID          string   `json:"id"`
@@ -105,6 +106,12 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	defer func() { err = audit.Join(err, s.Management.Audit.Finish(ev, err)) }()
 	if _, business := guard.Business(ctx); business {
+		if action == "list_knowledge_prompts" {
+			return s.ListKnowledgePrompts(ctx, in)
+		}
+		if action == "get_knowledge_prompt" {
+			return s.GetKnowledgePrompt(ctx, in)
+		}
 		if action == "search_knowledge" || action == "read_knowledge" {
 			return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
 		}
@@ -116,6 +123,10 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "list_knowledge_prompts":
+		return s.ListKnowledgePrompts(ctx, in)
+	case "get_knowledge_prompt":
+		return s.GetKnowledgePrompt(ctx, in)
 	case "get_auth_config", "save_auth_config":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -131,31 +142,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		}
 		return s.Management.AuthConfig(ctx)
 	case "configure_query_tools":
-		if e := require("policy.write"); e != nil {
-			return nil, e
-		}
-		if e := require("config.read"); e != nil {
-			return nil, e
-		}
-		if in.Database == nil || in.Database.ID != in.DatabaseID {
-			return nil, errors.New("数据源标识不一致")
-		}
-		d, e := s.Catalog.Get(in.DatabaseID)
-		if e != nil {
-			return nil, e
-		}
-		if d.Revision != in.Database.Revision {
-			return nil, errors.New("配置已变更，请刷新")
-		}
-		d.BusinessTools = in.Database.BusinessTools
-		if e = s.Catalog.Save(ctx, *d); e != nil {
-			return nil, e
-		}
-		saved, e := s.Catalog.Get(d.ID)
-		if e != nil {
-			return nil, e
-		}
-		return s.DatabaseView(ctx, *saved), nil
+		return nil, errors.New("命名查询功能已移除，请直接调用 query 编写 SELECT")
 	case "list_actions":
 		return s.InspectAction(ctx, in.DatabaseID, "")
 	case "describe_action":
@@ -326,6 +313,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		case "save_policy", "validate_policy":
 			d.Config = in.Database.Config
 		case "configure_mcp":
+			d.KnowledgeEnabled = in.Database.KnowledgeEnabled
 			d.MCPEnabled = in.Database.MCPEnabled
 			d.MCPPath = in.Database.MCPPath
 			d.Tools = in.Database.Tools
@@ -460,7 +448,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		if old.MCPEnabled != in.Database.MCPEnabled || old.MCPPath != in.Database.MCPPath || !reflect.DeepEqual(old.Tools, in.Database.Tools) || !reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if !reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) || old.MCPEnabled != in.Database.MCPEnabled || old.MCPPath != in.Database.MCPPath || !reflect.DeepEqual(old.Tools, in.Database.Tools) || !reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
 			if e := require("mcp.write"); e != nil {
 				return nil, e
 			}
@@ -468,7 +456,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
@@ -607,6 +595,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 }
 func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool) (any, error) {
+	return s.readKnowledge(ctx, in, full, drafts, 50)
+}
+func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool, limit int) (any, error) {
 	if full && in.ID == "" {
 		return nil, errors.New("需要知识 ID")
 	}
@@ -666,7 +657,7 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 			k.Content = ""
 		}
 		out = append(out, k)
-		if len(out) >= 50 {
+		if limit > 0 && len(out) >= limit {
 			break
 		}
 	}

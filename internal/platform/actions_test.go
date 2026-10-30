@@ -34,7 +34,7 @@ func setupAction(t *testing.T, confirm bool) (*fixture, context.Context) {
 	ctx := guard.WithBusiness(audit.With(context.Background(), audit.Metadata{Source: "test"}), a)
 	return f, ctx
 }
-func TestActionDurableIdempotencyAndPermission(t *testing.T) {
+func TestActionMemoryIdempotencyAndPermission(t *testing.T) {
 	f, ctx := setupAction(t, false)
 	args := map[string]any{"id": 1, "name": "after"}
 	out, e := f.app.InvokeAction(ctx, "default", "rename_item", "request-1", args)
@@ -52,16 +52,20 @@ func TestActionDurableIdempotencyAndPermission(t *testing.T) {
 	must(t, e)
 	must(t, tx.Commit())
 	writer.Close()
-	// Reopen management to represent a server restart; the receipt still wins.
-	other, e := management.Open(f.m.Path, f.a)
-	must(t, e)
-	defer other.Close()
-	app := *f.app
-	app.Management = other
-	again, e := app.InvokeAction(ctx, "default", "rename_item", "request-1", args)
+	// Replay within this runtime uses the in-memory receipt.
+	again, e := f.app.InvokeAction(ctx, "default", "rename_item", "request-1", args)
 	must(t, e)
 	if again.Status != "done" {
 		t.Fatal(again)
+	}
+	other, e := management.Open(f.m.Path, f.a)
+	must(t, e)
+	defer other.Close()
+	account, _ := guard.Business(ctx)
+	_, fresh, e := other.ReserveAction(ctx, management.ActionRequest{DatabaseID: "default", Actor: fmt.Sprintf("business:%d", account.ID), RequestID: "request-1", State: "running"})
+	must(t, e)
+	if !fresh {
+		t.Fatal("new runtime inherited a persisted receipt")
 	}
 	rows, e := f.st.Query(ctx, "SELECT name FROM items WHERE id=1", 1)
 	must(t, e)
@@ -137,7 +141,9 @@ func TestActionExpiredChangedAndRevokedConfirmation(t *testing.T) {
 			must(t, e)
 			switch mode {
 			case "expired":
-				_, e = sourceDB(t, f, "default").Exec("UPDATE ACTION_RECEIPT SET EXPIRES_=0")
+				rec, err := f.m.ActionToken(ctx, out.ConfirmationToken)
+				must(t, err)
+				e = f.m.TransitionAction(ctx, rec, "pending", "pending", rec.Data, rec.Token, 0)
 			case "config":
 				d, err := f.c.Get("default")
 				must(t, err)
@@ -311,8 +317,15 @@ func TestActionConcurrentInvokeAndUnknownReceipt(t *testing.T) {
 	if writes != 1 {
 		t.Fatal("repeated business execution", writes)
 	}
-	// Simulate a process crash after reserving a new request. Never reclaim it.
-	_, e = sourceDB(t, f, "default").Exec("UPDATE ACTION_RECEIPT SET STATE_='running',DATA_=json_remove(DATA_,'$.response') WHERE REQUEST_ID_='concurrent'")
+	// An unresolved request is never reclaimed during this runtime.
+	a, _ := guard.Business(ctx)
+	rec, _, e := f.m.ReserveAction(ctx, management.ActionRequest{DatabaseID: "default", Actor: fmt.Sprintf("business:%d", a.ID), RequestID: "concurrent"})
+	must(t, e)
+	var payload map[string]any
+	must(t, json.Unmarshal([]byte(rec.Data), &payload))
+	delete(payload, "response")
+	raw, _ := json.Marshal(payload)
+	e = f.m.TransitionAction(ctx, rec, "done", "running", string(raw), "", 0)
 	must(t, e)
 	if _, e = f.app.InvokeAction(ctx, "default", "rename_item", "concurrent", args); e == nil || !strings.Contains(e.Error(), "结果未知") {
 		t.Fatal(e)
@@ -333,9 +346,10 @@ func TestActionCommitsWithUnavailableAudit(t *testing.T) {
 	if rows.Rows[0]["name"] != "committed-without-audit" {
 		t.Fatal(rows)
 	}
-	var state string
-	must(t, sourceDB(t, f, "default").QueryRow("SELECT STATE_ FROM ACTION_RECEIPT WHERE REQUEST_ID_='audit-offline'").Scan(&state))
-	if state != "done" {
-		t.Fatal(state)
+	a, _ := guard.Business(ctx)
+	rec, _, e := f.m.ReserveAction(ctx, management.ActionRequest{DatabaseID: "default", Actor: fmt.Sprintf("business:%d", a.ID), RequestID: "audit-offline"})
+	must(t, e)
+	if rec.State != "done" {
+		t.Fatal(rec.State)
 	}
 }

@@ -64,7 +64,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS action_confirmation_token
 
 ## 迁移现有完整环境
 
-若目标是搬迁当前环境、保留全部配置和历史，则除业务库以外，还应一致性备份并迁移：全局 management.db / audit.db、各 data/databases/<ID>/management.db 与 audit.db、相应 credentials.key、OAuth 签名密钥及相应部署配置。`ACTION_RECEIPT` 应与各业务管理库一起保留，避免丢失幂等状态。
+若目标是搬迁当前环境、保留全部配置和历史，则除业务库以外，还应一致性备份并迁移：全局 management.db / audit.db、各 data/databases/<ID>/management.db 与 audit.db、相应 credentials.key、OAuth 签名密钥及相应部署配置。动作回执按当前方案只存 MCP 进程内存，重启清空；旧 ACTION_RECEIPT 表不再使用。
 
 管理库保存的是登记时的绝对业务文件路径。迁移后应保持可访问的路径/挂载，或在目标环境重新登记数据源并运行安装器；不能只复制到另一目录而保留失效的连接路径。MCP、OAuth 对外地址及数据库资源地址也要与新部署一致。
 

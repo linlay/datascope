@@ -70,6 +70,11 @@ func (c *Catalog) listSQLite(ctx context.Context) ([]Database, error) {
 		if e = json.Unmarshal([]byte(r.Data), &d); e != nil {
 			return nil, e
 		}
+		if d.Config != nil {
+			if e = d.Config.InlineFragments(); e != nil {
+				return nil, e
+			}
+		}
 		if check, ok := statuses[d.ID]; ok && (d.Discovery == nil || check.AttemptedAt.After(d.Discovery.AttemptedAt)) {
 			if d.Discovery == nil {
 				d.Discovery = &Discovery{}

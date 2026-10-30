@@ -211,7 +211,7 @@ func (s *QueryService) Execute(ctx context.Context, r *Rewritten, maxRows int) (
 	return s.Store.Query(ctx, r.RewrittenSQL, maxRows, r.args...)
 }
 
-// QueryWithParameters is reserved for configured tools, using named database bindings.
+// QueryWithParameters executes direct SELECT with explicit bound values.
 func (s *QueryService) QueryWithParameters(ctx context.Context, query string, userID int64, maxRows int, parameters map[string]any) (*Result, error) {
 	m := audit.From(ctx)
 	m.SubjectID = userID

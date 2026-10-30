@@ -30,7 +30,7 @@
 
 已有数据库修改时，database.id 必须等于 database_id，database.revision 必须是最近回读的正整数版本。update 只采用 database.name；mcp.save 只采用 database 中的 mcp_enabled、mcp_path、tools、business_tools；policy.save 见策略文档。其他字段不随局部动作修改。使用完整 database.save 时保留当前配置，服务端按名称、策略、MCP 部分的实际差异逐项检查 config.write/policy.write/mcp.write；文件路径与驱动保持原值。
 
-配置 MCP 前先完成策略并验证。基础 tools 允许 list_tables、describe_table、query、raw_query、customer_scope、search_knowledge、read_knowledge；raw_query 绕过行字段策略且需要单独权限，customer_scope 仅适用于证券样例库，按用户需要选择。mcp_path 是地址路径段，admin 为保留名称。不要在没有用户需求时开放全量查询。
+配置 MCP 前先完成策略并验证。基础 tools 允许 list_tables、describe_table、query、raw_query、customer_scope、list_actions、describe_action、invoke_action；raw_query 绕过行字段策略且需要单独权限，customer_scope 仅适用于证券样例库，按用户需要选择。mcp_path 是地址路径段，admin 为保留名称。不要在没有用户需求时开放全量查询。
 
 业务工具使用 business_tools 数组，每项为 `{name,description,sql,parameters}`。parameters 为参数名到 `{type,description}` 的映射；type 为 string/integer/number/boolean，SQL 使用 `:arg_参数名` 绑定，每个声明参数都必须被使用。业务 SQL 继续受服务端改写约束。
 
@@ -61,3 +61,5 @@
 
 
 认证连接来源：`authentication.source` 为 `GLOBAL`（或省略）时引用全局提供方；为 `DATABASE` 时必须同时给出 `authentication.provider` 和 `authentication.access`，且 `access.provider_id` 与本库提供方 ID 一致。独立提供方字段与全局 AuthProvider 相同，支持 BUSINESS_ACCOUNT、DEMO_OAUTH、ENTERPRISE_ACCOUNT_API、ENTERPRISE_OAUTH，禁止 PLATFORM_ACCOUNT。无需认证时使用 GLOBAL 且省略 provider / provider_id。本库连接只保存在该库的 management.db，失败不回退；企业密钥使用 DATASCOPE_AUTH_* 环境变量名。保存仍需要系统管理员和最新数据库版本。OAuth 资源发现自动发布最终选定的 issuer。
+
+知识使用独立 knowledge_enabled 开关，通过 prompts/list 和 prompts/get 提供，不是 tools 里的查询模板。旧 search_knowledge/read_knowledge 工具项仅用于读取旧配置时映射开关，业务 MCP 不再发布它们。

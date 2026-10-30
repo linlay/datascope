@@ -79,7 +79,7 @@ func (s *Store) migrateSources() error {
 		if _, e = s.DB.Exec("INSERT OR REPLACE INTO SOURCE_REGISTRY VALUES(?,?,?,'ACTIVE')", r.Key, d["name"], route); e != nil {
 			return e
 		}
-		for _, table := range []string{"PLATFORM_GRANT", "BUSINESS_ACCOUNT", "ACTION_RECEIPT"} {
+		for _, table := range []string{"PLATFORM_GRANT", "BUSINESS_ACCOUNT"} {
 			var exists int
 			if e = s.DB.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name=?", table).Scan(&exists); e != nil {
 				return e

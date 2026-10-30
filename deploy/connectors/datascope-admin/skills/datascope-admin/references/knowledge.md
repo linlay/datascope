@@ -23,3 +23,5 @@ search/list 最多返回 50 条描述；不支持 limit/offset，不能声称是
 写后用 get 验证正文、状态和 revision；仅在用户要求发布时设为 true。发布状态不意味着所有查询用户均可读取，读取权限继续由服务端判断。
 
 知识 description 支持多行，list/search 会完整提供给模型，不截断描述，不包含正文。旧 summary 输入仍可兼容，description（包括空字符串）优先；新调用统一使用 description，输出不再返回 summary。
+
+业务 MCP 的知识出口统一为 prompts/list（分页名称、ID、完整 description）和 prompts/get(name)（正文作为 user 文本消息）。不接受模板参数，Resources 留给 view。管理 MCP 的 list/get 用于编辑管理；工作台的 knowledge_prompt.list/get 复用相同读取与权限逻辑。

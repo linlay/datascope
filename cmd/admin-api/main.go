@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/envflag"
+	"datascope-server/internal/management"
 	"datascope-server/internal/managementmcp"
 	"datascope-server/internal/mcpserver"
 	"datascope-server/internal/oauth"
@@ -66,6 +68,7 @@ func run() error {
 	}
 	defer manager.Close()
 	defer manager.Audit.Close()
+	manager.Actions = management.RemoteActionMemory(envflag.String("ACTION_STATE_SOCKET", filepath.Join(filepath.Dir(manager.Path), "runtime", "actions.sock")))
 	catalogue, err := catalog.BootstrapManaged(context.Background(), manager, envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
 		return err

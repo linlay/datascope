@@ -133,6 +133,9 @@ var (
 )
 
 func (c *Config) compile() error {
+	if err := c.InlineFragments(); err != nil {
+		return err
+	}
 	if c.Version != 1 {
 		return fmt.Errorf("不支持的配置版本 %d", c.Version)
 	}
@@ -163,6 +166,35 @@ func (c *Config) compile() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// InlineFragments accepts old configurations once and returns self-contained
+// per-table SQL, retaining ${identity} bindings. Public fragment editing is gone.
+func (c *Config) InlineFragments() error {
+	type expanded struct{ sql, guard string }
+	values := make([]expanded, len(c.Tables))
+	for i, p := range c.Tables {
+		if p == nil {
+			continue
+		}
+		sql, err := c.expand(p.SQL, nil)
+		if err != nil {
+			return err
+		}
+		guard, err := c.expand(p.DenyUnless, nil)
+		if err != nil {
+			return err
+		}
+		values[i] = expanded{sql, guard}
+	}
+	for i, p := range c.Tables {
+		if p != nil {
+			p.SQL = values[i].sql
+			p.DenyUnless = values[i].guard
+		}
+	}
+	c.Fragments = nil
+	return nil
 }
 
 func (c *Config) compilePolicy(pol *Policy, schemes map[Scheme]bool) error {

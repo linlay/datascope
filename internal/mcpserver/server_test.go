@@ -3,14 +3,14 @@ package mcpserver
 import (
 	"context"
 	"database/sql"
+	"datascope-server/internal/catalog"
+	"datascope-server/internal/testutil"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
-	"datascope-server/internal/catalog"
-	"datascope-server/internal/testutil"
 	"strconv"
 	"testing"
 

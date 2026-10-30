@@ -2,11 +2,9 @@ package mcpserver
 
 import (
 	"context"
-	"datascope-server/internal/application"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
-	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"slices"
 	"strconv"
@@ -67,10 +65,13 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 					return nil, err
 				}
 			}
-			if tool == "search_knowledge" || tool == "read_knowledge" {
+			if method == "prompts/list" || method == "prompts/get" {
 				if err = guard.Require(ctx, h.opts.Management, d.ID, "knowledge.read"); err != nil {
 					return nil, err
 				}
+			}
+			if (method == "prompts/list" || method == "prompts/get") && h.opts.Application != nil {
+				return h.knowledgePrompts(ctx, method, req)
 			}
 			res, err := next(ctx, method, req)
 			if err == nil && method == "tools/list" {
@@ -99,26 +100,6 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 	})
 }
 
-type knowledgeSearchInput struct {
-	Query string `json:"query,omitempty"`
-}
-type knowledgeReadInput struct {
-	ID string `json:"id"`
-}
-
-func (h handlers) searchKnowledge(ctx context.Context, _ *mcp.CallToolRequest, in knowledgeSearchInput) (*mcp.CallToolResult, any, error) {
-	return h.knowledgeCall(ctx, "search_knowledge", application.Input{DatabaseID: h.opts.DatabaseID, Query: in.Query})
-}
-func (h handlers) readKnowledge(ctx context.Context, _ *mcp.CallToolRequest, in knowledgeReadInput) (*mcp.CallToolResult, any, error) {
-	return h.knowledgeCall(ctx, "read_knowledge", application.Input{DatabaseID: h.opts.DatabaseID, ID: in.ID})
-}
-func (h handlers) knowledgeCall(ctx context.Context, action string, in application.Input) (*mcp.CallToolResult, any, error) {
-	if h.opts.Application == nil {
-		return nil, nil, fmt.Errorf("知识服务未配置")
-	}
-	out, e := h.opts.Application.Call(ctx, action, in)
-	return nil, out, e
-}
 func (h handlers) businessID(ctx context.Context, req *mcp.CallToolRequest) (int64, error) {
 	if a, ok := guard.Business(ctx); ok && a.DatabaseID == h.opts.DatabaseID {
 		return a.BusinessUserID, nil

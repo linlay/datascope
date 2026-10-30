@@ -224,7 +224,7 @@ export interface Database {
  authentication?: {type:"local";label?:string;employee_directory?:boolean;access?:AuthPolicy;source?:'GLOBAL'|'DATABASE';provider?:AuthProvider};
  business_tools?:BusinessTool[];
  permissions?: string[]; business_user_id?: number;
- id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
+ id: string; name: string; driver: string; path: string; mcp_enabled: boolean; knowledge_enabled?:boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
  config: { version: number; schemes: SchemeInfo[]; fragments: Record<string,string>; tables: PolicyView[] };
 }
 export const databases = {
@@ -297,6 +297,9 @@ export const api = {
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
 
+export interface KnowledgePrompt {name:string;title:string;description:string}
+export interface KnowledgePrompts {prompts:KnowledgePrompt[];nextCursor?:string}
+export interface KnowledgePromptResult {description:string;messages:{role:string;content:{type:string;text:string}}[]}
 export interface Knowledge {id:string;database_id:string;name:string;description:string;content?:string;tables:string[];published:boolean;revision:number}
 
 export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}

@@ -1,11 +1,10 @@
 import { useI18n } from '../ui/preferences';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Checkbox, Col, Descriptions, Input, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { CodeOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
+import { HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { databases, type Annotation, type Column, type Database, type PolicyView, type SchemaChange, type TableSchema } from '../api';
 import { useAuth } from '../Auth';
-import { SqlFragments } from '../components/SqlFragments';
 import { TablePolicyEditor } from './DatabaseManager';
 import { setAllTableAccess } from '../tableAccess';
 import { IconButton } from '../components/IconButton';
@@ -16,7 +15,7 @@ const properties: Record<string,string> = { table:'表',column:'字段',comment:
 const date = (value?:string) => value && !value.startsWith('0001-') ? new Date(value).toLocaleString() : '';
 const changeKey = (change:SchemaChange) => JSON.stringify([change.table,change.column??'']);
 
-export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:()=>void;extraActions?:(state:{busy:boolean;dirty:boolean})=>ReactNode}) {
+export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  const t=useI18n();
  const { user } = useAuth();
  const [db,setDB] = useState<Database>();
@@ -26,15 +25,13 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
  const [busy,setBusy] = useState(false);
  const [dirty,setDirty] = useState(false);
  const [remoteChanged,setRemoteChanged] = useState(false);
- const [fragments,setFragments] = useState<Record<string,string>>({});
- const [fragmentsOpen,setFragmentsOpen] = useState(false);
  const [policyOptionsOpen,setPolicyOptionsOpen] = useState(false);
  const [report,setReport] = useState<number>();
  const [comparison,setComparison] = useState<'pending'|'history'>();
  const [choices,setChoices] = useState<Record<string,boolean>>({});
  const [editor,setEditor] = useState<{table:string;column:string;source:string;annotation:Annotation}>();
  const accept = (d:Database) => {
-  setDB(d);setDirty(false);setRemoteChanged(false);setFragments(d.config.fragments??{});
+  setDB(d);setDirty(false);setRemoteChanged(false);
   setActive(previous=>d.discovery?.tables?.some(tableInfo=>tableInfo.name===previous)?previous:d.discovery?.tables?.[0]?.name);
  };
  useEffect(()=>{let live=true;databases.get(id).then(d=>{if(live)accept(d)}).catch(e=>{if(live)setError(e.message)});return()=>{live=false}},[id]);
@@ -43,7 +40,7 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
  useEffect(()=>{
   let live=true;
   const timer=window.setInterval(()=>{
-   if(busy||editor||fragmentsOpen||policyOptionsOpen)return;
+   if(busy||editor||policyOptionsOpen)return;
    void databases.get(id).then(next=>{
     if(!live)return;
     if(!dirty){accept(next);return;}
@@ -55,7 +52,7 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
    }).catch(()=>undefined);
   },15000);
   return()=>{live=false;window.clearInterval(timer)};
- },[id,dirty,busy,editor,fragmentsOpen,policyOptionsOpen]);
+ },[id,dirty,busy,editor,policyOptionsOpen]);
  const run = async (work:()=>Promise<Database>,text:string|((d:Database)=>string)) => {
   setBusy(true);setError(undefined);
   try {const next=await work();accept(next);message.success(typeof text==='string'?text:text(next));onSaved();return true}
@@ -87,7 +84,7 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
  const editAnnotation = (table:string,column:string,source:string,a?:Annotation) => {setError(undefined);setEditor({table,column,source,annotation:a?{display_name:a.display_name,comment:a.comment}:{display_name:'',comment:null}})};
  const scan=()=>run(async()=>{const next=await databases.discover(id);if(next.discovery?.pending){setChoices({});setComparison('pending')}return next},next=>next.discovery?.pending?t("发现结构变化，请对比并确认"):t("检查完成，数据库结构一致"));
  const save=()=>run(async()=>{
-  return databases.save({...db,config:{...db.config,fragments}});
+  return databases.save(db);
  },t("表配置与权限已保存"));
  const diffColumns:ColumnsType<SchemaChange>=[
   {title:t("表 / 字段"),render:(_,change)=><Text code>{change.table}{change.column?`.${change.column}`:''}</Text>,width:200},
@@ -110,8 +107,6 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
     }}/>
     <IconButton label={t('检查表结构')} help={t('连接业务库检查表、字段和注释变化，发现后先对比确认。')} icon={<ScanOutlined/>} loading={busy} disabled={dirty||!can('config.write')} onClick={()=>void scan()}/>
     <IconButton label={t('变更记录')} icon={<HistoryOutlined/>} disabled={busy||reports.length===0} onClick={()=>setComparison('history')}/>
-    {extraActions?.({busy,dirty})}
-    <IconButton label={t('SQL 片段')} icon={<CodeOutlined/>} disabled={busy} onClick={()=>setFragmentsOpen(true)}/>
     <IconButton label={t('保存')} icon={<SaveOutlined/>} type="primary" loading={busy} disabled={!dirty||!can('policy.write')} onClick={()=>void save()}/>
    </Space>}>
     <Input.Search className="discovery-table-search" aria-label={t('搜索数据表')} placeholder={t('表名、名称或说明')} value={search} onChange={e=>setSearch(e.target.value)} allowClear/>
@@ -140,7 +135,6 @@ export function DiscoveryPage({ id, onSaved, extraActions }: {id:string;onSaved:
     </Space>}
    </Card></Col>
   </Row>
-  <SqlFragments value={fragments} open={fragmentsOpen} disabled={busy||!can('policy.write')} onClose={()=>setFragmentsOpen(false)} onApply={next=>{setFragments(next);setDirty(true)}}/>
   <Modal width={1120} title={comparison==='pending'?t("数据库结构变化对比"):t("结构变更记录")} open={!!comparison} onCancel={()=>setComparison(undefined)} okText={t("确认并更新配置")} confirmLoading={busy} okButtonProps={{disabled:dirty||!pending||!can('config.write')||!can('policy.write')}} onOk={async()=>{
    if(!pending)return;
    const resolutions=pending.changes.filter(c=>c.property==='comment'&&c.manual!==undefined).map(c=>({table:c.table,column:c.column,follow_source:choices[changeKey(c)]??false}));

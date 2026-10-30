@@ -243,7 +243,7 @@ func TestBusinessAccountManagementAndKnowledge(t *testing.T) {
 	session, e := mcp.NewClient(&mcp.Implementation{Name: "business-knowledge", Version: "1"}, nil).Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: env.resource + "/default", HTTPClient: &http.Client{Transport: bearer{token: tokens["access"]}}, DisableStandaloneSSE: true}, nil)
 	must(t, e)
 	defer session.Close()
-	out, e := callMCP(t, session, "read_knowledge", map[string]any{"id": "business-guide"})
+	out, e := session.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "business-guide"})
 	must(t, e)
 	raw, _ := json.Marshal(out)
 	if !strings.Contains(string(raw), "员工独立认证知识正文") {
