@@ -352,6 +352,12 @@ details > summary {
 .action-list-item strong {font-size:14px;font-weight:400;}
 .action-list-item span {font-size:12px;line-height:18px;color:var(--muted);}
 .action-list-item:disabled {cursor:default;}
+.resource-list-row {position:relative;min-width:0;}
+.resource-list-row>.action-list-item,.resource-list-row>.knowledge-list-item {padding-inline-end:58px;}
+.resource-publication {position:absolute;inset-inline-end:8px;top:10px;display:flex;align-items:center;}
+.content-field-header {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
+.content-language {font-size:12px;color:var(--muted);margin-inline-start:6px;}
+.resource-description {grid-column:1 / -1;}
 .action-editor-panel {min-width:0;}
 .action-editor-panel .ant-card-head-wrapper {flex-wrap:wrap;gap:8px;padding-block:8px;}
 .action-editor-panel .ant-card-head-title {white-space:normal;padding:0;}

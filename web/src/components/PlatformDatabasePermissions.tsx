@@ -1,3 +1,4 @@
+import { useSaveModalProps } from './IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Form, InputNumber, Modal, Space, Table, Typography, message } from 'antd';
 import { databases, managementCall, type Database } from '../api';
@@ -14,6 +15,7 @@ interface Grant { user_id: number; database_id: string; permissions: string[]; b
 interface Entry { database: Database; grant?: Grant; error?: string }
 
 export function PlatformDatabasePermissions({ user, onClose }: { user?: PlatformUser; onClose: () => void }) {
+ const saveModalProps = useSaveModalProps();
  const t = useI18n();
  const [entries, setEntries] = useState<Entry[]>([]);
  const [loading, setLoading] = useState(false);
@@ -64,7 +66,7 @@ export function PlatformDatabasePermissions({ user, onClose }: { user?: Platform
     ]} />
    </Space>
   </Modal>
-  <Modal title={t('设置权限 · {0}', { '0': editing?.database.name || '' })} open={!!editing} onCancel={() => setEditing(undefined)} onOk={() => void save()} confirmLoading={saving} width={640}>
+  <Modal {...saveModalProps} title={t('设置权限 · {0}', { '0': editing?.database.name || '' })} open={!!editing} onCancel={() => setEditing(undefined)} onOk={() => void save()} confirmLoading={saving} width={640}>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
    <Form form={form} layout="vertical">
     <Form.Item name="business_user_id" label={t('业务身份编号（0 表示未绑定）')}><InputNumber min={0} precision={0} /></Form.Item>

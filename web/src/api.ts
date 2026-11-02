@@ -207,7 +207,7 @@ export interface Discovery { pending?:PendingDiscovery;version:number; checked_a
 export interface ActionParameter { type: "string"|"integer"|"number"|"boolean"; description: string; optional?: boolean; enum?: unknown[]; min?: number; max?: number; max_length?: number; pattern?: string }
 export interface ViewDefinition { id:string; name:string; description:string; type:"view"; html:string; published:boolean }
 export interface ViewResource { uri:string; name:string; title?:string; description?:string; mimeType?:string; _meta?:{type?:string} }
-export interface ActionDefinition { view_id?:string; name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
+export interface ActionDefinition { published?:boolean; view_id?:string; name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
 export interface ActionLibrary { name: string; title: string; description: string; script: string }
 export interface ActionSchema { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, {type:string;description?:string;enum?:unknown[];minimum?:number;maximum?:number;maxLength?:number;pattern?:string}> }
 export interface ActionDescription { view_id?:string; view_uri?:string; name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }

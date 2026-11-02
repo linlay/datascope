@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { IconButton, SaveButton } from './IconButton';
 import { Alert, Button, Empty, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
 import { databases, managementCall, type ActionLibrary, type Database } from '../api';
 import { CodeEditor } from './CodeEditor';
@@ -62,16 +64,16 @@ export function ActionLibraries({ db, disabled, onSaved }: { db: Database; disab
  return <>
   <Button size="small" disabled={disabled} onClick={() => { setBase(db); edit(db.action_libraries?.[0],false,false); }}>{t('公共函数')}</Button>
   <Modal title={t('动作公共函数')} open={open} width={1040} onCancel={() => navigate(() => setRouteParams({library:undefined},false,true))} footer={<Space>
-   <Button disabled={busy} onClick={reload}>{t('重新载入')}</Button>
+   <IconButton label={t('刷新')} icon={<ReloadOutlined />} disabled={busy} onClick={reload} />
    <Button disabled={busy} onClick={() => navigate(() => setRouteParams({library:undefined},false,true))}>{t('关闭')}</Button>
-   <Button type="primary" loading={busy} disabled={!canWrite || !dirty} onClick={() => void save()}>{t('保存公共函数')}</Button>
+   <SaveButton loading={busy} disabled={!canWrite || !dirty} onClick={() => void save()} />
   </Space>} styles={{ body: { maxHeight: '74vh', overflowY: 'auto' } }}>
    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
     <Typography.Paragraph type="secondary">{t('使用 export 导出函数，在动作或其他库中通过 import { fn1, fn2 as alias } from "库名称" 引用。仅加载当前数据库被引用的模块。')}</Typography.Paragraph>
     <Space wrap>
      <Select aria-label={t('选择公共函数')} style={{ width: 300 }} value={selectedName} placeholder={t('选择公共函数')} disabled={busy} options={items.map(item => ({ value: item.name, label: `${item.title} · ${item.name}` }))} onChange={name => navigate(() => edit(items.find(item => item.name === name),false,false))} />
-     <Button disabled={!canWrite || busy || creating} onClick={() => navigate(() => edit({ ...example }, true))}>{t('新增公共函数')}</Button>
-     {draft && <Button danger disabled={!canWrite || busy} onClick={() => Modal.confirm({ title: t('删除公共函数？'), content: t('仍被动作或其他库引用的公共库不能删除。'), onOk: () => creating ? edit(items[0]) : persist(items.filter(item => item.name !== selectedName)) })}>{t('删除')}</Button>}
+     <IconButton label={t('新增公共函数')} icon={<PlusOutlined />} disabled={!canWrite || busy || creating} onClick={() => navigate(() => edit({ ...example }, true))} />
+     {draft && <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={!canWrite || busy} onClick={() => Modal.confirm({ title: t('删除公共函数？'), content: t('仍被动作或其他库引用的公共库不能删除。'), onOk: () => creating ? edit(items[0]) : persist(items.filter(item => item.name !== selectedName)) })} />}
     </Space>
     {error && <Alert type="error" showIcon title={error} />}
     {draft ? <Form name="action-library" form={form} layout="vertical" disabled={!canWrite || busy} onValuesChange={(_, values) => setDraft(values)}>

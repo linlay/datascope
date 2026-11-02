@@ -58,14 +58,8 @@ function KnowledgeWorkflow({ databaseID }: { databaseID: string }) {
  const items = searchResult?.data ? entries.filter(item=>`${item.name} ${item.title} ${item.description}`.toLowerCase().includes(query.toLowerCase())) : undefined;
  const document = readResult?.data;
 
- return <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-  <Space wrap size="small">
-   <Tag>{t('MCP 流程模拟')}</Tag>
-   <Typography.Text type="secondary">{t('查询列表 → 选择 ID → 读取正文')}</Typography.Text>
-   <Space size={4}><Typography.Text type="secondary">{t('当前平台权限')}</Typography.Text><HelpTip label={t('模拟身份')}>{t('复用业务 MCP 的知识检索逻辑，使用当前平台账号权限。业务账号的实际可见范围需通过业务 MCP 登录验证。')}</HelpTip></Space>
-  </Space>
-  <div className="knowledge-call-workspace">
-   <Card size="small" className="knowledge-call-panel knowledge-search-step" title={t('1. 查询知识列表')} extra={<Typography.Text code>prompts/list</Typography.Text>}>
+ return <div className="knowledge-call-workspace">
+   <Card size="small" className="knowledge-call-panel knowledge-search-step" title={<Space size={4}>{t('1. 查询知识列表')}<HelpTip label={t('模拟身份')}>{t('复用业务 MCP 的知识检索逻辑，使用当前平台账号权限。业务账号的实际可见范围需通过业务 MCP 登录验证。')}</HelpTip></Space>} extra={<Typography.Text code>prompts/list</Typography.Text>}>
     <form className="knowledge-call-form" onSubmit={event => { event.preventDefault(); void search(); }}>
      <Input aria-label={t('查询知识')} placeholder={t('筛选已加载的知识描述')} value={query} allowClear onChange={event => setQuery(event.target.value)} />
      <Button type="primary" htmlType="submit" loading={searching}>{t('查询列表')}</Button>
@@ -101,6 +95,5 @@ function KnowledgeWorkflow({ databaseID }: { databaseID: string }) {
      ]} /> : !readResult?.error && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('先查询列表，再选择 ID 并点击读取正文。')} />}
     </Spin>
    </Card>
-  </div>
- </Space>;
+ </div>;
 }

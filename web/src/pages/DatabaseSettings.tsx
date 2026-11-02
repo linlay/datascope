@@ -1,3 +1,4 @@
+import { SaveButton } from '../components/IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Input, Modal, Space, Typography, message } from 'antd';
 import { managementCall, type Database } from '../api';
@@ -31,7 +32,7 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
     <DatabaseClone db={db} onSaved={onSaved} />
     <Button onClick={() => setDetailsOpen(true)}>{t('存储详情')}</Button>
     <Button loading={busy} onClick={() => void run(() => managementCall('test_connection', { database_id: db.id }), t('数据库连接正常'))}>{t('测试连接')}</Button>
-    <Button type="primary" loading={busy} disabled={!can('config.write') || !name.trim() || name === db.name} onClick={() => void run(() => managementCall('update_database', { database_id: db.id, database: { id: db.id, revision: db.revision, name: name.trim() } }), t('数据库名称已保存'))}>{t('保存')}</Button>
+    <SaveButton type="primary" loading={busy} disabled={!can('config.write') || !name.trim() || name === db.name} onClick={() => void run(() => managementCall('update_database', { database_id: db.id, database: { id: db.id, revision: db.revision, name: name.trim() } }), t('数据库名称已保存'))} />
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      <div><Typography.Text>{t('显示名称')}</Typography.Text><Input aria-label={t('数据库显示名称')} style={{ marginTop: 8, maxWidth: 480, display: 'block' }} value={name} disabled={!can('config.write')} onChange={e => setName(e.target.value)} /></div>

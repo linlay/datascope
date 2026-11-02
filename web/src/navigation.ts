@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect } from 'react';
 import { Modal } from 'antd';
 
-export type Page = 'database' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'sql' | 'table' | 'mcp' | 'audit';
+export type Page = 'database' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql' | 'table' | 'mcp' | 'audit';
 export interface Route { page: Page; selection?: string; params: URLSearchParams }
-const pages: Page[] = ['database', 'tables', 'actions', 'views', 'knowledge', 'knowledge-workbench', 'action-workbench', 'sql', 'table', 'mcp', 'audit'];
+const pages: Page[] = ['database', 'tables', 'actions', 'views', 'knowledge', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'sql', 'table', 'mcp', 'audit'];
 const aliases: Record<string, Page> = { data: 'table', discovery: 'tables', policies: 'tables', access: 'database' };
 
 export function readRoute(hash = window.location.hash): Route {

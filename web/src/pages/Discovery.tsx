@@ -1,13 +1,13 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Checkbox, Col, Descriptions, Input, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
+import { EditOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { databases, type Annotation, type Column, type Database, type PolicyView, type SchemaChange, type TableSchema } from '../api';
 import { useAuth } from '../Auth';
 import { TablePolicyEditor } from './DatabaseManager';
 import { setAllTableAccess } from '../tableAccess';
-import { IconButton } from '../components/IconButton';
+import { IconButton, useSaveModalProps } from '../components/IconButton';
 import { navigate, selectResource, useNavigationBlocker, useRoute } from '../navigation';
 
 const { Text } = Typography;
@@ -17,6 +17,7 @@ const date = (value?:string) => value && !value.startsWith('0001-') ? new Date(v
 const changeKey = (change:SchemaChange) => JSON.stringify([change.table,change.column??'']);
 
 export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
+ const saveModalProps = useSaveModalProps();
  const t=useI18n();
  const route=useRoute();
  const { user } = useAuth();
@@ -124,7 +125,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
      {title:<Tooltip title={`${t(allTablesEnabled?'全部关闭':'全部开放')}：${t('作用于当前数据库的全部已登记表，保存后生效。')}`}><Checkbox className="discovery-table-access-header" aria-label={t('全部表开放')} checked={allTablesEnabled} indeterminate={enabledTableCount>0&&!allTablesEnabled} disabled={busy||!can('policy.write')||tables.length===0} onChange={e=>setAllEnabled(e.target.checked)}>{t('开放')}</Checkbox></Tooltip>,width:80,render:(_,tableInfo)=><Switch size="small" aria-label={t("开放表 {0}", {"0":(tableInfo.name)})} disabled={busy||!can('policy.write')} checked={db.config.tables.find(p=>p.table.toLowerCase()===tableInfo.name.toLowerCase())?.enabled!==false} onClick={(_,e)=>e.stopPropagation()} onChange={enabled=>setPolicy(tableInfo.name,{enabled})}/>},
     ]}/>
    </Card></Col>
-   <Col xs={24} xl={16}><Card title={current?t("表与字段 · {0}", {"0":(annotation?.display_name||current.name)}):t("选择数据表")} extra={current&&<Space><Button aria-label={t("编辑表名称与注释")} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,'',current.comment,annotation)}>{t("编辑")}</Button>{can('raw_query')&&<Button onClick={()=>{navigate('table',current.name)}}>{t("浏览数据")}</Button>}</Space>}>
+   <Col xs={24} xl={16}><Card title={current?t("表与字段 · {0}", {"0":(annotation?.display_name||current.name)}):t("选择数据表")} extra={current&&<Space><IconButton label={t("编辑表名称与注释")} icon={<EditOutlined />} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,'',current.comment,annotation)} />{can('raw_query')&&<Button onClick={()=>{navigate('table',current.name)}}>{t("浏览数据")}</Button>}</Space>}>
     {current&&<Space orientation="vertical" size="middle" style={{width:'100%'}}>
      <Descriptions size="small" column={{xs:1,md:2}} items={[
       {key:'name',label:t("名称"),children:annotation?.display_name||current.name},
@@ -138,7 +139,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
       {title:t("字段 / 类型"),render:(_,c)=><><Text code>{c.name}</Text>{c.primary_key&&<Tag color="gold">{t("主键")}</Tag>}<div><Text type="secondary">{c.type}{c.not_null?t(" · 非空"):''}</Text></div></>},
       {title:t("名称"),render:(_,c)=>annotation?.columns?.[c.name]?.display_name||c.name},
       {title:t("注释"),render:(_,c)=>(annotation?.columns?.[c.name]?.comment??c.comment)||<Text type="secondary">{t("（空）")}</Text>},
-      {title:t("操作"),width:70,render:(_,c)=><Button type="link" size="small" aria-label={t("编辑字段 {0}",{"0":c.name})} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,c.name,c.comment,annotation?.columns?.[c.name])}>{t("编辑")}</Button>},
+      {title:t("操作"),width:70,render:(_,c)=><IconButton label={t("编辑字段 {0}",{"0":c.name})} icon={<EditOutlined />} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,c.name,c.comment,annotation?.columns?.[c.name])} />},
      ]}/>
     </Space>}
    </Card></Col>
@@ -153,7 +154,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
    <Table<SchemaChange> rowKey={change=>JSON.stringify([change.table,change.column,change.property,change.kind])} size="small" dataSource={changes} pagination={false} scroll={{x:950,y:'min(56vh, 600px)'}} columns={diffColumns}/>
    {error&&<Alert type="error" title={error}/>}
   </Modal>
-  <Modal title={t("编辑名称与注释 · {0}{1}", {"0":(editor?.table??''),"1":(editor?.column?`.${editor.column}`:'')})} open={!!editor} confirmLoading={busy} onCancel={()=>setEditor(undefined)} onOk={async()=>{if(!editor)return;const value=editor;if(await run(()=>databases.annotate(id,value.table,value.column,db.revision,value.annotation),t("名称与说明已保存")))setEditor(undefined)}} okText={t("保存")}>
+  <Modal title={t("编辑名称与注释 · {0}{1}", {"0":(editor?.table??''),"1":(editor?.column?`.${editor.column}`:'')})} open={!!editor} confirmLoading={busy} onCancel={()=>setEditor(undefined)} onOk={async()=>{if(!editor)return;const value=editor;if(await run(()=>databases.annotate(id,value.table,value.column,db.revision,value.annotation),t("名称与说明已保存")))setEditor(undefined)}} {...saveModalProps}>
    {error&&<Alert type="error" showIcon title={error} style={{marginBottom:12}}/>}
    {editor&&<Space orientation="vertical" style={{width:'100%'}}>
     <Descriptions size="small" column={1} items={[

@@ -61,7 +61,13 @@ func (s *Service) DescribeAction(ctx context.Context, database, name string) (an
 	if !d.MCPEnabled || !d.WriteEnabled {
 		return nil, management.ErrDenied
 	}
-	out, err := describeActions(d.Actions, name)
+	definitions := make([]action.Definition, 0, len(d.Actions))
+	for _, a := range d.Actions {
+		if a.IsPublished() {
+			definitions = append(definitions, a)
+		}
+	}
+	out, err := describeActions(definitions, name)
 	if err == nil && name != "" {
 		for _, a := range d.Actions {
 			if a.Name == name && a.ViewID != "" {
@@ -124,6 +130,9 @@ func (s *Service) actionDefinition(ctx context.Context, database, name string, l
 	}
 	for _, a := range d.Actions {
 		if a.Name == name {
+			if liveMCP && !a.IsPublished() {
+				return nil, action.Definition{}, management.ErrDenied
+			}
 			return d, a, nil
 		}
 	}

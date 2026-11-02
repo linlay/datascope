@@ -1,3 +1,5 @@
+import { ReloadOutlined } from '@ant-design/icons';
+import { IconButton } from '../components/IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import { Alert, Button, Card, Col, Collapse, DatePicker, Descriptions, Empty, Form, Input, Row, Select, Space, Table, Tag, Typography } from 'antd';
@@ -113,7 +115,7 @@ export function AuditPage({databases}:{databases:Database[]}){
     <Space style={{marginTop:12}}><Button type="primary" htmlType="submit" loading={busy}>{t('查询')}</Button><Button disabled={busy} onClick={()=>{form.resetFields();apply({database:defaultScope})}}>{t('重置')}</Button></Space>
    </Form>
   </Card>
-  <Card title={t('日志记录')} extra={<Button loading={busy} onClick={()=>setQuery(old=>({...old,refresh:old.refresh+1}))}>{t('刷新')}</Button>}>
+  <Card title={t('日志记录')} extra={<IconButton label={t('刷新')} icon={<ReloadOutlined />} loading={busy} onClick={()=>setQuery(old=>({...old,refresh:old.refresh+1}))} />}>
    {error&&<Alert type="error" showIcon title={t('日志查询失败')} description={error} style={{marginBottom:12}}/>}
    <Table<AuditEvent> rowKey="id" size="small" loading={busy} dataSource={result?.items??[]} scroll={{x:1100}} locale={{emptyText:<Empty description={t('没有符合条件的日志')}/>}} pagination={{current:query.page,pageSize:query.size,total:result?.total??0,showSizeChanger:true,pageSizeOptions:[20,50,100,200],showTotal:total=>t('共 {count} 条',{count:total}),onChange:(page,size)=>setQuery(old=>({...old,page:size===old.size?page:1,size}))}} columns={[
     {title:t('时间'),dataIndex:'started_at',width:180,render:value=>new Date(value).toLocaleString()},

@@ -1,3 +1,4 @@
+import { SaveButton, useSaveModalProps } from './IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Checkbox, Typography, message } from 'antd';
 import { databases, managementCall, type AuthConfig, type AuthPolicy, type AuthProvider, type Database } from '../api';
@@ -16,6 +17,7 @@ const optionalFields = [
 ] as const;
 
 export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved: () => void }) {
+ const saveModalProps = useSaveModalProps();
  const t = useI18n();
  const { user } = useAuth();
  const [optionsOpen, setOptionsOpen] = useState(false);
@@ -75,7 +77,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
  const metadataURL = `${endpoint.origin}/.well-known/oauth-protected-resource${endpoint.pathname}`;
  return <>
   <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-   <Card title={t('业务认证')} extra={user.system_admin ? <Space><Button disabled={!dirty || busy} onClick={() => { setDraft(undefined); setError(''); }}>{t('取消')}</Button><Button type="primary" loading={busy} disabled={!dirty || mode !== 'NONE' && !selectedProvider?.enabled} onClick={() => void saveMode()}>{t('保存')}</Button></Space> : undefined}>
+   <Card title={t('业务认证')} extra={user.system_admin ? <Space><Button disabled={!dirty || busy} onClick={() => { setDraft(undefined); setError(''); }}>{t('取消')}</Button><SaveButton type="primary" loading={busy} disabled={!dirty || mode !== 'NONE' && !selectedProvider?.enabled} onClick={() => void saveMode()} /></Space> : undefined}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {error && !optionsOpen && <Alert type="error" showIcon title={error} />}
      <Radio.Group aria-label={t('认证方式')} value={mode} disabled={!user.system_admin || busy} onChange={e => changeMode(e.target.value)} options={[{ value: 'NONE', label: t('无需认证') }, { value: 'ACCOUNT', label: t('账号密码（Token）') }, { value: 'OAUTH', label: 'OAuth' }]} />
@@ -104,7 +106,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
    </Card>
    {usesAccounts && user.system_admin && <Card title={t('本地账号')}><BusinessAccounts key={db.id} db={db}/></Card>}
   </Space>
-  <Modal title={t('登录选项')} open={optionsOpen} onCancel={() => setOptionsOpen(false)} onOk={() => void saveOptions()} confirmLoading={busy} destroyOnHidden>
+  <Modal {...saveModalProps} title={t('登录选项')} open={optionsOpen} onCancel={() => setOptionsOpen(false)} onOk={() => void saveOptions()} confirmLoading={busy} destroyOnHidden>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
    <Form form={form} layout="vertical">
     <Form.Item name="label" label={t('登录页名称')}><Input maxLength={40} placeholder={db.name} /></Form.Item>

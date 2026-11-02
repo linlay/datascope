@@ -1,6 +1,7 @@
+import { SaveButton } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
 import { databases, managementCall, type Database } from '../api';
 
 const { Text } = Typography;
@@ -90,7 +91,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
       <Card title={<Space>{t("MCP 配置")}<Switch size="small" aria-label={t("开启 MCP")} disabled={!db.permissions?.includes('mcp.write') || saving} checked={enabled} onChange={setEnabled} /></Space>} extra={
         <Space>
           {dirty && <Tag color="orange">{t("有未保存修改")}</Tag>}
-          <Button type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || !writeAccountValid} onClick={save}>{t("保存并生效")}</Button>
+          <SaveButton type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || !writeAccountValid} onClick={save} />
         </Space>
       }>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
