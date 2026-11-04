@@ -1,5 +1,17 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "字段 {field} 的脱敏规则": "Masking rule for {field}",
+ "预览字段 {field} 的脱敏效果": "Preview masking for {field}",
+ "字段 {field} 保留前几位": "Visible prefix length for {field}",
+ "字段 {field} 保留后几位": "Visible suffix length for {field}",
+ "保留前": "Keep first",
+ "后": "last",
+ "位": "characters",
+ "查询结果不返回此字段": "Omitted from query results",
+ "相同值返回稳定摘要": "Equal values return a stable digest",
+ "直接选择字段脱敏规则，调整后保存配置生效。": "Choose a masking rule for each field, then save to apply your changes.",
+ "名称与说明": "Name and description",
+
  "全量行范围，字段按配置脱敏": "All rows; field masking applies",
  "字段权限与脱敏": "Field access and masking",
  "不脱敏": "No masking",

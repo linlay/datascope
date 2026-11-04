@@ -2,7 +2,7 @@ GOPROXY ?= https://goproxy.cn,direct
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 
-.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build build-linux test test-network clean init init-shop install-demo-actions migrate-state
+.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build build-linux test test-network clean init init-shop install-demo-actions install-demo-masking migrate-state
 
 # 三个服务分别在三个终端启动：MCP server、后台 API、前端。
 run-mcp:
@@ -24,6 +24,7 @@ build:
 	$(GO_ENV) go build -o bin/mcp-server ./cmd/mcp-server
 	$(GO_ENV) go build -o bin/admin-api ./cmd/admin-api
 	$(GO_ENV) go build -o bin/install-demo-actions ./cmd/install-demo-actions
+	$(GO_ENV) go build -o bin/install-demo-masking ./cmd/install-demo-masking
 	$(GO_ENV) go build -o bin/migrate-state ./cmd/migrate-state
 	$(GO_ENV) go build -o bin/gen-data ./cmd/gen-data
 	$(GO_ENV) go build -o bin/gen-shop ./cmd/gen-shop
@@ -39,6 +40,7 @@ build-linux:
 	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/mcp-server ./cmd/mcp-server
 	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/admin-api ./cmd/admin-api
 	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/install-demo-actions ./cmd/install-demo-actions
+	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/install-demo-masking ./cmd/install-demo-masking
 	cd web && npm run build
 
 # Skips any vendor without DATASCOPE_INTEGRATION_<DRIVER> configuration.
@@ -54,6 +56,10 @@ init:
 
 init-shop:
 	$(GO_ENV) go run ./cmd/gen-shop
+
+# 为已登记证券演示库的六个字段补充脱敏示例，不覆盖已有规则。
+install-demo-masking:
+	$(LOAD_ENV) $(GO_ENV) go run ./cmd/install-demo-masking
 
 # 显式为已登记证券演示库安装18种 Action，并向三个演示业务账号授权。
 install-demo-actions:

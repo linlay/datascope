@@ -449,3 +449,10 @@ details > summary {
 .view-list-item>strong {grid-column:1;grid-row:1;min-width:0;}
 .view-list-item>.view-entry-id {grid-column:1 / -1;grid-row:2;min-width:0;}
 .view-list-item>.view-entry-status {grid-column:2;grid-row:1;align-self:start;margin:0;padding-inline:5px;font-size:11px;line-height:18px;}
+
+.discovery-fields-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.field-masking-control {display:flex;flex-direction:column;gap:6px;max-width:260px;}
+.field-masking-choice {display:flex;align-items:center;gap:4px;}
+.field-masking-choice .ant-select {flex:1;min-width:145px;}
+.field-masking-choice .ant-btn {padding-inline:6px;}
+.field-masking-control .ant-input-number {width:60px;}

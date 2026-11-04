@@ -8,6 +8,10 @@ export const maskingLabels: Record<Masking['type'], string> = {
  none:'不脱敏', full:'全部遮盖', partial:'部分遮盖', omit:'不返回', hmac:'哈希脱敏',
 };
 
+export function defaultMasking(type:Masking['type'], field:string):Masking {
+ return type==='partial'?{type,keep_prefix:/name/i.test(field)?1:3,keep_suffix:/name/i.test(field)?0:4}:{type};
+}
+
 export function MaskingEditor({table,column,onCancel,onApply}: {
  table:string;column:Column;onCancel:()=>void;onApply:(rule?:Masking)=>void;
 }) {
@@ -28,7 +32,7 @@ export function MaskingEditor({table,column,onCancel,onApply}: {
    ]}/>
    <Space orientation="vertical" size={4} style={{width:'100%'}}>
     <Text>{t('脱敏规则')}</Text>
-    <Select aria-label={t('脱敏规则')} style={{width:'100%'}} value={rule.type} options={Object.entries(maskingLabels).map(([value,label])=>({value,label:t(label)}))} onChange={type=>setRule(type==='partial'?{type,keep_prefix:3,keep_suffix:4}:{type})}/>
+    <Select aria-label={t('脱敏规则')} style={{width:'100%'}} value={rule.type} options={Object.entries(maskingLabels).map(([value,label])=>({value,label:t(label)}))} onChange={type=>setRule(defaultMasking(type,column.name))}/>
    </Space>
    {rule.type==='partial'&&<Space wrap size="large">
     <Space><Text>{t('保留前几位')}</Text><InputNumber aria-label={t('保留前几位')} min={0} max={100} precision={0} value={prefix} onChange={value=>setRule({...rule,keep_prefix:value??0})}/></Space>
