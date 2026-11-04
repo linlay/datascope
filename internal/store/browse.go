@@ -37,7 +37,14 @@ type BrowseResult struct {
 
 // Browse returns a page of rows from a table, unfiltered by business
 // permissions (the super-admin view).
-func (s *Store) Browse(ctx context.Context, opts BrowseOptions) (*BrowseResult, error) {
+func (s *Store) Browse(ctx context.Context, opts BrowseOptions) (out *BrowseResult, err error) {
+	defer func() {
+		if err == nil && out != nil {
+			if e := s.maskBrowse(out); e != nil {
+				out, err = nil, e
+			}
+		}
+	}()
 	if s.engine != nil {
 		return s.remoteBrowse(ctx, opts)
 	}

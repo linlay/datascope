@@ -30,12 +30,14 @@ const (
 
 // Store is the shared execution facade; engine selects the network SQL adapter.
 type Store struct {
-	Annotations  map[string]TableAnnotation
-	engine       *dialect.Engine
-	Audit        *audit.Store
-	db           *sql.DB
-	path         string
-	queryTimeout time.Duration
+	RegisteredSchema []TableSchema
+	MaskingKey       []byte
+	Annotations      map[string]TableAnnotation
+	engine           *dialect.Engine
+	Audit            *audit.Store
+	db               *sql.DB
+	path             string
+	queryTimeout     time.Duration
 }
 
 // Open opens path in read-only mode with query_only enforced on every
@@ -97,11 +99,21 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 	maxRows = min(maxRows, HardMaxRows)
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
+	stmt, plan, err := s.prepareMasking(stmt)
+	if err != nil {
+		return nil, err
+	}
 	result, err := s.read(ctx, maxRows, stmt, args...)
+	if err == nil {
+		err = s.applyMasking(result, plan)
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("查询超过 %s 被中断", s.queryTimeout)
 	}
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // QueryBool runs trusted SQL returning one value and reports whether it is
@@ -169,11 +181,21 @@ func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRo
 	if err != nil {
 		return nil, err
 	}
+	body, plan, err := s.prepareMasking(body)
+	if err != nil {
+		return nil, err
+	}
 	result, err := s.read(ctx, maxRows, body, args...)
+	if err == nil {
+		err = s.applyMasking(result, plan)
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("查询超过 %s 被中断", s.queryTimeout)
 	}
-	return result, err
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // TableNames lists user tables in name order.
@@ -430,14 +452,15 @@ func (s *Store) sourceTables(ctx context.Context) ([]Table, error) {
 
 // Column describes one column of a table.
 type Column struct {
-	DisplayName string  `json:"display_name,omitempty" yaml:"displayName,omitempty"`
-	Name        string  `json:"name" yaml:"name"`
-	Type        string  `json:"type" yaml:"type"`
-	NotNull     bool    `json:"not_null" yaml:"notNull"`
-	PrimaryKey  bool    `json:"primary_key" yaml:"primaryKey"`
-	Default     *string `json:"default,omitempty" yaml:"default,omitempty"`
-	References  string  `json:"references,omitempty" yaml:"references,omitempty"`
-	Comment     string  `json:"comment" yaml:"comment"`
+	Masking     *Masking `json:"masking,omitempty" yaml:"masking,omitempty"`
+	DisplayName string   `json:"display_name,omitempty" yaml:"displayName,omitempty"`
+	Name        string   `json:"name" yaml:"name"`
+	Type        string   `json:"type" yaml:"type"`
+	NotNull     bool     `json:"not_null" yaml:"notNull"`
+	PrimaryKey  bool     `json:"primary_key" yaml:"primaryKey"`
+	Default     *string  `json:"default,omitempty" yaml:"default,omitempty"`
+	References  string   `json:"references,omitempty" yaml:"references,omitempty"`
+	Comment     string   `json:"comment" yaml:"comment"`
 }
 
 // TableSchema is the full description of a table.

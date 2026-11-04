@@ -12,7 +12,9 @@ export interface TableInfo {
   scheme: Scheme;
 }
 
+export interface Masking {type:'none'|'full'|'partial'|'omit'|'hmac';keep_prefix?:number;keep_suffix?:number}
 export interface Column {
+  masking?: Masking;
   display_name?: string;
   name: string;
   type: string;
@@ -239,7 +241,7 @@ export const databases = {
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
  test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database,password});},
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
- save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify({...body,discovery:undefined})}),
+ save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;

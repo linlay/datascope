@@ -122,7 +122,8 @@ function TableView({
     return()=>{live=false};
   }, [table, query]);
 
-  const columns: ColumnsType<Row> = (schema?.columns ?? []).map((c) => ({
+  const rowKeys = useMemo(() => new WeakMap((page?.rows ?? []).map((row, index) => [row, String(query.offset + index)] as const)), [page, query.offset]);
+  const columns: ColumnsType<Row> = (schema?.columns ?? []).filter(c => !page || page.columns.includes(c.name)).map((c) => ({
     key: c.name,
     dataIndex: c.name,
     sorter: true,
@@ -139,7 +140,7 @@ function TableView({
       </Tooltip>
     ),
     render: (value: unknown) => {
-      if (c.references && value !== null && value !== undefined) {
+      if (c.references && (!c.masking || c.masking.type === 'none') && value !== null && value !== undefined) {
         const [refTable, refColumn] = c.references.split('.');
         return (
           <a onClick={() => onOpenTable(refTable, { col: refColumn, val: String(value) })} title={t("查看 {0} = {1}", {"0":(c.references),"1":(value)})}>
@@ -190,7 +191,7 @@ function TableView({
                       {query.filter.col} = {query.filter.val}
                     </Tag>
                   )}
-                  <Text type="secondary">{t("超级管理员视图：全量数据，未经权限改写")}</Text>
+                  <Text type="secondary">{t("全量行范围，字段按配置脱敏")}</Text>
                 </Space>
                 {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 12 }} />}
                 <Table<Row>
@@ -199,7 +200,7 @@ function TableView({
                   loading={loading}
                   columns={columns}
                   dataSource={page?.rows ?? []}
-                  rowKey={(row) => String(row[schema?.columns[0]?.name ?? 'id'])}
+                  rowKey={row => rowKeys.get(row) ?? ''}
                   scroll={{ x: 'max-content' }}
                   pagination={{
                     current: Math.floor(query.offset / query.limit) + 1,

@@ -7,6 +7,7 @@ import { databases, type Annotation, type Column, type Database, type PolicyView
 import { useAuth } from '../Auth';
 import { TablePolicyEditor } from './DatabaseManager';
 import { setAllTableAccess } from '../tableAccess';
+import { MaskingEditor, maskingLabels } from '../components/MaskingEditor';
 import { IconButton, useSaveModalProps } from '../components/IconButton';
 import { navigate, selectResource, useNavigationBlocker, useRoute } from '../navigation';
 
@@ -31,6 +32,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  const [report,setReport] = useState<number>();
  const [comparison,setComparison] = useState<'pending'|'history'>();
  const [choices,setChoices] = useState<Record<string,boolean>>({});
+ const [maskingEditor,setMaskingEditor] = useState<{table:string;column:Column}>();
  const [editor,setEditor] = useState<{table:string;column:string;source:string;annotation:Annotation}>();
  useNavigationBlocker(dirty,t('当前配置尚未保存，确定离开？'),busy);
  useEffect(()=>{
@@ -49,7 +51,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  useEffect(()=>{
   let live=true;
   const timer=window.setInterval(()=>{
-   if(busy||editor)return;
+   if(busy||editor||maskingEditor)return;
    void databases.get(id).then(next=>{
     if(!live)return;
     if(!dirty){accept(next);return;}
@@ -61,7 +63,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
    }).catch(()=>undefined);
   },15000);
   return()=>{live=false;window.clearInterval(timer)};
- },[id,dirty,busy,editor]);
+ },[id,dirty,busy,editor,maskingEditor]);
  const run = async (work:()=>Promise<Database>,text:string|((d:Database)=>string)) => {
   setBusy(true);setError(undefined);
   try {const next=await work();accept(next);message.success(typeof text==='string'?text:text(next));onSaved();return true}
@@ -132,18 +134,22 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
       {key:'comment',label:t("注释"),children:(annotation?.comment??current.comment)||t('（空）')},
      ]}/>
      {policy&&<TablePolicyEditor key={`policy:${current.name}`} policy={policy} disabled={busy||!can('policy.write')} onChange={patch=>setPolicy(current.name,patch)}/>}
-     <Text strong>{t("字段权限")}</Text>
+     <Text strong>{t("字段权限与脱敏")}</Text>
      <Space wrap><Checkbox disabled={busy||!can('policy.write')||!policy} checked={policy?.columns==null} onChange={e=>setPolicy(current.name,{columns:e.target.checked?null:current.columns.map(c=>c.name)})}>{t("包含未来新增字段")}</Checkbox><Button size="small" disabled={busy||!can('policy.write')} onClick={()=>setPolicy(current.name,{columns:current.columns.map(c=>c.name)})}>{t("选择当前全部字段")}</Button></Space>
-     <Table<Column> key={`columns:${current.name}`} rowKey="name" size="small" dataSource={current.columns} pagination={false} scroll={{x:700}} columns={[
+     <Table<Column> key={`columns:${current.name}`} rowKey="name" size="small" dataSource={current.columns} pagination={false} scroll={{x:950}} columns={[
       {title:t("开放"),width:60,render:(_,c)=><Checkbox aria-label={t("开放字段 {0}", {"0":(c.name)})} disabled={busy||!can('policy.write')} checked={policy?.columns==null||policy.columns.includes(c.name)} onChange={e=>{const cols=policy?.columns??current.columns.map(col=>col.name);setPolicy(current.name,{columns:e.target.checked?[...cols,c.name]:cols.filter(n=>n!==c.name)})}}/>},
       {title:t("字段 / 类型"),render:(_,c)=><><Text code>{c.name}</Text>{c.primary_key&&<Tag color="gold">{t("主键")}</Tag>}<div><Text type="secondary">{c.type}{c.not_null?t(" · 非空"):''}</Text></div></>},
       {title:t("名称"),render:(_,c)=>annotation?.columns?.[c.name]?.display_name||c.name},
       {title:t("注释"),render:(_,c)=>(annotation?.columns?.[c.name]?.comment??c.comment)||<Text type="secondary">{t("（空）")}</Text>},
+      {title:t("脱敏"),width:180,render:(_,c)=><Space size={4}><Tooltip title={c.masking?.type==='partial'?t('保留前 {prefix} 后 {suffix}',{prefix:c.masking.keep_prefix??0,suffix:c.masking.keep_suffix??0}):undefined}><Tag color={c.masking&&c.masking.type!=='none'?'blue':undefined}>{t(maskingLabels[c.masking?.type??'none'])}</Tag></Tooltip><IconButton label={t('配置字段脱敏')} icon={<EditOutlined/>} disabled={busy||!can('policy.write')} onClick={()=>setMaskingEditor({table:current.name,column:c})}/></Space>},
       {title:t("操作"),width:70,render:(_,c)=><IconButton label={t("编辑字段 {0}",{"0":c.name})} icon={<EditOutlined />} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,c.name,c.comment,annotation?.columns?.[c.name])} />},
      ]}/>
     </Space>}
    </Card></Col>
   </Row>
+  {maskingEditor&&<MaskingEditor key={`${maskingEditor.table}.${maskingEditor.column.name}`} table={maskingEditor.table} column={maskingEditor.column} onCancel={()=>setMaskingEditor(undefined)} onApply={masking=>{
+   setDB({...db,discovery:state?{...state,tables:state.tables.map(table=>table.name===maskingEditor.table?{...table,columns:table.columns.map(column=>column.name===maskingEditor.column.name?{...column,masking}:column)}:table)}:state});setDirty(true);setMaskingEditor(undefined);
+  }}/>}
   <Modal width={1120} title={comparison==='pending'?t("数据库结构变化对比"):t("结构变更记录")} open={!!comparison} onCancel={()=>setComparison(undefined)} okText={t("确认并更新配置")} confirmLoading={busy} okButtonProps={{disabled:dirty||!pending||!can('config.write')||!can('policy.write')}} onOk={async()=>{
    if(!pending)return;
    const resolutions=pending.changes.filter(c=>c.property==='comment'&&c.manual!==undefined).map(c=>({table:c.table,column:c.column,follow_source:choices[changeKey(c)]??false}));

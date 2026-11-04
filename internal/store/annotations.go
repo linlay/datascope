@@ -13,6 +13,19 @@ type TableAnnotation struct {
 }
 
 func (s *Store) applySchema(out *TableSchema) {
+	for _, t := range s.RegisteredSchema {
+		if t.Name == out.Name {
+			for i := range out.Columns {
+				for _, c := range t.Columns {
+					if c.Name == out.Columns[i].Name {
+						out.Columns[i].Masking = c.Masking
+						break
+					}
+				}
+			}
+			break
+		}
+	}
 	if a, ok := s.Annotations[out.Name]; ok {
 		out.DisplayName = a.DisplayName
 		if a.Comment != nil {

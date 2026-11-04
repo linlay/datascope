@@ -319,7 +319,7 @@ func buildClone(source, target *Database, sourceRecords, targetRecords []managem
 						d.Reports = d.Reports[len(d.Reports)-20:]
 					}
 				}
-				d.Tables = actual
+				d.Tables = mergeDiscoveredColumns(d.Tables, actual)
 			}
 		}
 		if scope.Policies {
