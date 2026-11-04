@@ -21,41 +21,59 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"datascope-server/internal/action"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/management"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
+	"datascope-server/internal/view"
 )
 
 var DefaultTools = []string{"list_tables", "describe_table", "query"}
-var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge"}
+var Tools = []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "list_actions", "describe_action", "invoke_action"}
 var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
+type SQLExample struct {
+	Label string `json:"label" yaml:"label"`
+	SQL   string `json:"sql" yaml:"sql"`
+}
+
 type Database struct {
-	Discovery              *Discovery        `json:"discovery,omitempty" yaml:"discovery,omitempty"`
-	AuthenticationRevision int64             `json:"authentication_revision,omitempty" yaml:"authentication_revision,omitempty"`
-	Authentication         *Authentication   `json:"authentication,omitempty" yaml:"authentication,omitempty"`
-	BusinessTools          []BusinessTool    `json:"business_tools,omitempty" yaml:"business_tools,omitempty"`
-	ID                     string            `json:"id" yaml:"id"`
-	Name                   string            `json:"name" yaml:"name"`
-	Driver                 string            `json:"driver" yaml:"driver"`
-	Path                   string            `json:"path" yaml:"path"`
-	Connection             *store.Connection `json:"connection,omitempty" yaml:"connection,omitempty"`
-	MCPEnabled             bool              `json:"mcp_enabled" yaml:"mcp_enabled"`
-	MCPPath                string            `json:"mcp_path" yaml:"mcp_path,omitempty"`
-	Tools                  []string          `json:"tools" yaml:"tools"`
-	Config                 *rewrite.Config   `json:"config" yaml:"config"`
-	Revision               int               `json:"revision" yaml:"revision"`
-	ETag                   string            `json:"etag,omitempty" yaml:"-"`
+	Views                  []view.Definition   `json:"views,omitempty" yaml:"views,omitempty"`
+	QueryViewID            string              `json:"query_view_id,omitempty" yaml:"queryViewId,omitempty"`
+	SQLExamples            []SQLExample        `json:"sql_examples,omitempty" yaml:"sqlExamples,omitempty"`
+	AuthPolicyFingerprint  string              `json:"-" yaml:"-"`
+	Actions                []action.Definition `json:"actions,omitempty" yaml:"actions,omitempty"`
+	ActionLibraries        []action.Library    `json:"action_libraries,omitempty" yaml:"actionLibraries,omitempty"`
+	WriteEnabled           bool                `json:"write_enabled,omitempty" yaml:"writeEnabled,omitempty"`
+	WriteConnection        *store.Connection   `json:"write_connection,omitempty" yaml:"writeConnection,omitempty"`
+	Discovery              *Discovery          `json:"discovery,omitempty" yaml:"discovery,omitempty"`
+	AuthenticationRevision int64               `json:"authentication_revision,omitempty" yaml:"authenticationRevision,omitempty"`
+	Authentication         *Authentication     `json:"authentication,omitempty" yaml:"authentication,omitempty"`
+	ID                     string              `json:"id" yaml:"id"`
+	Name                   string              `json:"name" yaml:"name"`
+	Driver                 string              `json:"driver" yaml:"driver"`
+	Path                   string              `json:"path" yaml:"path"`
+	Connection             *store.Connection   `json:"connection,omitempty" yaml:"connection,omitempty"`
+	MCPEnabled             bool                `json:"mcp_enabled" yaml:"mcpEnabled"`
+	KnowledgeEnabled       *bool               `json:"knowledge_enabled,omitempty" yaml:"knowledgeEnabled,omitempty"`
+	MCPPath                string              `json:"mcp_path" yaml:"mcpPath,omitempty"`
+	Tools                  []string            `json:"tools" yaml:"tools"`
+	Config                 *rewrite.Config     `json:"config" yaml:"config"`
+	Revision               int                 `json:"revision" yaml:"revision"`
+	ETag                   string              `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
-	Management *management.Store
-	Audit      *audit.Store
-	Path       string
-	Timeout    time.Duration
-	AsOf       time.Time
-	mu         sync.Mutex
+	Management     *management.Store
+	Audit          *audit.Store
+	Path           string
+	Timeout        time.Duration
+	AsOf           time.Time
+	scanMu         sync.Mutex
+	runtimeMu      sync.Mutex
+	discoveryState map[string]*discoveryRuntime
+	mu             sync.Mutex
 }
 
 // Bootstrap imports legacy JSON or the initial rewrite rules only once.
@@ -135,7 +153,7 @@ func migrateDatabaseNames(items *[]Database) error {
 // Each database is stored in its own YAML file. Invalid files fail closed.
 func (c *Catalog) List() ([]Database, error) {
 	if c.Management != nil {
-		return c.listSQLite(context.Background())
+		return c.listManaged(context.Background())
 	}
 	entries, err := os.ReadDir(c.Path)
 	if err != nil {
@@ -183,6 +201,7 @@ func (c *Catalog) List() ([]Database, error) {
 		}
 		return items[i].ID < items[j].ID
 	})
+	c.overlayDiscovery(items)
 	return items, nil
 }
 
@@ -234,6 +253,9 @@ func configFilename(d Database) string {
 }
 
 func (c *Catalog) Get(id string) (*Database, error) {
+	if c.Management != nil {
+		return c.getManaged(context.Background(), id)
+	}
 	items, err := c.List()
 	if err != nil {
 		return nil, err
@@ -277,15 +299,18 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 		st.Close()
 		return nil, err
 	}
-	if err := validateBusinessTools(*d, svc.Rewriter, st); err != nil {
+	if err := validateActions(*d); err != nil {
 		st.Close()
 		return nil, err
 	}
 	svc.Management = c.Management
 	svc.Audit = c.Audit
+	if c.Management != nil {
+		svc.Audit = c.Management.AuditFor(d.ID)
+	}
 	svc.DatabaseID = d.ID
 	svc.PolicyVersion = d.Revision
-	st.Audit = c.Audit
+	st.Audit = svc.Audit
 	return svc, nil
 }
 func (c *Catalog) Add(ctx context.Context, d Database) error {
@@ -306,10 +331,27 @@ func (c *Catalog) Create(ctx context.Context, d Database, password string) (*Dat
 	if err := c.addDatabase(ctx, d, password); err != nil {
 		return nil, err
 	}
+	created, err := c.Get(d.ID)
+	if err != nil {
+		return nil, err
+	}
+	if created.Discovery != nil {
+		c.recordDiscoveryReport(d.ID, SchemaReport{Version: created.Discovery.Version, At: time.Now().UTC(), Changes: schemaDiff(nil, created.Discovery.Tables, nil)})
+		c.recordDiscoveryCheck(d.ID, time.Now().UTC(), nil)
+	}
 	return c.Get(d.ID)
 }
 
 func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) error {
+	if d.Authentication != nil {
+		if c.Management == nil {
+			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
+				return fmt.Errorf("逐库认证需要管理存储")
+			}
+		} else if err := c.Management.ValidateDatabaseAuth(ctx, d.Authentication.Connection()); err != nil {
+			return err
+		}
+	}
 	var credentials []management.DatabaseCredential
 	if password != "" {
 		if c.Management == nil {
@@ -368,10 +410,14 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	if err != nil {
 		return err
 	}
-	d.Config = &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "NONE", Name: "公共访问", Description: "不进行行权限改写"}, {Scheme: "CUSTOM", Name: "自定义改写", Description: "使用 SQL 模板过滤数据"}}, Fragments: map[string]string{}, Tables: []*rewrite.Policy{}}
+	d.Config = &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "NONE", Name: "公共访问", Description: "不进行行权限改写"}, {Scheme: "CUSTOM", Name: "自定义改写", Description: "使用完整 SQL 过滤数据"}}, Tables: []*rewrite.Policy{}}
 	d.Discovery = nil
 	applyDiscovery(&d, tables)
 	d.MCPEnabled = false
+	d.Actions = nil
+	d.ActionLibraries = nil
+	d.WriteEnabled = false
+	d.WriteConnection = nil
 	d.Tools = append([]string(nil), DefaultTools...)
 	d.Revision = 1
 	d.AuthenticationRevision = 1
@@ -393,6 +439,34 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	}, credentials...)
 }
 func (c *Catalog) Save(ctx context.Context, d Database) error {
+	return c.SaveWithWritePassword(ctx, d, "")
+}
+
+func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, password string) error {
+	if d.Authentication != nil {
+		if c.Management == nil {
+			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
+				return fmt.Errorf("逐库认证需要管理存储")
+			}
+		} else if err := c.Management.ValidateDatabaseAuth(ctx, d.Authentication.Connection()); err != nil {
+			return err
+		}
+	}
+	var credentials []management.DatabaseCredential
+	if password != "" {
+		if c.Management == nil || d.Driver == "sqlite" || d.WriteConnection == nil {
+			return fmt.Errorf("写入密码仅用于网络数据库")
+		}
+		if d.WriteConnection.PasswordEnv != "" {
+			return fmt.Errorf("请只提供一种写入密码来源")
+		}
+		d.WriteConnection.CredentialID = management.WriteCredentialID(d.ID)
+		sealed, e := c.Management.SealDatabaseCredential(d.WriteConnection.CredentialID, password)
+		if e != nil {
+			return e
+		}
+		credentials = append(credentials, sealed)
+	}
 	if err := d.ValidateAuthentication(); err != nil {
 		return err
 	}
@@ -438,14 +512,14 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 			}
 		}
 		return fmt.Errorf("数据库不存在")
-	})
+	}, credentials...)
 }
 func (c *Catalog) update(fn func(*[]Database) error) error {
 	return c.updateContext(context.Background(), "database.import", "", fn)
 }
 func (c *Catalog) updateContext(ctx context.Context, action, database string, fn func(*[]Database) error, credentials ...management.DatabaseCredential) error {
 	if c.Management != nil {
-		return c.updateSQLite(ctx, action, database, fn, credentials...)
+		return c.updateManaged(ctx, action, database, fn, credentials...)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

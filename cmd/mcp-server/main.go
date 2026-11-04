@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"datascope-server/internal/application"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/envflag"
+	"datascope-server/internal/management"
 	"datascope-server/internal/mcpserver"
 	"datascope-server/internal/platform"
 	"datascope-server/internal/store"
@@ -88,7 +91,7 @@ func run() error {
 		return err
 	}
 
-	app := &application.Service{Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}
+	app := &application.Service{ManagementMCPURL: strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin", Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}
 	opts := mcpserver.Options{Management: manager, Application: app, AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}
 	if !*stateless {
 		logger.Warn("managed HTTP uses stateless requests so policy changes apply immediately")
@@ -96,6 +99,11 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	closeActionMemory, err := management.ServeActionMemory(ctx, envflag.String("ACTION_STATE_SOCKET", filepath.Join(filepath.Dir(manager.Path), "runtime", "actions.sock")), manager.Actions)
+	if err != nil {
+		return err
+	}
+	defer closeActionMemory()
 	outboxDone := make(chan struct{})
 	go func() { defer close(outboxDone); platform.RunOutbox(ctx, manager) }()
 	defer func() { stop(); <-outboxDone }()
@@ -106,13 +114,9 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		svc, e := catalogue.Open(ctx, initial)
-		if e != nil {
-			return e
-		}
-		defer svc.Store.Close()
-		logger.Info("serving MCP over stdio", "db", st.Path(), "default_user_id", *defaultUserID)
-		return mcpserver.ManagedServer(catalogue, *databaseID, svc, opts).Run(ctx, &mcp.StdioTransport{})
+		opts.DatabaseDriver = initial.Driver
+		logger.Info("serving MCP over stdio", "database_id", initial.ID, "default_user_id", *defaultUserID)
+		return mcpserver.ManagedServer(catalogue, *databaseID, nil, opts).Run(ctx, &mcp.StdioTransport{})
 	case "http":
 		handler, err := mcpserver.ManagedHTTPHandler(catalogue, st, opts, authMode, issuer, resource, *path)
 		if err != nil {

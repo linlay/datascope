@@ -59,9 +59,8 @@ func TestDatabaseCreationGeneratesStableIDs(t *testing.T) {
 	if !errors.Is(err, management.ErrDenied) {
 		t.Fatal("unprivileged source creation accepted")
 	}
-	var count int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM database_credentials").Scan(&count))
-	if count != 0 {
+	if _, e := f.m.DatabasePassword(f.ctx, "default"); e == nil {
 		t.Fatal("connection test stored a password")
 	}
+	assertNoBusinessSQLite(t, f, "default")
 }

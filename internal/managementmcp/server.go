@@ -32,6 +32,7 @@ type operation struct {
 // the application's per-action authorization, revision checks or audit.
 var operations = map[string][]operation{
 	"datascope_query": {
+		{"authentication", "get", "get_auth_config", "", ""},
 		{"discovery", "get", "get_discovery", "database_id", ""},
 		{"database", "list", "list_databases", "", ""},
 		{"database", "get", "get_database", "database_id", ""},
@@ -43,10 +44,19 @@ var operations = map[string][]operation{
 		{"knowledge", "get", "get_knowledge", "database_id id", ""},
 		{"knowledge", "search", "search_knowledge", "database_id query", ""},
 		{"knowledge", "read", "read_knowledge", "database_id id", ""},
+		{"knowledge_prompt", "list", "list_knowledge_prompts", "database_id", "cursor"},
+		{"knowledge_prompt", "get", "get_knowledge_prompt", "database_id name", ""},
+		{"view", "templates", "list_view_templates", "database_id", ""},
+		{"action", "list", "list_actions", "database_id", ""},
+		{"action", "describe", "describe_action", "database_id name", ""},
 		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"database", "clone_configuration", "clone_configuration", "database_id clone", ""},
+		{"authentication", "save", "save_auth_config", "auth_config", ""},
+		{"view", "save", "configure_views", "database_id database", ""},
+		{"action", "save", "configure_actions", "database_id database", "write_password"},
 		{"discovery", "refresh", "discover_database", "database_id", ""},
 		{"discovery", "apply", "apply_discovery", "database_id id revision", "resolutions"},
 		{"annotation", "save", "save_annotation", "database_id table revision annotation", "column"},
@@ -62,13 +72,15 @@ var operations = map[string][]operation{
 		{"user", "enable", "enable_user", "user_id", ""},
 		{"user", "disable", "disable_user", "user_id", ""},
 		{"user", "reset_password", "reset_password", "user_id password", ""},
-		{"knowledge", "save", "save_knowledge", "database_id id name summary content tables published revision", ""},
+		{"knowledge", "save", "save_knowledge", "database_id id name description content published revision", "summary"},
 	},
 	"datascope_inspect": {
+		{"database", "preview_clone_configuration", "preview_clone_configuration", "database_id clone", ""},
+		{"action", "try", "try_action", "database_id name arguments request_id business_user_id", ""},
 		{"connection", "test", "test_database_connection", "database", "password"},
 		{"database", "test_connection", "test_connection", "database_id", ""},
 		{"policy", "validate", "validate_policy", "database_id database", ""},
-		{"policy", "preview_rewrite", "preview_rewrite", "database_id sql", "business_user_id"},
+		{"policy", "preview_rewrite", "preview_rewrite", "database_id sql", "business_user_id parameters"},
 	},
 }
 
@@ -95,6 +107,14 @@ func decode(tool string, in input) (string, application.Input, error) {
 				return "", out, fmt.Errorf("参数 %s 不能为 null", key)
 			}
 			args[key] = value
+		}
+		if op.domain == "save_knowledge" {
+			if _, ok := args["description"]; !ok {
+				if legacy, exists := args["summary"]; exists {
+					args["description"] = legacy
+				}
+			}
+			delete(args, "summary")
 		}
 		for _, key := range strings.Fields(op.required) {
 			value, exists := args[key]
@@ -146,6 +166,10 @@ func decode(tool string, in input) (string, application.Input, error) {
 				required += " name"
 			case "save_policy", "validate_policy":
 				required += " config"
+			case "configure_views":
+				required += " views"
+			case "configure_actions":
+				required += " actions write_enabled"
 			case "configure_mcp":
 				required += " mcp_enabled mcp_path tools"
 			}

@@ -1,18 +1,21 @@
-// Package audit persists request and SQL execution events independently of business databases.
+// Package audit asynchronously records events independently of business transactions.
 package audit
 
 import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"datascope-server/internal/metaschema"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 	_ "modernc.org/sqlite"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,9 +44,22 @@ type Event struct {
 	Truncated    bool   `json:"truncated"`
 	Detail       any    `json:"detail,omitempty"`
 }
+type queuedEvent struct {
+	event   Event
+	raw     []byte
+	barrier chan struct{}
+}
 type Store struct {
-	db   *sql.DB
-	Path string
+	queueMu sync.RWMutex
+	db      *sql.DB
+	Path    string
+	queue   chan queuedEvent
+	done    chan struct{}
+	once    sync.Once
+	Dropped atomic.Int64
+	Closed  atomic.Bool
+	Source  func(string) *Store
+	Sources func() []*Store
 }
 type contextKey struct{}
 
@@ -60,34 +76,113 @@ func With(ctx context.Context, m Metadata) context.Context {
 	}
 	return context.WithValue(ctx, contextKey{}, m)
 }
-func From(ctx context.Context) Metadata { m, _ := ctx.Value(contextKey{}).(Metadata); return m }
+func From(ctx context.Context) Metadata {
+	m, _ := ctx.Value(contextKey{}).(Metadata)
+	return m
+}
 func Open(path string) (*Store, error) {
 	abs, e := filepath.Abs(path)
 	if e != nil {
 		return nil, e
 	}
-	if e = os.MkdirAll(filepath.Dir(abs), 0700); e != nil {
-		return nil, e
+	s := &Store{Path: abs, queue: make(chan queuedEvent, 2048), done: make(chan struct{})}
+	if e = os.MkdirAll(filepath.Dir(abs), 0700); e == nil {
+		var f *os.File
+		f, e = os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
+		if e == nil {
+			f.Close()
+			s.db, e = sql.Open("sqlite", (&url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(250)&_pragma=journal_mode(WAL)"}).String())
+			if e == nil {
+				s.db.SetMaxOpenConns(1)
+				e = metaschema.Migrate(s.db)
+			}
+			if e == nil {
+				_, e = s.db.Exec("CREATE TABLE IF NOT EXISTS AUDIT_EVENT(ID_ TEXT PRIMARY KEY,REQUEST_ID_ TEXT NOT NULL,ACTOR_ID_ INTEGER NOT NULL,DATABASE_ID_ TEXT NOT NULL,KIND_ TEXT NOT NULL,STARTED_AT_ TEXT NOT NULL,DATA_ TEXT NOT NULL);CREATE INDEX IF NOT EXISTS IX_AUDIT_EVENT_SOURCE_TIME ON AUDIT_EVENT(DATABASE_ID_,STARTED_AT_);CREATE INDEX IF NOT EXISTS IX_AUDIT_EVENT_REQUEST ON AUDIT_EVENT(REQUEST_ID_);CREATE INDEX IF NOT EXISTS IX_AUDIT_EVENT_ACTOR_TIME ON AUDIT_EVENT(ACTOR_ID_,STARTED_AT_);CREATE INDEX IF NOT EXISTS IX_AUDIT_EVENT_KIND_TIME ON AUDIT_EVENT(KIND_,STARTED_AT_);")
+			}
+		}
 	}
-	f, e := os.OpenFile(abs, os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
-		return nil, e
+		slog.Warn("audit storage unavailable; business remains enabled", "error", e)
+		if s.db != nil {
+			s.db.Close()
+			s.db = nil
+		}
 	}
-	f.Close()
-	db, e := sql.Open("sqlite", (&url.URL{Scheme: "file", Path: abs, RawQuery: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"}).String())
-	if e != nil {
-		return nil, e
-	}
-	db.SetMaxOpenConns(1)
-	_, e = db.Exec(`CREATE TABLE IF NOT EXISTS audit_events(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, actor_id INTEGER NOT NULL, database_id TEXT NOT NULL, kind TEXT NOT NULL, started_at TEXT NOT NULL, data TEXT NOT NULL); CREATE INDEX IF NOT EXISTS audit_database_time ON audit_events(database_id,started_at); CREATE INDEX IF NOT EXISTS audit_request ON audit_events(request_id); CREATE INDEX IF NOT EXISTS audit_actor_time ON audit_events(actor_id,started_at); CREATE INDEX IF NOT EXISTS audit_kind_time ON audit_events(kind,started_at);`)
-	if e != nil {
-		db.Close()
-		return nil, e
-	}
-	return &Store{db: db, Path: abs}, nil
+	go s.run()
+	return s, nil
 }
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) run() {
+	defer close(s.done)
+	for msg := range s.queue {
+		if msg.barrier != nil {
+			close(msg.barrier)
+			continue
+		}
+		if s.db == nil {
+			s.Dropped.Add(1)
+			continue
+		}
+		e := msg.event
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		_, err := s.db.ExecContext(ctx, "INSERT INTO AUDIT_EVENT VALUES(?,?,?,?,?,?,?) ON CONFLICT(ID_) DO UPDATE SET DATA_=excluded.DATA_", e.ID, e.RequestID, e.ActorID, e.DatabaseID, e.Kind, e.StartedAt, string(msg.raw))
+		cancel()
+		if err != nil {
+			s.Dropped.Add(1)
+			slog.Warn("audit event dropped", "error", err)
+		}
+	}
+}
+func (s *Store) Flush(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.queueMu.RLock()
+	defer s.queueMu.RUnlock()
+	if s == nil || s.Closed.Load() {
+		return
+	}
+	ready := make(chan struct{})
+	select {
+	case s.queue <- queuedEvent{barrier: ready}:
+		select {
+		case <-ready:
+		case <-ctx.Done():
+		}
+	case <-ctx.Done():
+	}
+}
+func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		s.queueMu.Lock()
+		s.Closed.Store(true)
+		close(s.queue)
+		s.queueMu.Unlock()
+		<-s.done
+		if s.db != nil {
+			s.db.Close()
+		}
+	})
+	return nil
+}
 func (s *Store) Put(ctx context.Context, e Event) error {
+	if s == nil {
+		return nil
+	}
+	if e.DatabaseID != "" && s.Source != nil {
+		target := s.Source(e.DatabaseID)
+		if target != nil && target != s {
+			return target.Put(ctx, e)
+		}
+	}
+	s.queueMu.RLock()
+	defer s.queueMu.RUnlock()
+	if s.Closed.Load() {
+		s.Dropped.Add(1)
+		return nil
+	}
 	if e.ID == "" {
 		e.ID = ID()
 	}
@@ -97,15 +192,20 @@ func (s *Store) Put(ctx context.Context, e Event) error {
 	if e.StartedAt == "" {
 		e.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return err
+	raw, err := json.Marshal(e)
+	if err != nil || len(raw) > 2*1024*1024 {
+		s.Dropped.Add(1)
+		return nil
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO audit_events VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data`, e.ID, e.RequestID, e.ActorID, e.DatabaseID, e.Kind, e.StartedAt, string(b))
-	return err
+	select {
+	case s.queue <- queuedEvent{event: e, raw: raw}:
+	default:
+		s.Dropped.Add(1)
+	}
+	return nil
 }
 
-// Start is synchronous: callers must not execute SQL if this fails.
+// Start allocates an in-memory event. Audit availability never gates business.
 func (s *Store) Start(ctx context.Context, kind, original string) (*Event, error) {
 	if s == nil {
 		return nil, nil
@@ -114,8 +214,7 @@ func (s *Store) Start(ctx context.Context, kind, original string) (*Event, error
 	if m.RequestID == "" {
 		m.RequestID = ID()
 	}
-	e := &Event{Metadata: m, ID: ID(), Kind: kind, OriginalSQL: original, Status: "running", StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	return e, s.Put(ctx, *e)
+	return &Event{Metadata: m, ID: ID(), Kind: kind, OriginalSQL: original, Status: "running", StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}, nil
 }
 func (s *Store) Finish(e *Event, err error) error {
 	if s == nil || e == nil {
@@ -127,16 +226,7 @@ func (s *Store) Finish(e *Event, err error) error {
 		e.Error = err.Error()
 	}
 	e.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	var last error
-	for i := 0; i < 3; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		last = s.Put(ctx, *e)
-		cancel()
-		if last == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("审计完成记录写入失败: %w", last)
+	return s.Put(context.Background(), *e)
 }
 func (s *Store) List(ctx context.Context, database, request string, limit, offset int) ([]Event, error) {
 	page, err := s.search(ctx, Filter{DatabaseID: database, RequestID: request, Limit: limit, Offset: offset}, false)
@@ -145,7 +235,9 @@ func (s *Store) List(ctx context.Context, database, request string, limit, offse
 	}
 	return page.Items, nil
 }
-func Join(err, other error) error { return errors.Join(err, other) }
+func Join(err, other error) error {
+	return errors.Join(err, other)
+}
 
 type sqlKey struct{}
 
@@ -155,4 +247,45 @@ func WithSQL(ctx context.Context, original, rewritten string) context.Context {
 func SQL(ctx context.Context) (string, string) {
 	v, _ := ctx.Value(sqlKey{}).([2]string)
 	return v[0], v[1]
+}
+
+func (s *Store) MoveSource(id string, target *Store) error {
+	if s == nil || s.db == nil || target == nil || target.db == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	s.Flush(ctx)
+	rows, e := s.db.QueryContext(ctx, "SELECT DATA_ FROM AUDIT_EVENT WHERE DATABASE_ID_=?", id)
+	if e != nil {
+		return e
+	}
+	defer rows.Close()
+	tx, e := target.db.BeginTx(ctx, nil)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	for rows.Next() {
+		var raw string
+		if e = rows.Scan(&raw); e != nil {
+			return e
+		}
+		var event Event
+		if e = json.Unmarshal([]byte(raw), &event); e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, "INSERT INTO AUDIT_EVENT VALUES(?,?,?,?,?,?,?) ON CONFLICT(ID_) DO UPDATE SET DATA_=excluded.DATA_", event.ID, event.RequestID, event.ActorID, event.DatabaseID, event.Kind, event.StartedAt, raw); e != nil {
+			return e
+		}
+	}
+	if e = rows.Err(); e != nil {
+		return e
+	}
+	rows.Close()
+	if e = tx.Commit(); e != nil {
+		return e
+	}
+	_, e = s.db.ExecContext(ctx, "DELETE FROM AUDIT_EVENT WHERE DATABASE_ID_=?", id)
+	return e
 }

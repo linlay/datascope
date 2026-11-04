@@ -236,13 +236,14 @@ func TestBusinessAccountManagementAndKnowledge(t *testing.T) {
 	if e == nil {
 		t.Fatal("reader created business identity")
 	}
-	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "business-guide", Name: "查询指南", Summary: "员工业务知识", Content: "员工独立认证知识正文", Tables: []string{"items"}, Published: true})
+	knowledgeDescription1 := "员工业务知识"
+	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "business-guide", Name: "查询指南", Description: &knowledgeDescription1, Content: "员工独立认证知识正文", Published: true})
 	must(t, e)
 	tokens, _, _ := employeeTokens(t, env, "default", "employee-default-password")
 	session, e := mcp.NewClient(&mcp.Implementation{Name: "business-knowledge", Version: "1"}, nil).Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: env.resource + "/default", HTTPClient: &http.Client{Transport: bearer{token: tokens["access"]}}, DisableStandaloneSSE: true}, nil)
 	must(t, e)
 	defer session.Close()
-	out, e := callMCP(t, session, "read_knowledge", map[string]any{"id": "business-guide"})
+	out, e := session.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "business-guide"})
 	must(t, e)
 	raw, _ := json.Marshal(out)
 	if !strings.Contains(string(raw), "员工独立认证知识正文") {
@@ -379,6 +380,10 @@ func TestDemoRealmInitializationAndEmployeeDirectory(t *testing.T) {
 	must(t, e)
 	if a.BusinessUserID != 1 {
 		t.Fatal("wrong employee mapping")
+	}
+	d.Config = nil
+	if _, e = f.c.BusinessAccount(f.ctx, d, "E0001"); e != nil {
+		t.Fatal("employee authentication depends on query configuration", e)
 	}
 	if _, e = f.m.ByUsername(f.ctx, "E0001"); e == nil {
 		t.Fatal("demo employee imported into platform users")

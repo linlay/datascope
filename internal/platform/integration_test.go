@@ -65,7 +65,7 @@ func setup(t *testing.T) *fixture {
 	db.Close()
 	st, e := store.Open(path, time.Second)
 	must(t, e)
-	cfg := &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "CUSTOM", Name: "owner"}}, Fragments: map[string]string{}, Tables: []*rewrite.Policy{{Table: "items", Scheme: "CUSTOM", SQL: "SELECT * FROM main.items WHERE owner_id = ${userId}"}}}
+	cfg := &rewrite.Config{Version: 1, Schemes: []rewrite.SchemeInfo{{Scheme: "CUSTOM", Name: "owner"}}, Tables: []*rewrite.Policy{{Table: "items", Scheme: "CUSTOM", SQL: "SELECT * FROM main.items WHERE owner_id = ${userId}"}}}
 	_, e = catalog.New(filepath.Join(dir, "databases"), st, cfg, store.DefaultAsOf, time.Second)
 	must(t, e)
 	c, e := catalog.BootstrapManaged(ctx, m, filepath.Join(dir, "databases"), st, "unused", store.DefaultAsOf, time.Second, filepath.Join(dir, "old.json"))
@@ -299,14 +299,16 @@ func TestCatalogMigrationConcurrencyAndInternalIsolation(t *testing.T) {
 	}
 	must(t, f.m.Flush(f.ctx))
 	var count int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM outbox_events").Scan(&count))
+	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM sqlite_schema WHERE name='AUDIT_OUTBOX'").Scan(&count))
 	if count != 0 {
-		t.Fatal("outbox not drained")
+		t.Fatal("runtime audit queue persisted in management")
 	}
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM record_versions WHERE bucket='databases'").Scan(&count))
-	if count < 2 {
-		t.Fatal("missing versions")
+	current, e := f.c.Get("default")
+	must(t, e)
+	if current.Revision != one.Revision+1 {
+		t.Fatal("revision did not advance exactly once")
 	}
+	assertNoBusinessSQLite(t, f, "default")
 }
 
 type bearer struct{ token string }
@@ -355,7 +357,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	d, e := f.c.Get("default")
 	must(t, e)
 	d.Tools = []string{"list_tables", "describe_table", "query", "raw_query", "search_knowledge", "read_knowledge"}
-	d.BusinessTools = []catalog.BusinessTool{{Name: "find_items", Description: "Find by name", SQL: "SELECT id,name FROM items WHERE name=:arg_name", Parameters: map[string]catalog.ToolParameter{"name": {Type: "string", Description: "Exact name"}}}}
+
 	must(t, f.c.Save(f.ctx, *d))
 	h, e := mcpserver.ManagedHTTPHandler(f.c, nil, mcpserver.Options{AuthMode: "oauth", Management: f.m, Application: f.app}, "oauth", issuer, base, "/mcp")
 	must(t, e)
@@ -376,7 +378,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	for _, tool := range list.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Contains(names, "raw_query") || !slices.Contains(names, "find_items") {
+	if slices.Contains(names, "raw_query") || slices.Contains(names, "find_items") || slices.Contains(names, "read_knowledge") {
 		t.Fatalf("tools %v", names)
 	}
 	out, e := callMCP(t, session, "query", map[string]any{"sql": "SELECT * FROM items"})
@@ -384,7 +386,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	if out.IsError {
 		t.Fatalf("query %+v", out)
 	}
-	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one' OR 1=1 --"})
+	out, e = callMCP(t, session, "query", map[string]any{"sql": "SELECT id,name FROM items WHERE name=:arg_name", "parameters": map[string]any{"arg_name": "one' OR 1=1 --"}})
 	must(t, e)
 	if out.IsError {
 		t.Fatalf("safe parameter query %+v", out)
@@ -393,23 +395,24 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	if !bytes.Contains(raw, []byte(`"row_count":0`)) {
 		t.Fatalf("parameter injection %s", raw)
 	}
-	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one", "extra": 1})
+	out, e = callMCP(t, session, "query", map[string]any{"sql": "SELECT id,name FROM items WHERE name=:arg_name", "parameters": map[string]any{"arg_name": "one", "userId": 20}})
 	if e == nil && !out.IsError {
 		t.Fatal("accepted unknown parameter")
 	}
-	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Summary: "Ownership rules", Content: "Query items by owner_id; never sum duplicated joins.", Tables: []string{"items"}, Published: true})
+	knowledgeDescription1 := "Ownership rules\nScope and applicable questions\nDetailed model guidance"
+	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Description: &knowledgeDescription1, Content: "Query items by owner_id; never sum duplicated joins.", Published: true})
 	must(t, e)
-	out, e = callMCP(t, session, "search_knowledge", map[string]any{"query": "Ownership"})
+	prompts, e := session.ListPrompts(ctx, nil)
 	must(t, e)
-	raw, _ = json.Marshal(out.StructuredContent)
-	if out.IsError || bytes.Contains(raw, []byte("never sum")) {
-		t.Fatalf("summary disclosure %+v", out)
+	raw, _ = json.Marshal(prompts)
+	if bytes.Contains(raw, []byte("never sum")) || !bytes.Contains(raw, []byte(`"description"`)) || !bytes.Contains(raw, []byte(`Ownership rules\nScope and applicable questions\nDetailed model guidance`)) {
+		t.Fatalf("description disclosure %s", raw)
 	}
-	out, e = callMCP(t, session, "read_knowledge", map[string]any{"id": "items"})
+	prompt, e := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "items"})
 	must(t, e)
-	raw, _ = json.Marshal(out.StructuredContent)
-	if out.IsError || !bytes.Contains(raw, []byte("never sum")) {
-		t.Fatalf("knowledge detail %+v", out)
+	raw, _ = json.Marshal(prompt)
+	if !bytes.Contains(raw, []byte("never sum")) {
+		t.Fatalf("knowledge detail %s", raw)
 	}
 	adminToken, e := as.SignEmployeeForResource(ctx, f.admin.ID, adminResource)
 	must(t, e)
@@ -519,7 +522,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 		t.Fatal("old JWT valid after reset")
 	}
 }
-func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
+func TestAuditFailureIsIsolatedAndGrantEscalation(t *testing.T) {
 	f := setup(t)
 	_, e := f.app.Call(f.readerContext(), "grant_database_permissions", application.Input{DatabaseID: "default", UserID: f.reader.ID, Permissions: []string{"raw_query"}})
 	if !errors.Is(e, management.ErrDenied) {
@@ -541,13 +544,14 @@ func TestAuditFailClosedAndGrantEscalation(t *testing.T) {
 		}
 	}
 	must(t, f.a.Close())
+	must(t, f.m.AuditFor("default").Close())
 	_, e = svc.Query(f.readerContext(), "SELECT * FROM items", 10, 200)
-	if e == nil {
-		t.Fatal("query executed with unavailable audit")
+	if e != nil {
+		t.Fatalf("unavailable audit blocked query: %v", e)
 	}
 }
 
-func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
+func TestDirectSQLReplacesNamedTools(t *testing.T) {
 	env := setupRealms(t)
 	f := env.f
 	ctx := context.Background()
@@ -555,12 +559,15 @@ func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
 	session := connectMCP(t, env.resource+"/default", tokens["access"])
 	d, e := f.c.Get("default")
 	must(t, e)
-	d.BusinessTools = []catalog.BusinessTool{{Name: "find_items", Description: "Find item", SQL: "SELECT id FROM items WHERE name=:arg_name", Parameters: map[string]catalog.ToolParameter{"name": {Type: "string"}}}}
+
 	must(t, f.c.Save(f.ctx, *d))
 	list, e := session.ListTools(ctx, nil)
 	must(t, e)
-	if !slices.ContainsFunc(list.Tools, func(t *mcp.Tool) bool { return t.Name == "find_items" }) {
-		t.Fatal("new configured tool not published")
+	if slices.ContainsFunc(list.Tools, func(t *mcp.Tool) bool { return t.Name == "find_items" }) {
+		t.Fatal("legacy named tool published")
+	}
+	if out, e := callMCP(t, session, "find_items", map[string]any{}); e == nil && !out.IsError {
+		t.Fatal("legacy tool callable")
 	}
 	var wg sync.WaitGroup
 	failures := make(chan string, 8)
@@ -568,7 +575,7 @@ func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out, e := session.CallTool(ctx, &mcp.CallToolParams{Name: "find_items", Arguments: map[string]any{"name": "one"}})
+			out, e := callMCP(t, session, "query", map[string]any{"sql": "SELECT id FROM items WHERE name=:arg_name", "parameters": map[string]any{"arg_name": "one"}})
 			if e != nil {
 				failures <- e.Error()
 				return
@@ -581,31 +588,14 @@ func TestConfiguredToolsRefreshOverLongLivedTransport(t *testing.T) {
 	}
 	wg.Wait()
 	close(failures)
-	for e := range failures {
-		t.Fatal(e)
-	}
-	d, e = f.c.Get("default")
-	must(t, e)
-	d.BusinessTools[0].SQL = "SELECT id FROM items WHERE name=:arg_name AND id=3"
-	must(t, f.c.Save(f.ctx, *d))
-	out, e := callMCP(t, session, "find_items", map[string]any{"name": "one"})
-	must(t, e)
-	raw, _ := json.Marshal(out.StructuredContent)
-	if out.IsError || !bytes.Contains(raw, []byte(`"row_count":0`)) {
-		t.Fatalf("old SQL retained: %s", raw)
-	}
-	d, e = f.c.Get("default")
-	must(t, e)
-	d.BusinessTools = nil
-	must(t, f.c.Save(f.ctx, *d))
-	out, e = callMCP(t, session, "find_items", map[string]any{"name": "one"})
-	if e == nil && !out.IsError {
-		t.Fatal("removed business tool still callable")
+	for message := range failures {
+		t.Fatal(message)
 	}
 }
 func TestKnowledgeVisibilityAndConflict(t *testing.T) {
 	f := setup(t)
-	in := application.Input{DatabaseID: "default", ID: "owner-guide", Name: "Owner guide", Summary: "Only owned items", Content: "Query owner_id in items", Tables: []string{"items"}}
+	knowledgeDescription2 := "Only owned items"
+	in := application.Input{DatabaseID: "default", ID: "owner-guide", Name: "Owner guide", Description: &knowledgeDescription2, Content: "Query owner_id in items"}
 	_, e := f.app.Call(f.ctx, "save_knowledge", in)
 	must(t, e)
 	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})
@@ -627,7 +617,13 @@ func TestKnowledgeVisibilityAndConflict(t *testing.T) {
 	d.Config.Tables[0].Columns = []string{"id", "name"}
 	must(t, f.c.Save(f.ctx, *d))
 	_, e = f.app.Call(f.readerContext(), "read_knowledge", application.Input{DatabaseID: "default", ID: in.ID})
-	if e == nil {
-		t.Fatal("knowledge exposing restricted fields still visible")
+	must(t, e)
+}
+
+func assertNoBusinessSQLite(t *testing.T, f *fixture, id string) {
+	t.Helper()
+	_, e := os.Stat(filepath.Join(filepath.Dir(f.m.Path), "databases", id, "management.db"))
+	if !os.IsNotExist(e) {
+		t.Fatal("runtime created a business SQLite database", e)
 	}
 }

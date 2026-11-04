@@ -122,7 +122,6 @@ export interface PoliciesResponse {
   path: string;
   schemes: SchemeInfo[];
   variables: VariableInfo[];
-  fragments: Record<string, string>;
   policies: PolicyView[];
   as_of: string;
 }
@@ -200,7 +199,6 @@ export let selectedDatabase = localStorage.getItem('datascope-database') || loca
 export function selectDatabase(id: string) {
  selectedDatabase = id; localStorage.setItem('datascope-database', id); usersPromise = undefined;
 }
-export interface BusinessTool { name:string; description:string; sql:string; parameters:Record<string,{type:"string"|"integer"|"number"|"boolean";description:string}> }
 export interface DatabaseConnection {
  host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
 }
@@ -212,14 +210,32 @@ export interface SchemaReport { version:number; at:string; changes:SchemaChange[
 export interface AnnotationResolution {table:string;column?:string;follow_source:boolean}
 export interface PendingDiscovery {id:string;base_version:number;detected_at:string;tables:TableSchema[];changes:SchemaChange[]}
 export interface Discovery { pending?:PendingDiscovery;version:number; checked_at:string; error?:string; tables:TableSchema[]; annotations:Record<string,TableAnnotation>; reports:SchemaReport[] }
+export interface ActionParameter { type: "string"|"integer"|"number"|"boolean"; description: string; optional?: boolean; enum?: unknown[]; min?: number; max?: number; max_length?: number; pattern?: string }
+export interface ViewDefinition { id:string; name:string; description:string; type:"view"; html:string; published:boolean }
+export interface ViewResource { uri:string; name:string; title?:string; description?:string; mimeType?:string; _meta?:{type?:string} }
+export interface ActionDefinition { view_id?:string; name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
+export interface ActionLibrary { name: string; title: string; description: string; script: string }
+export interface ActionSchema { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, {type:string;description?:string;enum?:unknown[];minimum?:number;maximum?:number;maxLength?:number;pattern?:string}> }
+export interface ActionDescription { view_id?:string; view_uri?:string; name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }
+export interface ActionPreview { status:string;message?:string;result?:unknown;preview?:{result:unknown;writes:{sql:string;rows:number;binds:unknown[]}[]};sql?:unknown[] }
+export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string}
+export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE';provider_id?:string;permissions?:string[];business_user_id?:number}
+export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
+export interface SQLExample { label: string; sql: string }
 export interface Database {
+ views?:ViewDefinition[]; query_view_id?:string;
+ sql_examples?: SQLExample[];
+ management_path?:string; audit_path?:string; access?:{policy:AuthPolicy;provider:AuthProvider;revision:number;source?:'DATABASE'};
+ actions?: ActionDefinition[];
+ action_libraries?: ActionLibrary[];
+ write_enabled?: boolean;
+ write_connection?: DatabaseConnection;
  discovery?:Discovery;
  connection?:DatabaseConnection;
- authentication?: {type:"local";label?:string;employee_directory?:boolean};
- business_tools?:BusinessTool[];
+ authentication?: {type:"local";label?:string;employee_directory?:boolean;access?:AuthPolicy;source?:'GLOBAL'|'DATABASE';provider?:AuthProvider};
  permissions?: string[]; business_user_id?: number;
- id: string; name: string; driver: string; path: string; mcp_enabled: boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
- config: { version: number; schemes: SchemeInfo[]; fragments: Record<string,string>; tables: PolicyView[] };
+ id: string; name: string; driver: string; path: string; mcp_enabled: boolean; knowledge_enabled?:boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
+ config: { version: number; schemes: SchemeInfo[]; tables: PolicyView[] };
 }
 export const databases = {
  list: () => request<Database[]>('/api/databases'),
@@ -280,16 +296,21 @@ export const api = {
     throw e;
   })),
   policies: () => request<PoliciesResponse>('/api/policies'),
-  rawQuery: (sql: string, maxRows: number) => post<QueryResult>('/api/query', { sql, max_rows: maxRows }),
-  rewrite: (sql: string, userId: number, maxRows: number) =>
-    post<RewriteResult>('/api/rewrite', { sql, user_id: userId, max_rows: maxRows }),
-  previewRewrite: (sql: string, userId: number) =>
-    post<RewritePreview>('/api/rewrite', { sql, user_id: userId, preview_only: true }),
+  rawQuery: (sql: string, maxRows: number, parameters: Record<string, unknown> = {}) => post<QueryResult>('/api/query', { sql, max_rows: maxRows, parameters }),
+  rewrite: (sql: string, userId: number, maxRows: number, parameters: Record<string, unknown> = {}) =>
+    post<RewriteResult>('/api/rewrite', { sql, user_id: userId, max_rows: maxRows, parameters }),
+  previewRewrite: (sql: string, userId: number, parameters: Record<string, unknown> = {}) =>
+    post<RewritePreview>('/api/rewrite', { sql, user_id: userId, preview_only: true, parameters }),
   mcpInfo: () => request<ServerInfo>('/api/mcp/info'),
   mcpCall: (name: string, args: Record<string, unknown>, _userId: number) =>
     post<CallResult>('/api/mcp/call', { name, arguments: args }),
   mcpVerify: () => post<Report>('/api/mcp/verify', {}),
 };
+
+export interface KnowledgePrompt {name:string;title:string;description:string}
+export interface KnowledgePrompts {prompts:KnowledgePrompt[];nextCursor?:string}
+export interface KnowledgePromptResult {description:string;messages:{role:string;content:{type:string;text:string}}[]}
+export interface Knowledge {id:string;database_id:string;name:string;description:string;content?:string;published:boolean;revision:number}
 
 export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
 export interface AuditFilters {database_id?:string;platform_only?:boolean;request_id?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;query?:string;started_from?:string;started_to?:string}

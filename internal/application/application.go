@@ -8,6 +8,7 @@ import (
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
 	"datascope-server/internal/store"
+	"datascope-server/internal/view"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,11 +19,17 @@ import (
 type Service struct {
 	Management       *management.Store
 	Catalog          *catalog.Catalog
+	WebURL           string
 	ManagementMCPURL string
 	MCPBase          string
 	SecureCookies    bool
 }
 type Input struct {
+	Parameters     map[string]any                 `json:"parameters,omitempty"`
+	Clone          *catalog.CloneRequest          `json:"clone,omitempty"`
+	AuthConfig     *management.AuthConfig         `json:"auth_config,omitempty"`
+	Arguments      map[string]any                 `json:"arguments,omitempty"`
+	WritePassword  string                         `json:"write_password,omitempty"`
 	ActorID        *int64                         `json:"actor_id,omitempty"`
 	PlatformOnly   bool                           `json:"platform_only,omitempty"`
 	Kind           string                         `json:"kind,omitempty"`
@@ -47,30 +54,52 @@ type Input struct {
 	SQL            string                         `json:"sql,omitempty"`
 	Query          string                         `json:"query,omitempty"`
 	ID             string                         `json:"id,omitempty"`
-	Summary        string                         `json:"summary,omitempty"`
+	Description    *string                        `json:"description,omitempty"`
+	Summary        *string                        `json:"summary,omitempty"` // Legacy request alias.
 	Content        string                         `json:"content,omitempty"`
-	Tables         []string                       `json:"tables,omitempty"`
 	Published      bool                           `json:"published,omitempty"`
 	Revision       int                            `json:"revision,omitempty"`
 	Limit          int                            `json:"limit,omitempty"`
 	Offset         int                            `json:"offset,omitempty"`
 	RequestID      string                         `json:"request_id,omitempty"`
+	Cursor         string                         `json:"cursor,omitempty"`
 }
 type Knowledge struct {
-	ID         string   `json:"id"`
-	DatabaseID string   `json:"database_id"`
-	Name       string   `json:"name"`
-	Summary    string   `json:"summary"`
-	Content    string   `json:"content,omitempty"`
-	Tables     []string `json:"tables"`
-	Published  bool     `json:"published"`
-	Revision   int      `json:"revision"`
+	ID          string `json:"id"`
+	DatabaseID  string `json:"database_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Content     string `json:"content,omitempty"`
+	Published   bool   `json:"published"`
+	Revision    int    `json:"revision"`
+}
+
+// Stored records and old clients may still use summary; responses always use description.
+func (k *Knowledge) UnmarshalJSON(raw []byte) error {
+	type plain Knowledge
+	var value struct {
+		*plain
+		Description *string `json:"description"`
+		Summary     *string `json:"summary"`
+	}
+	*k = Knowledge{}
+	value.plain = (*plain)(k)
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	if value.Description != nil {
+		k.Description = *value.Description
+	} else if value.Summary != nil {
+		k.Description = *value.Summary
+	}
+	return nil
 }
 
 func (s *Service) Call(ctx context.Context, action string, in Input) (out any, err error) {
 	m := audit.From(ctx)
 	m.Tool = action
 	m.DatabaseID = in.DatabaseID
+	audit.UpdateRequest(ctx, in.DatabaseID, 0)
 	ctx = audit.With(ctx, m)
 	ev, e := s.Management.Audit.Start(ctx, "action."+action, "")
 	if e != nil {
@@ -78,6 +107,12 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	defer func() { err = audit.Join(err, s.Management.Audit.Finish(ev, err)) }()
 	if _, business := guard.Business(ctx); business {
+		if action == "list_knowledge_prompts" {
+			return s.ListKnowledgePrompts(ctx, in)
+		}
+		if action == "get_knowledge_prompt" {
+			return s.GetKnowledgePrompt(ctx, in)
+		}
 		if action == "search_knowledge" || action == "read_knowledge" {
 			return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
 		}
@@ -89,6 +124,82 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "configure_views":
+		return s.ConfigureViews(ctx, in)
+	case "list_view_templates":
+		if e := require("view.write"); e != nil {
+			return nil, e
+		}
+		return view.Templates(), nil
+	case "preview_clone_configuration", "clone_configuration":
+		return s.CloneConfiguration(ctx, in, action == "clone_configuration")
+	case "list_knowledge_prompts":
+		return s.ListKnowledgePrompts(ctx, in)
+	case "get_knowledge_prompt":
+		return s.GetKnowledgePrompt(ctx, in)
+	case "get_auth_config", "save_auth_config":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if action == "get_auth_config" {
+			return s.Management.AuthConfig(ctx)
+		}
+		if in.AuthConfig == nil {
+			return nil, errors.New("需要 auth_config")
+		}
+		if e := s.Management.SaveAuthConfig(ctx, *in.AuthConfig); e != nil {
+			return nil, e
+		}
+		return s.Management.AuthConfig(ctx)
+	case "list_actions":
+		return s.InspectAction(ctx, in.DatabaseID, "")
+	case "describe_action":
+		if in.Name == "" {
+			return nil, errors.New("需要 action 名称，请先调用 list_actions")
+		}
+		return s.InspectAction(ctx, in.DatabaseID, in.Name)
+	case "try_action":
+		if e := require("action.write"); e != nil {
+			return nil, e
+		}
+		if e := require("impersonate"); e != nil {
+			return nil, e
+		}
+		if in.BusinessUserID <= 0 {
+			return nil, errors.New("需要正整数业务身份")
+		}
+		return s.invokeAction(ctx, in.DatabaseID, in.Name, in.RequestID, in.Arguments, fmt.Sprintf("platform:%d", u.ID), in.BusinessUserID, "", 0, true)
+	case "configure_actions":
+		if e := require("action.write"); e != nil {
+			return nil, e
+		}
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("需要标识一致的 database")
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Revision != in.Database.Revision {
+			return nil, errors.New("配置已变更，请刷新后重试")
+		}
+		d.Actions = in.Database.Actions
+		if in.Database.ActionLibraries != nil {
+			d.ActionLibraries = in.Database.ActionLibraries
+		}
+		d.WriteEnabled = in.Database.WriteEnabled
+		d.WriteConnection = in.Database.WriteConnection
+		if e = s.Catalog.SaveWithWritePassword(ctx, *d, in.WritePassword); e != nil {
+			return nil, e
+		}
+		saved, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		return s.DatabaseView(ctx, *saved), nil
 	case "list_users", "create_user", "disable_user", "enable_user", "reset_password":
 		if e := guard.Require(ctx, s.Management, "", "users.manage"); e != nil {
 			return nil, e
@@ -213,10 +324,10 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		case "save_policy", "validate_policy":
 			d.Config = in.Database.Config
 		case "configure_mcp":
+			d.KnowledgeEnabled = in.Database.KnowledgeEnabled
 			d.MCPEnabled = in.Database.MCPEnabled
 			d.MCPPath = in.Database.MCPPath
 			d.Tools = in.Database.Tools
-			d.BusinessTools = in.Database.BusinessTools
 		}
 		if action == "validate_policy" {
 			svc, e := s.Catalog.Open(ctx, d)
@@ -330,10 +441,20 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
 			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
+		if !reflect.DeepEqual(old.Views, in.Database.Views) || old.QueryViewID != in.Database.QueryViewID {
+			if e := require("view.write"); e != nil {
+				return nil, e
+			}
+		}
+		if !reflect.DeepEqual(old.Actions, in.Database.Actions) || !reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) || old.WriteEnabled != in.Database.WriteEnabled || !reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) || in.WritePassword != "" {
+			if e := require("action.write"); e != nil {
+				return nil, e
+			}
+		}
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
-		if old.Name != in.Database.Name {
+		if old.Name != in.Database.Name || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
 			if e := require("config.write"); e != nil {
 				return nil, e
 			}
@@ -343,7 +464,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		if old.MCPEnabled != in.Database.MCPEnabled || old.MCPPath != in.Database.MCPPath || !reflect.DeepEqual(old.Tools, in.Database.Tools) || !reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if !reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) || old.MCPEnabled != in.Database.MCPEnabled || old.MCPPath != in.Database.MCPPath || !reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			if e := require("mcp.write"); e != nil {
 				return nil, e
 			}
@@ -351,10 +472,10 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.Config, in.Database.Config) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) && reflect.DeepEqual(old.BusinessTools, in.Database.BusinessTools) {
+		if reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
-		if e := s.Catalog.Save(ctx, *in.Database); e != nil {
+		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
 			return nil, e
 		}
 		d, e := s.Catalog.Get(in.DatabaseID)
@@ -401,7 +522,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		defer svc.Store.Close()
-		return svc.Rewrite(ctx, in.SQL, bid)
+		return svc.RewriteWithParameters(ctx, in.SQL, bid, in.Parameters)
 	case "search_audit_events", "get_audit_page":
 		if (in.DatabaseID == "" || in.PlatformOnly) && !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -443,23 +564,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.ID == "" || strings.Contains(in.ID, "/") || in.Name == "" || len(in.Content) > 200000 {
 			return nil, errors.New("需要合法知识 ID、名称，正文最多 200000 字节")
 		}
-		d, e := s.Catalog.Get(in.DatabaseID)
-		if e != nil {
+		if _, e := s.Catalog.Get(in.DatabaseID); e != nil {
 			return nil, e
-		}
-		if d.Config == nil {
-			return nil, errors.New("缺少数据库策略")
-		}
-		if e := d.Config.Validate(); e != nil {
-			return nil, e
-		}
-		for _, t := range in.Tables {
-			if _, ok := d.Config.Lookup(t); !ok {
-				return nil, fmt.Errorf("未知表 %s", t)
-			}
 		}
 		var saved Knowledge
-		e = s.Management.UpdateRecords(ctx, "knowledge", "knowledge.save", in.DatabaseID, func(records []management.Record) ([]management.Record, error) {
+		e := s.Management.UpdateRecords(ctx, "knowledge", "knowledge.save", in.DatabaseID, func(records []management.Record) ([]management.Record, error) {
 			key := in.DatabaseID + "/" + in.ID
 			old := Knowledge{}
 			for _, r := range records {
@@ -472,7 +581,15 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			if old.Revision != in.Revision {
 				return nil, errors.New("知识已更新，请刷新后重试")
 			}
-			saved = Knowledge{ID: in.ID, DatabaseID: in.DatabaseID, Name: in.Name, Summary: in.Summary, Content: in.Content, Tables: in.Tables, Published: in.Published, Revision: old.Revision + 1}
+			description := in.Description
+			if description == nil {
+				description = in.Summary
+			}
+			text := ""
+			if description != nil {
+				text = *description
+			}
+			saved = Knowledge{ID: in.ID, DatabaseID: in.DatabaseID, Name: in.Name, Description: text, Content: in.Content, Published: in.Published, Revision: old.Revision + 1}
 			raw, e := json.Marshal(saved)
 			return []management.Record{{Key: key, Data: string(raw)}}, e
 		})
@@ -482,6 +599,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 }
 func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool) (any, error) {
+	return s.readKnowledge(ctx, in, full, drafts, 50)
+}
+func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool, limit int) (any, error) {
 	if full && in.ID == "" {
 		return nil, errors.New("需要知识 ID")
 	}
@@ -489,25 +609,15 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 		if e := guard.Require(ctx, s.Management, in.DatabaseID, "knowledge.read"); e != nil {
 			return nil, e
 		}
-		if e := guard.Require(ctx, s.Management, in.DatabaseID, "query"); e != nil {
-			return nil, e
-		}
 	}
-	d, e := s.Catalog.Get(in.DatabaseID)
+	if _, e := s.Catalog.Get(in.DatabaseID); e != nil {
+		return nil, e
+	}
+	records, e := s.Management.RecordsForDatabase(ctx, "knowledge", in.DatabaseID)
 	if e != nil {
 		return nil, e
 	}
-	if d.Config == nil {
-		return nil, errors.New("缺少数据库策略")
-	}
-	if e := d.Config.Validate(); e != nil {
-		return nil, e
-	}
-	matches, e := s.Management.SearchKnowledge(ctx, in.Query)
-	if e != nil {
-		return nil, e
-	}
-	records, e := s.Management.Records(ctx, "knowledge")
+	matches, e := management.MatchKnowledgeRecords(records, in.Query)
 	if e != nil {
 		return nil, e
 	}
@@ -523,25 +633,14 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 		if in.ID != "" && k.ID != in.ID {
 			continue
 		}
-		visible := true
-		for _, t := range k.Tables {
-			p, ok := d.Config.Lookup(t)
-			if !ok || (p.Enabled != nil && !*p.Enabled) || p.Columns != nil {
-				visible = false
-				break
-			}
-		}
-		if !drafts && !visible {
-			continue
-		}
-		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Summary+" "+k.Content), strings.ToLower(in.Query)) {
+		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Description+" "+k.Content), strings.ToLower(in.Query)) {
 			continue
 		}
 		if !full {
 			k.Content = ""
 		}
 		out = append(out, k)
-		if len(out) >= 50 {
+		if limit > 0 && len(out) >= limit {
 			break
 		}
 	}
@@ -555,7 +654,10 @@ func (s *Service) ReadKnowledge(ctx context.Context, in Input, full, drafts bool
 }
 
 type DatabaseView struct {
-	MCPEndpoint string `json:"mcp_endpoint"`
+	ManagementPath string                   `json:"management_path,omitempty"`
+	AuditPath      string                   `json:"audit_path,omitempty"`
+	Access         *management.ResolvedAuth `json:"access,omitempty"`
+	MCPEndpoint    string                   `json:"mcp_endpoint"`
 	catalog.Database
 	Permissions    []string `json:"permissions"`
 	BusinessUserID int64    `json:"business_user_id"`
@@ -571,13 +673,30 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 	}
 	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		d.Views = nil
+		d.QueryViewID = ""
 		d.Discovery = nil
 		d.Authentication = nil
 		d.Path = ""
 		d.Connection = nil
 		d.Config = nil
-		d.BusinessTools = nil
+		d.Actions = nil
+		d.ActionLibraries = nil
+		d.WriteConnection = nil
+		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	return DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
+		if source, e := s.Management.Source(ctx, d.ID); e == nil {
+			view.ManagementPath = source.Path
+			if source.Audit != nil {
+				view.AuditPath = source.Audit.Path
+			}
+		}
+		if access, e := s.Management.ResolveAuth(ctx, "DATABASE", d.ID); e == nil {
+			view.Access = &access
+		}
+	}
+	return view
 }

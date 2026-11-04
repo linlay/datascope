@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/mcpserver"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func setup(t *testing.T) (*catalog.Catalog, string) {
@@ -385,7 +385,7 @@ func TestYAMLFilesAndLegacyMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), "mcp_enabled:") || strings.Contains(string(raw), "compiled_sql:") {
+	if !strings.Contains(string(raw), "mcpEnabled:") || strings.Contains(string(raw), "compiledSql:") {
 		t.Fatalf("unexpected YAML: %s", raw)
 	}
 	if mustGet(t, migrated, "default").Config.Tables[0].Columns != nil {

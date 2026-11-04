@@ -19,7 +19,20 @@ import (
 func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 	m := app.Management
 	limiter := rate.NewLimiter(2, 10)
+	external := newExternalAuth(app)
+	confirmation := ActionConfirmationHandler(app)
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if external.handle(w, r) {
+			return
+		}
+		if r.URL.Path == "/api/action-oauth/callback" && r.Method == "GET" {
+			businessOAuthCallback(app, w, r)
+			return
+		}
+		if r.URL.Path == "/actions/confirm" {
+			confirmation.ServeHTTP(w, external.withIdentity(r))
+			return
+		}
 		if r.URL.Path == "/healthz" {
 			next.ServeHTTP(w, r)
 			return
@@ -44,7 +57,19 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 				platformError(w, e)
 				return
 			}
-			u, e := m.Authenticate(ctx, in.Username, in.Password)
+			policy, e := m.ResolveAuth(ctx, "API", "platform")
+			var u management.User
+			if e == nil {
+				if policy.Provider.Type == "PLATFORM_ACCOUNT" {
+					u, e = m.Authenticate(ctx, in.Username, in.Password)
+				} else {
+					var a management.BusinessAccount
+					a, e = m.VerifyAccount(ctx, policy, "", in.Username, in.Password)
+					if e == nil {
+						u, e = m.PlatformIdentity(ctx, policy, a)
+					}
+				}
+			}
 			if ev != nil {
 				ev.ActorID = u.ID
 			}
@@ -111,13 +136,19 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 		}
 		if r.URL.Path == "/api/management/call" && r.Method == "POST" {
 			var in struct {
-				Action    string            `json:"action"`
-				Arguments application.Input `json:"arguments"`
+				Action    string          `json:"action"`
+				Arguments json.RawMessage `json:"arguments"`
 			}
-			if !decode(w, r, &in) {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "管理参数无效: " + err.Error()})
 				return
 			}
-			out, e := app.Call(ctx, in.Action, in.Arguments)
+			arguments, e := application.DecodeInput(in.Arguments)
+			if e != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "管理参数无效: " + e.Error()})
+				return
+			}
+			out, e := app.Call(ctx, in.Action, arguments)
 			if e != nil {
 				platformError(w, e)
 				return
@@ -186,6 +217,10 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 				return
 			}
 			writeJSON(w, 200, out)
+			return
+		}
+		if rest == "business-mcp" {
+			businessWorkbench(app, w, r, id)
 			return
 		}
 		permission := "config.read"

@@ -15,6 +15,7 @@ import (
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"datascope-server/internal/queryparams"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
@@ -29,14 +30,15 @@ const (
 
 // Options configures identity and debug tools.
 type Options struct {
-	Catalog       *catalog.Catalog
-	BusinessTools []catalog.BusinessTool
-	Application   *application.Service
-	Management    *management.Store
-	DatabaseID    string
-	AuthMode      string
-	Managed       bool
-	Tools         []string
+	Catalog     *catalog.Catalog
+	Application *application.Service
+	Management  *management.Store
+	DatabaseID  string
+	// DatabaseDriver provides the dialect without opening a query connection.
+	DatabaseDriver string
+	AuthMode       string
+	Managed        bool
+	Tools          []string
 	// IdentityStore is the shared trusted employee directory for all data sources.
 	IdentityStore *store.Store
 	// UserHeader carries the trusted user id, set by the gateway in front of
@@ -62,18 +64,22 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	}
 	title, guidance := "证券业务 SQL 查询（权限改写）", instructions
 	dialectLabel := "SQLite 方言"
-	if svc != nil && svc.Store.Driver() != "sqlite" {
-		dialectLabel = "受限 SELECT 子集，后端 " + svc.Store.Driver()
+	driver := opts.DatabaseDriver
+	if svc != nil {
+		driver = svc.Store.Driver()
+	}
+	if driver != "" && driver != "sqlite" {
+		dialectLabel = "受限 SELECT 子集，后端 " + driver
 	}
 	if opts.Managed {
 		title = "SQL 数据库代理"
 		guidance = "使用" + dialectLabel + "。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
-		if svc != nil && svc.Store.Driver() != "sqlite" {
+		if driver != "" && driver != "sqlite" {
 			guidance += " 支持常用聚合、子查询、非递归 CTE、整数 LIMIT/OFFSET；不支持窗口函数、CAST、自定义函数、原生专有语法或跨 schema 查询。使用结构返回的字段名与显式表别名。"
 		}
 	}
-	if opts.Management != nil && (slices.Contains(opts.Tools, "search_knowledge") || slices.Contains(opts.Tools, "read_knowledge")) {
-		guidance += " 遇到业务口径、表关联、指标计算等问题时，先 search_knowledge 检索摘要，再 read_knowledge 按需读取正文。优先使用匹配的命名业务工具；知识和示例不会扩大访问权限。"
+	if opts.Management != nil {
+		guidance += " 已发布 HTML 视图通过 resources/list 发现、resources/read 读取，资源 _meta.type 为 view；query 可传 view_id，工具返回 _meta.datascope/viewUri 提示展示资源，宿主按需读取 HTML。业务知识通过 prompts/list 查看名称与 description，再通过 prompts/get(name) 按需读取正文。SELECT 直接使用 query；DML 使用 Action。知识和示例不会扩大访问权限。"
 	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    Name,
@@ -81,15 +87,25 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		Version: Version,
 	}, &mcp.ServerOptions{
 		Instructions: guidance,
-		// Only tools are offered; drop the SDK's historical default logging capability.
-		Capabilities: &mcp.ServerCapabilities{},
+		// Expose tools and knowledge Prompts, without the SDK's historical logging capability.
+		Capabilities: &mcp.ServerCapabilities{Resources: func() *mcp.ResourceCapabilities {
+			if opts.Management != nil {
+				return &mcp.ResourceCapabilities{}
+			}
+			return nil
+		}(), Prompts: func() *mcp.PromptCapabilities {
+			if opts.Management != nil {
+				return &mcp.PromptCapabilities{}
+			}
+			return nil
+		}()},
 	})
 	h := handlers{svc: svc, opts: opts}
 	businessMiddleware(server, h)
-	registerBusinessTools(server, h, opts.BusinessTools)
 	if opts.Management != nil {
-		mcp.AddTool(server, &mcp.Tool{Name: "search_knowledge", Description: "先按业务问题检索知识摘要，再按需 read_knowledge 获取业务口径、关联关系和示例 SQL。", Annotations: readOnly("搜索业务知识")}, h.searchKnowledge)
-		mcp.AddTool(server, &mcp.Tool{Name: "read_knowledge", Description: "通过 id 按需读取业务知识正文。知识是查询指导，执行仍应用当前权限。", Annotations: readOnly("读取业务知识")}, h.readKnowledge)
+		mcp.AddTool(server, &mcp.Tool{Name: "list_actions", Description: "列出可用业务 action 的名称、说明和人工确认要求；再用 describe_action(name) 获取完整参数格式。", Annotations: readOnly("列出业务操作")}, h.listActions)
+		mcp.AddTool(server, &mcp.Tool{Name: "describe_action", Description: "按 name 查看单个业务 action 的说明和完整参数 JSON Schema。先用 list_actions 获取名称。", Annotations: readOnly("查看业务操作")}, h.describeAction)
+		mcp.AddTool(server, &mcp.Tool{Name: "invoke_action", Description: "执行业务 action。request_id 必须唯一，同一服务运行期间重试使用同一值。回执仅保存在内存，服务重启后清空，不应自动重试重启前结果未知的写入。confirm_required 时向人展示 preview 和 confirmation_url；由本人打开页面登录确认后，使用相同 request_id 并设置 result_only:true 只查询回执；无回执时不会再次写入。模型不能代替人确认。", Annotations: &mcp.ToolAnnotations{Title: "执行业务操作", IdempotentHint: false}}, h.invokeAction)
 	}
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -134,7 +150,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	}
 
 	if opts.Managed {
-		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge"} {
+		for _, name := range []string{"list_tables", "describe_table", "query", "raw_query", "customer_scope", "search_knowledge", "read_knowledge", "list_actions", "describe_action", "invoke_action"} {
 			if !slices.Contains(opts.Tools, name) {
 				server.RemoveTools(name)
 			}
@@ -263,8 +279,10 @@ func (h handlers) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 type queryInput struct {
-	SQL     string `json:"sql" jsonschema:"单条 SELECT，使用服务器 Instructions 声明的方言，无需添加权限过滤"`
-	MaxRows int    `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
+	ViewID     string         `json:"view_id,omitempty" jsonschema:"可选已发布视图标识，省略时使用数据库默认查询视图，仅影响展示"`
+	SQL        string         `json:"sql" jsonschema:"单条 SELECT，使用服务器 Instructions 声明的方言，无需添加权限过滤"`
+	MaxRows    int            `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
+	Parameters map[string]any `json:"parameters,omitempty" jsonschema:"可选绑定参数，键使用 arg_ 前缀，例如 SQL 中 :arg_name 对应 parameters.arg_name；身份参数由服务端提供"`
 }
 
 type queryOutput struct {
@@ -282,7 +300,27 @@ func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryI
 	if err != nil {
 		return nil, nil, err
 	}
-	res, err := h.svc.Query(ctx, in.SQL, uid, in.MaxRows)
+	if err := queryparams.Validate(in.Parameters); err != nil {
+		return nil, nil, err
+	}
+	viewID := in.ViewID
+	if h.opts.Catalog != nil {
+		d, err := h.opts.Catalog.Get(h.opts.DatabaseID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if viewID == "" {
+			viewID = d.QueryViewID
+		}
+		if viewID != "" {
+			if _, err = d.View(viewID, true); err != nil {
+				return nil, nil, err
+			}
+		}
+	} else if viewID != "" {
+		return nil, nil, fmt.Errorf("此服务不支持视图")
+	}
+	res, err := h.svc.QueryWithParameters(ctx, in.SQL, uid, in.MaxRows, in.Parameters)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -290,12 +328,13 @@ func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryI
 	if h.opts.Debug {
 		out.UserID, out.RewrittenSQL, out.Binds = uid, res.RewrittenSQL, res.Binds
 	}
-	return nil, out, nil
+	return viewResult(h.opts.DatabaseID, viewID), out, nil
 }
 
 type rawQueryInput struct {
-	SQL     string `json:"sql" jsonschema:"单条只读 SELECT / WITH / VALUES 或允许的结构查看 PRAGMA，按原样执行，不做权限改写"`
-	MaxRows int    `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
+	Parameters map[string]any `json:"parameters,omitempty"`
+	SQL        string         `json:"sql" jsonschema:"单条只读 SELECT / WITH / VALUES 或允许的结构查看 PRAGMA，按原样执行，不做权限改写"`
+	MaxRows    int            `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
 }
 
 func (h handlers) rawQuery(ctx context.Context, req *mcp.CallToolRequest, in rawQueryInput) (*mcp.CallToolResult, *store.QueryResult, error) {
@@ -303,7 +342,7 @@ func (h handlers) rawQuery(ctx context.Context, req *mcp.CallToolRequest, in raw
 	if err := h.debugAllowed(ctx, req); err != nil {
 		return nil, nil, err
 	}
-	result, err := h.svc.Store.RawQuery(ctx, in.SQL, in.MaxRows)
+	result, err := h.svc.Store.RawQueryWithParameters(ctx, in.SQL, in.MaxRows, in.Parameters)
 	if err != nil {
 		return nil, nil, err
 	}

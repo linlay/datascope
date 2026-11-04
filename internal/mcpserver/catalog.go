@@ -4,15 +4,14 @@ import (
 	"context"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
+	"datascope-server/internal/management"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
-	"encoding/json"
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
 	"slices"
 	"strings"
-	"sync"
 )
 
 // ManagedHTTPHandler resolves current configuration on every request. Stateless
@@ -59,18 +58,12 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			http.Error(w, "该数据库未开启 MCP", 403)
 			return
 		}
-		svc, err := c.Open(r.Context(), d)
-		if err != nil {
-			http.Error(w, err.Error(), 503)
-			return
-		}
-		defer svc.Store.Close()
 		selected := opts
 		selected.Catalog = c
 		selected.IdentityStore = identity
 		selected.Tools = d.Tools
 		selected.DatabaseID = d.ID
-		selected.BusinessTools = d.BusinessTools
+		selected.DatabaseDriver = d.Driver
 		selected.Managed = true
 		endpoint := path
 		if segment != "" {
@@ -83,22 +76,34 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			endpointResource = strings.TrimRight(resource, "/") + "/" + segment
 		}
 		endpointIssuer := issuer
+		authMode := mode
+		var selectedAuth *management.ResolvedAuth
 		if c.Management != nil {
-			if !d.LocalAuthentication() {
-				http.Error(w, "业务 MCP 仅支持独立业务账号", 503)
+			resolved, e := c.Management.ResolveAuth(r.Context(), "DATABASE", d.ID)
+			if e != nil {
+				http.Error(w, "认证配置不可用", 503)
 				return
 			}
-			endpointIssuer = d.AuthorizationIssuer(issuer)
+			selectedAuth = &resolved
+			if resolved.Provider.Type == "DEMO_OAUTH" {
+				endpointIssuer = d.AuthorizationIssuer(issuer)
+				authMode = "oauth"
+			} else {
+				authMode = "none"
+			}
 		}
-		if c.Management != nil && mode != "oauth" {
-			http.Error(w, "独立业务账号认证需要 OAuth 模式", 503)
-			return
-		}
-		h, err := HTTPHandlerWithManagement(New(svc, selected), svc.Store, mode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
+		selected.AuthMode = authMode
+		// Open a query service only for tool calls. Knowledge Prompts and protocol
+		// discovery do not depend on query policies or a live data connection.
+		h, err := HTTPHandlerWithManagement(ManagedServer(c, d.ID, nil, selected), identity, authMode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		if selectedAuth != nil && selectedAuth.Provider.Type != "DEMO_OAUTH" {
+			h = policyAuthentication(h, c, d, *selectedAuth, endpointResource, issuer, endpoint)
+		}
+
 		h.ServeHTTP(w, r)
 	})
 	return audit.HTTPHandler(c.Audit, "database-mcp", handler), nil
@@ -112,8 +117,6 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 	opts.DatabaseID = id
 	opts.Tools = catalog.Tools
 	server := New(svc, opts)
-	var toolsMu sync.Mutex
-	var toolsFingerprint string
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			d, err := c.Get(id)
@@ -123,21 +126,8 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 			if !d.MCPEnabled {
 				return nil, fmt.Errorf("该数据库未开启 MCP")
 			}
-			ctx = context.WithValue(ctx, businessContextKey{}, d.BusinessTools)
-			if method == "tools/list" || method == "tools/call" {
-				raw, _ := json.Marshal(d.BusinessTools)
-				toolsMu.Lock()
-				if string(raw) != toolsFingerprint {
-					registerBusinessTools(server, handlers{svc: svc, opts: opts}, d.BusinessTools)
-					toolsFingerprint = string(raw)
-				}
-				toolsMu.Unlock()
-			}
 			enabled := func(name string) bool {
-				if slices.Contains(d.Tools, name) {
-					return true
-				}
-				return slices.ContainsFunc(d.BusinessTools, func(t catalog.BusinessTool) bool { return t.Name == name })
+				return name != "search_knowledge" && name != "read_knowledge" && slices.Contains(d.Tools, name)
 			}
 			switch method {
 			case "tools/list":

@@ -122,3 +122,40 @@ func TestUnsupportedRawFunctionNeverReachesDriver(t *testing.T) {
 		t.Fatal("unsupported SQL reached driver")
 	}
 }
+
+func TestActionNetworkTransactionUsesNativeWriteBindings(t *testing.T) {
+	for _, name := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+		t.Run(name, func(t *testing.T) {
+			c := &probeConn{}
+			s := probeStore(name, c)
+			s.engine.Tables = map[string]string{"records": "records"}
+			defer s.Close()
+			tx, e := s.BeginAction(context.Background())
+			if e != nil {
+				t.Fatal(e)
+			}
+			if c.opts.ReadOnly {
+				t.Fatal("action started read-only transaction")
+			}
+			if _, e = tx.Exec(context.Background(), "UPDATE records SET owner=:owner WHERE id=:id", sql.Named("owner", int64(4)), sql.Named("id", int64(7))); e != nil {
+				t.Fatal(e)
+			}
+			if !strings.Contains(c.setup, "business") || strings.Contains(c.setup, ":owner") {
+				t.Fatal("write SQL not compiled", c.setup)
+			}
+			rows, e := tx.Query(context.Background(), "SELECT :value", 1, sql.Named("value", int64(9)))
+			if e != nil {
+				t.Fatal(e)
+			}
+			if rows.RowCount != 1 || len(c.binds) != 1 || c.binds[0].Value != int64(9) {
+				t.Fatal(rows, c.binds)
+			}
+			if e = tx.Rollback(); e != nil {
+				t.Fatal(e)
+			}
+			if !c.rolledBack {
+				t.Fatal("preview rollback missing")
+			}
+		})
+	}
+}

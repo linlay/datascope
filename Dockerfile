@@ -9,7 +9,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM harbor.gtjaqh.io/library/golang:1.25-alpine AS go-build
+FROM harbor.gtjaqh.io/library/golang:1.26-alpine AS go-build
 WORKDIR /src
 ARG GOPROXY=https://mirrors.gtjaqh.cloud/goproxy
 ENV CGO_ENABLED=0 \

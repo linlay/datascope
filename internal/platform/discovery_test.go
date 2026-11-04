@@ -34,11 +34,7 @@ func TestDiscoveryAuthorizationAndDriftRecovery(t *testing.T) {
 	if unchanged.(application.DatabaseView).Revision != d.Revision {
 		t.Fatal("unchanged scan invalidated an editor revision")
 	}
-	var snapshotCount int
-	must(t, f.m.DB.QueryRow("SELECT COUNT(*) FROM record_versions WHERE bucket='databases' AND key='default'").Scan(&snapshotCount))
-	if snapshotCount != 2 {
-		t.Fatalf("unchanged scan rewrote full snapshot history: %d", snapshotCount)
-	}
+	assertNoBusinessSQLite(t, f, "default")
 	comment := "人工说明"
 	out, err = f.app.Call(f.ctx, "save_annotation", application.Input{DatabaseID: d.ID, Table: "items", Revision: d.Revision, Annotation: &store.Annotation{DisplayName: "业务记录", Comment: &comment}})
 	must(t, err)

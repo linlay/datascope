@@ -10,14 +10,20 @@ import (
 	"strings"
 )
 
-// Authentication configures this database's business accounts. An absent
-// value uses the same independent account realm with default settings.
+// Authentication keeps local login options and an optional database-owned
+// access policy. An absent access policy preserves the global binding/default.
 type Authentication struct {
-	Type              string `json:"type" yaml:"type"`
-	Label             string `json:"label,omitempty" yaml:"label,omitempty"`
-	EmployeeDirectory bool   `json:"employee_directory,omitempty" yaml:"employee_directory,omitempty"`
+	Type              string                   `json:"type" yaml:"type"`
+	Label             string                   `json:"label,omitempty" yaml:"label,omitempty"`
+	EmployeeDirectory bool                     `json:"employee_directory,omitempty" yaml:"employeeDirectory,omitempty"`
+	Source            string                   `json:"source,omitempty" yaml:"source,omitempty"`
+	Provider          *management.AuthProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
+	Access            *management.AuthPolicy   `json:"access,omitempty" yaml:"access,omitempty"`
 }
 
+func (a Authentication) Connection() management.DatabaseAuthConnection {
+	return management.DatabaseAuthConnection{Source: a.Source, Access: a.Access, Provider: a.Provider}
+}
 func (d Database) LocalAuthentication() bool {
 	return d.Authentication == nil || d.Authentication.Type == "local"
 }
@@ -25,7 +31,8 @@ func (d Database) AuthenticationVersion() string {
 	raw, _ := json.Marshal(struct {
 		Config   *Authentication
 		Revision int64
-	}{d.Authentication, d.AuthenticationRevision})
+		Policy   string
+	}{d.Authentication, d.AuthenticationRevision, d.AuthPolicyFingerprint})
 	sum := sha256.Sum256(raw)
 	return fmt.Sprintf("%x", sum[:])
 }
@@ -56,12 +63,12 @@ func (c *Catalog) BusinessAccount(ctx context.Context, d *Database, username str
 		return a, management.ErrDenied
 	}
 	if d.Authentication != nil && d.Authentication.EmployeeDirectory {
-		svc, e := c.Open(ctx, d)
+		st, e := c.OpenStore(ctx, d)
 		if e != nil {
 			return a, e
 		}
-		defer svc.Store.Close()
-		users, e := svc.Store.Users(ctx)
+		defer st.Close()
+		users, e := st.Users(ctx)
 		if e != nil {
 			return a, e
 		}

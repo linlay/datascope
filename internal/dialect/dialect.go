@@ -51,6 +51,15 @@ var safeFunctions = map[string]bool{
 // Compile also checks raw queries. Named bindings are resolved in SQL occurrence
 // order (including repeats), independently of Go map or sql.Named argument order.
 func (e Engine) Compile(query string, args ...any) (string, []any, error) {
+	return e.compile(query, false, args...)
+}
+
+// CompileWrite accepts the portable INSERT/UPDATE/DELETE subset for actions.
+func (e Engine) CompileWrite(query string, args ...any) (string, []any, error) {
+	return e.compile(query, true, args...)
+}
+
+func (e Engine) compile(query string, write bool, args ...any) (string, []any, error) {
 	p := parser.NewParser(strings.NewReader(query))
 	n, err := p.ParseStatement()
 	if err != nil {
@@ -59,8 +68,33 @@ func (e Engine) Compile(query string, args ...any) (string, []any, error) {
 	if next, end := p.ParseStatement(); next != nil || !errors.Is(end, io.EOF) {
 		return "", nil, errors.New("只允许单条 SELECT 语句")
 	}
-	sel, ok := n.(*parser.SelectStatement)
-	if !ok {
+	if write {
+		switch x := n.(type) {
+		case *parser.InsertStatement:
+			if x.WithClause != nil || x.Replace.IsValid() || x.InsertOr.IsValid() || len(x.UpsertClauses) > 0 || x.ReturningClause != nil || x.Alias != nil {
+				return "", nil, errors.New("不支持该 INSERT 形式")
+			}
+			if x.Schema != nil && x.Schema.Name != e.Schema {
+				return "", nil, errors.New("不允许跨 schema 写入")
+			}
+			physical, ok := e.Tables[strings.ToLower(x.Table.Name)]
+			if !ok {
+				return "", nil, errors.New("未登记的写入表")
+			}
+			x.Schema = &parser.Ident{Name: e.Schema, Quoted: true}
+			x.Table = &parser.Ident{Name: physical, Quoted: true}
+		case *parser.UpdateStatement:
+			if x.WhereExpr == nil || x.WithClause != nil || x.UpdateOr.IsValid() || x.Source != nil || x.ReturningClause != nil {
+				return "", nil, errors.New("UPDATE 需要 WHERE，不支持 FROM、WITH、RETURNING 或冲突处理")
+			}
+		case *parser.DeleteStatement:
+			if x.WhereExpr == nil || x.WithClause != nil || x.LimitExpr != nil || len(x.OrderingTerms) > 0 || x.ReturningClause != nil {
+				return "", nil, errors.New("DELETE 需要 WHERE，不支持 WITH、LIMIT、ORDER 或 RETURNING")
+			}
+		default:
+			return "", nil, errors.New("只允许 INSERT/UPDATE/DELETE")
+		}
+	} else if _, ok := n.(*parser.SelectStatement); !ok {
 		return "", nil, errors.New("只允许 SELECT 查询")
 	}
 	ctes := map[string]bool{}
@@ -74,12 +108,16 @@ func (e Engine) Compile(query string, args ...any) (string, []any, error) {
 			ctes[key] = true
 		}
 		return n, nil
-	}), sel)
+	}), n)
 	if err != nil {
 		return "", nil, err
 	}
 	_, err = parser.Walk(parser.VisitFunc(func(n parser.Node) (parser.Node, error) {
 		switch x := n.(type) {
+		case *parser.InsertStatement, *parser.UpdateStatement, *parser.DeleteStatement, *parser.Assignment:
+			if !write {
+				return nil, errors.New("只允许 SELECT")
+			}
 		case *parser.SelectStatement:
 			if len(x.ValueLists) > 0 || len(x.Windows) > 0 {
 				return nil, errors.New("暂不支持 VALUES 或 WINDOW")
@@ -183,11 +221,11 @@ func (e Engine) Compile(query string, args ...any) (string, []any, error) {
 			return nil, fmt.Errorf("未经支持的 SQL 节点 %T", n)
 		}
 		return n, nil
-	}), sel)
+	}), n)
 	if err != nil {
 		return "", nil, err
 	}
-	return e.emit(sel.String(), args)
+	return e.emit(n.String(), args)
 }
 
 type token struct {

@@ -3,21 +3,29 @@ package platform
 
 import (
 	"context"
-	"log/slog"
-	"path/filepath"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/envflag"
 	"datascope-server/internal/management"
+	"log/slog"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 func Open(ctx context.Context) (*management.Store, error) {
-	a, e := audit.Open(envflag.String("AUDIT_DB_PATH", "data/audit.sqlite"))
+	auditPath := envflag.String("AUDIT_DB_PATH", "data/audit.db")
+	managementPath := envflag.String("MANAGEMENT_DB_PATH", "data/management.db")
+	if e := management.CopyLegacyState(filepath.Join(filepath.Dir(managementPath), "management.sqlite"), managementPath); e != nil {
+		return nil, e
+	}
+	if e := management.CopyLegacyState(filepath.Join(filepath.Dir(auditPath), "audit.sqlite"), auditPath); e != nil {
+		slog.Warn("legacy audit copy failed; business startup continues", "error", e)
+	}
+	a, e := audit.Open(auditPath)
 	if e != nil {
 		return nil, e
 	}
-	m, e := management.Open(envflag.String("MANAGEMENT_DB_PATH", "data/management.sqlite"), a)
+	m, e := management.Open(managementPath, a)
 	if e != nil {
 		a.Close()
 		return nil, e
