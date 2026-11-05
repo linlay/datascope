@@ -51,7 +51,8 @@ internal/
 | `data/databases/<ID>/management/` | 逐库 YAML：连接、认证、账号、授权、表权限与结构、Actions、知识；仅保留当前 revision |
 | `data/databases/<ID>/audit.db` | 此库的查询、SQL 改写、Action 与管理审计，异步写入 |
 | `data/databases/<ID>/credentials.key` | 此库连接密码的 AES-256-GCM 密钥，与业务管理 YAML 目录一起备份 |
-| `data/oauth/signing.pem` | 演示 OAuth 私钥，独立文件保存 |
+| `data/oauth/signing.pem` | 平台管理令牌签名私钥 |
+| `data/databases/<ID>/auth/` | 本库 JWT 公私钥与 API Key 校验摘要；不保存 API Key 原文 |
 
 DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；业务库命名不受影响。YAML 配置字段统一使用小驼峰，如 `mcpEnabled`、`maxRows`、`denyUnless`、`businessUserId`，业务标识与脚本正文保留原值；HTTP JSON 接口格式保持不变。运行时会话、OAuth 授权码 / 刷新凭据和连接保留在内存。完整表结构、认证接口约定与发布清单见 [存储与认证改造](docs/storage-auth-refactor.md)。
 

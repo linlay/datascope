@@ -180,6 +180,7 @@ func oauthError(w http.ResponseWriter, code string) {
 func (s *Server) Handler(next http.Handler) http.Handler {
 	m := http.NewServeMux()
 	if s.cfg.AccountDatabase == "" && s.cfg.Catalog != nil {
+		m.HandleFunc("GET /auth/databases/{database}/login-info", s.accountLoginInfo)
 		m.HandleFunc("POST /auth/databases/{database}/token", s.accountToken)
 		m.HandleFunc("/auth/databases/{database}/", s.realmHandler)
 		m.HandleFunc("GET /.well-known/oauth-authorization-server/auth/databases/{database}", s.realmMetadata)
@@ -591,11 +592,19 @@ func (s *Server) signVersion(sub, scope, resource string, version int64) (string
 	return s.signClaims(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random(), "version": version, "identity": s.identity(), "auth_config": s.authConfig()})
 }
 func (s *Server) signClaims(values map[string]any) (string, error) {
+	key := s.key
+	if identity, ok := values["identity"].(string); ok && strings.HasPrefix(identity, "database:") && s.cfg.Management != nil {
+		var err error
+		key, err = s.databaseKey(context.Background(), strings.TrimPrefix(identity, "database:"))
+		if err != nil {
+			return "", err
+		}
+	}
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "at+jwt", "kid": "demo-rsa-1"})
 	claims, _ := json.Marshal(values)
 	body := b64.EncodeToString(header) + "." + b64.EncodeToString(claims)
 	h := sha256.Sum256([]byte(body))
-	sig, e := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, h[:])
+	sig, e := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])
 	return body + "." + b64.EncodeToString(sig), e
 }
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {

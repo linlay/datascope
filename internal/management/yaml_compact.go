@@ -57,6 +57,9 @@ func compactDerivedYAML(path, backup string, st *sourceState) (bool, error) {
 		return false, err
 	}
 	if d, ok := root["database"].(map[string]any); ok {
+		if _, inline := d["sql_examples"]; inline {
+			dirty = true // Split SQL examples into their database-owned file.
+		}
 		if discovery, ok := d["discovery"].(map[string]any); ok {
 			for _, key := range []string{"pending", "checked_at", "attempted_at", "error", "reports"} {
 				if _, exists := discovery[key]; exists {

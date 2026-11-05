@@ -456,3 +456,7 @@ details > summary {
 .field-masking-choice .ant-select {flex:1;min-width:145px;}
 .field-masking-choice .ant-btn {padding-inline:6px;}
 .field-masking-control .ant-input-number {width:60px;}
+
+.business-login { width: min(100% - 32px, 560px); margin: 8vh auto; padding-bottom: 32px; }
+.business-login .ant-card-body { padding: clamp(20px, 5vw, 32px); }
+.business-login-address { overflow-wrap: anywhere; word-break: break-word; }

@@ -28,7 +28,7 @@ func main() {
 	}
 }
 func run() error {
-	id := flag.String("database", "default", "证券演示库 ID")
+	id := flag.String("database", envflag.String("MCP_DATABASE", "default"), "证券演示库 ID")
 	names := flag.String("accounts", "E0001,E0121,E0175", "仅向指定的已有业务账号追加 action 权限，逗号分隔；空值不授权")
 	replace := flag.Bool("replace", false, "显式替换同名的已修改演示 action")
 	backupRoot := flag.String("backup-dir", "data/legacy/action-install", "安装前管理库的一致性备份目录")

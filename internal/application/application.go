@@ -216,6 +216,35 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		default:
 			return nil, s.Management.ResetPassword(ctx, in.UserID, in.Password)
 		}
+	case "rotate_database_api_key", "revoke_database_api_key":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if e := require("mcp.write"); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Authentication == nil || d.Authentication.Source != "DATABASE" || d.Authentication.Provider == nil || d.Authentication.Provider.Type != "STATIC_TOKEN" || d.Authentication.Access == nil || d.Authentication.Access.Mode != "TOKEN" {
+			return nil, errors.New("请先保存本库独立的 Token / API Key 认证配置")
+		}
+		// Remove a legacy env reference before issuing/revoking the database key.
+		if d.Authentication.Provider.SecretEnv != "" {
+			d.Authentication.Provider.SecretEnv = ""
+			if _, e = s.Call(ctx, "save_database", Input{DatabaseID: d.ID, Database: d}); e != nil {
+				return nil, e
+			}
+		}
+		if action == "revoke_database_api_key" {
+			return map[string]bool{"revoked": true}, s.Management.RevokeDatabaseAPIKey(ctx, d.ID)
+		}
+		key, e := s.Management.GenerateDatabaseAPIKey(ctx, d.ID)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]string{"api_key": key, "header_name": d.Authentication.Provider.HeaderName, "mcp_endpoint": strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute()}, nil
 	case "list_business_accounts", "save_business_account":
 		if e := require("grant"); e != nil {
 			return nil, e

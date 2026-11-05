@@ -2,7 +2,7 @@ GOPROXY ?= https://goproxy.cn,direct
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 
-.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build build-linux test test-network clean init init-shop install-demo-actions install-demo-masking migrate-state
+.PHONY: run-mcp run-mcp-stdio run-api run-web web-install build build-linux test test-network clean init init-shop install-demo-actions install-demo-masking migrate-state install-demo-sql-examples
 
 # 三个服务分别在三个终端启动：MCP server、后台 API、前端。
 run-mcp:
@@ -68,3 +68,7 @@ install-demo-actions:
 # 停止 API/MCP 后执行；备份逐库 management.db 并迁移至分目录 YAML。
 migrate-state:
 	$(GO_ENV) go run ./cmd/migrate-state
+
+# 显式补齐证券演示库 SQL 示例，保留已有名称或 SQL 相同的示例。
+install-demo-sql-examples:
+	$(LOAD_ENV) $(GO_ENV) go run ./cmd/install-demo-sql-examples

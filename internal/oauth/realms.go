@@ -29,13 +29,24 @@ func (s *Server) realm(database string) (*Server, error) {
 	scoped.cfg = s.cfg
 	scoped.cfg.AccountDatabase = d.ID
 	scoped.cfg.Issuer = d.AuthorizationIssuer(s.cfg.Issuer)
+	scoped.key, e = s.databaseKey(context.Background(), d.ID)
+	if e != nil {
+		return nil, e
+	}
 	return &scoped, nil
 }
 func (s *Server) realmHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/auth/databases/"+r.PathValue("database")+"/oauth/jwks.json" && r.Method == "GET" {
 		d, err := s.cfg.Catalog.Get(r.PathValue("database"))
 		if err == nil && d.MCPEnabled {
-			jsonOut(w, 200, s.JWKS())
+			key, err := s.databaseKey(r.Context(), d.ID)
+			if err != nil {
+				jsonOut(w, 503, map[string]string{"error": "暂时无法读取数据库公钥"})
+				return
+			}
+			scoped := *s
+			scoped.key = key
+			jsonOut(w, 200, scoped.JWKS())
 			return
 		}
 	}
@@ -159,6 +170,30 @@ func (s *Server) authConfigMatches(g grant) bool {
 }
 func databaseIdentity(identity string) bool {
 	return strings.HasPrefix(identity, "database:")
+}
+
+// accountLoginInfo exposes only the public details needed by the standalone
+// business login page. Account/token configuration stays behind management auth.
+func (s *Server) accountLoginInfo(w http.ResponseWriter, r *http.Request) {
+	d, err := s.cfg.Catalog.Get(r.PathValue("database"))
+	if err != nil || !d.MCPEnabled {
+		jsonOut(w, 404, map[string]string{"error": "数据库不存在或 MCP 未开启"})
+		return
+	}
+	p, err := s.cfg.Management.ResolveAuth(r.Context(), "DATABASE", d.ID)
+	if err != nil {
+		jsonOut(w, 503, map[string]string{"error": "暂时无法读取业务认证配置"})
+		return
+	}
+	if p.Policy.Mode != "ACCOUNT" {
+		jsonOut(w, 400, map[string]string{"error": "当前数据库未启用账号密码登录，请联系管理员"})
+		return
+	}
+	jsonOut(w, 200, map[string]any{
+		"database_id": d.ID, "name": d.Name,
+		"mcp_endpoint": strings.TrimRight(s.cfg.Resource, "/") + "/" + d.MCPRoute(),
+		"expires_in":   3600,
+	})
 }
 
 // accountToken exchanges credentials for a database-bound bearer token. It is

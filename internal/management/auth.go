@@ -66,6 +66,8 @@ type DatabaseAuthConnection struct {
 	Provider *AuthProvider `json:"provider,omitempty" yaml:"provider,omitempty"`
 }
 type ResolvedAuth struct {
+	store *Store
+
 	Source   string       `json:"source,omitempty" yaml:"source,omitempty"`
 	Policy   AuthPolicy   `json:"policy" yaml:"policy"`
 	Provider AuthProvider `json:"provider" yaml:"provider"`
@@ -199,8 +201,8 @@ func validateAuthProvider(p AuthProvider) error {
 	if p.Type == "ONEID" && (!authURL(p.Issuer) || !authURL(p.JWKSURL) || strings.TrimSpace(p.Audience) == "") {
 		return fmt.Errorf("OneID 需要有效的 issuer、JWKS 地址和 audience")
 	}
-	if p.Type == "STATIC_TOKEN" && (!regexpEnv.MatchString(p.SecretEnv) || !validTokenHeader(p.HeaderName)) {
-		return fmt.Errorf("Token 需要 DATASCOPE_AUTH_ 密钥环境变量及有效的自定义请求头（留空使用 Bearer）")
+	if p.Type == "STATIC_TOKEN" && (p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) || !validTokenHeader(p.HeaderName)) {
+		return fmt.Errorf("Token 需要有效的自定义请求头（留空使用 Bearer）；旧环境变量引用须以 DATASCOPE_AUTH_ 开头")
 	}
 	return nil
 }
@@ -385,7 +387,7 @@ func (s *Store) ResolveAuth(ctx context.Context, kind, id string) (ResolvedAuth,
 			}
 		}
 	}
-	out := ResolvedAuth{Revision: cfg.Revision}
+	out := ResolvedAuth{Revision: cfg.Revision, store: s}
 	for _, p := range cfg.Policies {
 		if p.ID == key {
 			out.Policy = p

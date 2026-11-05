@@ -11,7 +11,6 @@ const providerTypes = (mode: AuthPolicy['mode']) => mode === 'OAUTH' ? ['DEMO_OA
 const providerLabel = (type: string) => ({ STATIC_TOKEN: 'Token / API Key', ONEID: 'Desktop 企业 SSO', BUSINESS_ACCOUNT: '账号密码 / 业务 Token', ENTERPRISE_ACCOUNT_API: '企业账号接口', DEMO_OAUTH: '本库业务账号 · OAuth', ENTERPRISE_OAUTH: '企业 OAuth' }[type] || type);
 const providerMode = (type: string): AuthPolicy['mode'] => ['BUSINESS_ACCOUNT', 'ENTERPRISE_ACCOUNT_API'].includes(type) ? 'ACCOUNT' : type === 'STATIC_TOKEN' ? 'TOKEN' : type === 'ONEID' ? 'ONEID' : 'OAUTH';
 const oneIDFields = [['issuer', '身份签发方（Issuer）'], ['jwks_url', '签名公钥地址（JWKS）'], ['audience', '接收方（Audience）']] as const;
-const tokenFields = [['secret_env', '密钥环境变量']] as const;
 const oauthFields = [
  ['issuer', '认证服务标识（Issuer）'], ['authorize_url', '登录授权地址'], ['token_url', 'Token 地址'], ['userinfo_url', '用户信息地址'], ['client_id', '应用标识（Client ID）'],
 ] as const;
@@ -25,6 +24,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
  const t = useI18n();
  const { user } = useAuth();
  const [optionsOpen, setOptionsOpen] = useState(false);
+ const [issuedKey,setIssuedKey]=useState('');
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState('');
  const [form] = Form.useForm();
@@ -43,6 +43,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
  const savedLocal = ['DEMO_OAUTH', 'BUSINESS_ACCOUNT'].includes(db.access?.provider.type || '');
  useEffect(() => { if (!user.system_admin) return; let live = true; managementCall<AuthConfig>('get_auth_config').then(cfg => { if (live) setProviders(cfg.providers); }).catch(e => { if (live) setError(e.message); }); return () => { live = false; }; }, [user.system_admin, db.id]);
  useEffect(() => { setDraft(undefined); setOptionsOpen(false); setError(''); }, [db.id, db.revision]);
+ useEffect(()=>setIssuedKey(''),[db.id]);
  const newProvider = (nextMode: AuthPolicy['mode'], type = nextMode === 'OAUTH' ? 'DEMO_OAUTH' : providerTypes(nextMode)[0]): AuthProvider => ({ id: 'database-provider', name: db.name + '业务认证', type, enabled: true, subject_claim: 'sub', business_id_claim: 'employee_id' });
  const globalProvider = (nextMode: AuthPolicy['mode']) => providers.find(p => p.enabled && providerTypes(nextMode).includes(p.type) && p.id === selected.provider_id) || providers.find(p => p.enabled && p.type === providerTypes(nextMode)[0]) || providers.find(p => p.enabled && providerTypes(nextMode).includes(p.type));
  const update = (patch: Partial<Authentication>) => { setDraft({ ...current, access: { ...selected }, ...patch }); setError(''); };
@@ -69,11 +70,20 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
     }
    }
    if (mode === 'ONEID') for (const [key, label] of oneIDFields) { if (!selectedProvider?.[key]?.trim()) throw new Error(t('{0}不能为空', { '0': t(label) })); }
-   if (mode === 'TOKEN' && (!selectedProvider?.secret_env?.trim() || !selected.business_user_id)) throw new Error(t('请填写密钥环境变量和正整数业务身份'));
+   if (mode === 'TOKEN' && !selected.business_user_id) throw new Error(t('请填写正整数业务身份'));
    setBusy(true); setError('');
    await databases.save({ ...db, authentication: { ...current, source: mode === 'NONE' ? 'GLOBAL' : source, provider: source === 'DATABASE' && mode !== 'NONE' ? current.provider : undefined, access: { ...selected, id: 'database-auth', name: '本库业务认证' } } });
    setDraft(undefined); onSaved(); message.success(t('认证方式已保存，业务客户端需重新连接'));
   } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+ };
+ const manageKey = async (action: 'rotate_database_api_key' | 'revoke_database_api_key') => {
+  setBusy(true);setError('');setIssuedKey('');
+  try {
+   const result=await managementCall<{api_key?:string}>(action,{database_id:db.id});
+   onSaved();
+   if(result.api_key)setIssuedKey(result.api_key);
+   else message.success(t('API Key 已撤销'));
+  }catch(e){setError((e as Error).message);}finally{setBusy(false);}
  };
  const openOptions = () => { form.setFieldsValue(db.authentication || { label: '', employee_directory: false }); setError(''); setOptionsOpen(true); };
  const saveOptions = async () => {
@@ -99,7 +109,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
       </Space> : <>
        <Space wrap><Typography.Text>{t('认证服务')}</Typography.Text><Select aria-label={t('认证服务')} style={{ width: 280, maxWidth: '100%' }} disabled={!user.system_admin || busy} value={selectedProvider?.type} options={providerTypes(displayMode).map(type => ({ value: type, label: t(providerLabel(type)) }))} onChange={type => { const provider = newProvider(displayMode, type); update({ provider, access: { ...selected, mode: providerMode(type), provider_id: provider.id } }); }} /></Space>
        {(mode === 'ONEID' || mode === 'TOKEN') && <Form layout="vertical" disabled={!user.system_admin || busy} className="auth-connection-form">
-        {(mode === 'ONEID' ? oneIDFields : tokenFields).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'secret_env' ? 'DATASCOPE_AUTH_DATABASE_TOKEN' : undefined} /></Form.Item>)}
+        {(mode === 'ONEID' ? oneIDFields : []).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
         {mode === 'TOKEN' && <Form.Item label={t('API Key 请求头（留空使用 Bearer）')}><Input aria-label={t('API Key 请求头')} value={selectedProvider?.header_name || ''} onChange={e => patchProvider({ header_name: e.target.value })} placeholder="X-API-Key" /></Form.Item>}
         {mode === 'ONEID' && optionalFields.filter(([key]) => key !== 'secret_env').map(([key,label]) => <Form.Item key={key} label={t(label)}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
        </Form>}
@@ -111,18 +121,32 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        </Form>}
       </>}
      </>}
-     {mode === 'TOKEN' && <Alert type="info" showIcon title={t('服务端密钥至少 16 字符，通过环境变量设置；Platform 选择 token，并使用相同的 Bearer 或自定义请求头。')} />}
+     {mode === 'TOKEN' && <Space orientation="vertical">
+      <Alert type="info" showIcon title={t('API Key 仅在生成时显示。保存本库配置后可生成或重置密钥；重置后旧密钥立即失效。')} />
+      {source==='DATABASE' && user.system_admin && <Space wrap>
+       <Button disabled={dirty||busy||db.access?.policy.mode!=='TOKEN'} loading={busy} onClick={()=>Modal.confirm({title:t('生成或重置 API Key'),content:t('旧 API Key 将立即失效，请同步更新连接器。'),onOk:()=>manageKey('rotate_database_api_key')})}>{t('生成或重置 API Key')}</Button>
+       <Button danger disabled={dirty||busy||db.access?.policy.mode!=='TOKEN'} onClick={()=>Modal.confirm({title:t('撤销 API Key'),content:t('撤销后，该密钥不能继续访问本数据库。'),onOk:()=>manageKey('revoke_database_api_key')})}>{t('撤销 API Key')}</Button>
+      </Space>}
+     </Space>}
      {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，按请求发送 Desktop ID Token。业务身份字段必须映射到正整数员工编号。')} />}
      {(mode === 'NONE' || !usesAccounts) && <Space wrap>
       {(mode === 'NONE' || mode === 'TOKEN') && <><Typography.Text>{t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')}</Typography.Text><InputNumber aria-label={t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')} min={0} precision={0} disabled={!user.system_admin || busy} value={selected.business_user_id || 0} onChange={value => patchPolicy({ business_user_id: value || 0 })} /></>}
       <Checkbox.Group disabled={!user.system_admin || busy} value={selected.permissions || []} options={[{ value: 'query', label: t('查询') }, { value: 'knowledge.read', label: t('知识查询') }, { value: 'raw_query', label: t('原始查询') }, { value: 'action', label: t('执行动作') }]} onChange={permissions => patchPolicy({ permissions: permissions as string[] })} />
      </Space>}
      {usesAccounts && user.system_admin && <Button disabled={busy || dirty || !savedLocal} onClick={openOptions}>{t('登录选项')}</Button>}
+     {db.access?.policy.mode === 'ACCOUNT' && db.mcp_enabled && <Button href={`#/business-login?database=${encodeURIComponent(db.id)}`} target="_blank" rel="noreferrer">{t('登录并获取个人 Token')}</Button>}
      {db.access?.policy.mode === 'OAUTH' && <div><Typography.Text type="secondary" style={{ marginInlineEnd: 8 }}>{t('已生效的发现地址')}</Typography.Text><Typography.Link href={metadataURL} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>{metadataURL}</Typography.Link></div>}
     </Space>
    </Card>
    {usesAccounts && user.system_admin && <Card title={t('本地账号')}><BusinessAccounts key={db.id} db={db}/></Card>}
   </Space>
+  <Modal title={t('API Key 已生成')} open={!!issuedKey} onCancel={()=>setIssuedKey('')} onOk={()=>setIssuedKey('')} okText={t('已保存，关闭')} cancelButtonProps={{style:{display:'none'}}} destroyOnHidden>
+   <Space orientation="vertical" style={{width:'100%'}}>
+    <Alert type="warning" showIcon title={t('请立即复制并保存，关闭后无法再次查看。')} />
+    <Input.Password aria-label="API Key" value={issuedKey} readOnly autoComplete="off" />
+    <Button onClick={()=>void navigator.clipboard.writeText(issuedKey).then(()=>message.success(t('API Key 已复制'))).catch(()=>message.error(t('复制失败，请手动复制')))}>{t('复制 API Key')}</Button>
+   </Space>
+  </Modal>
   <Modal {...saveModalProps} title={t('登录选项')} open={optionsOpen} onCancel={() => setOptionsOpen(false)} onOk={() => void saveOptions()} confirmLoading={busy} destroyOnHidden>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
    <Form form={form} layout="vertical">

@@ -42,14 +42,24 @@ func validTokenHeader(name string) bool {
 }
 
 func (r ResolvedAuth) verifyStaticToken(database, token string) (BusinessAccount, error) {
-	secret := os.Getenv(r.Provider.SecretEnv)
-	// Missing/empty secrets fail closed, including when the caller sends none.
-	if len(secret) < 16 || token == "" || len(token) > 65536 || r.Policy.BusinessUserID <= 0 {
+	if token == "" || len(token) > 65536 || r.Policy.BusinessUserID <= 0 {
 		return BusinessAccount{}, ErrDenied
 	}
-	want, got := sha256.Sum256([]byte(secret)), sha256.Sum256([]byte(token))
-	if subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
-		return BusinessAccount{}, ErrDenied
+	if r.Provider.SecretEnv == "" {
+		if r.store == nil || !r.store.verifyDatabaseAPIKey(context.Background(), database, token) {
+			return BusinessAccount{}, ErrDenied
+		}
+	} else {
+		// Compatibility for explicitly configured external deployments. New keys
+		// are generated into each database's auth directory, never its YAML or env.
+		secret := os.Getenv(r.Provider.SecretEnv)
+		if len(secret) < 16 {
+			return BusinessAccount{}, ErrDenied
+		}
+		want, got := sha256.Sum256([]byte(secret)), sha256.Sum256([]byte(token))
+		if subtle.ConstantTimeCompare(want[:], got[:]) != 1 {
+			return BusinessAccount{}, ErrDenied
+		}
 	}
 	return BusinessAccount{ID: externalID("token:"+database, r.Provider.ID), DatabaseID: database, Username: "token:" + r.Provider.ID, Name: r.Provider.Name, BusinessUserID: r.Policy.BusinessUserID, Permissions: r.Policy.Permissions, Active: true, AuthVersion: int64(r.Revision)}, nil
 }

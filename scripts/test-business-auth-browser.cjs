@@ -36,7 +36,6 @@ const server = spawn(process.execPath, [resolve(root, 'web/node_modules/vite/bin
   await page.reload(); await choice('企业 SSO（oneid）').waitFor(); assert.equal(await choice('企业 SSO（oneid）').isChecked(),true);
   if(output)await card.screenshot({path:resolve(output,'business-auth-oneid.png')});
   await choice('Token / API Key（token）').check();
-  await card.getByRole('textbox',{name:'密钥环境变量',exact:true}).fill('DATASCOPE_AUTH_TEST_KEY');
   await card.getByRole('textbox',{name:'API Key 请求头',exact:true}).fill('X-API-Key');
   await card.getByRole('spinbutton',{name:'Token 业务身份',exact:true}).fill('10');
   await card.getByRole('button',{name:'保存',exact:true}).click();
@@ -44,6 +43,31 @@ const server = spawn(process.execPath, [resolve(root, 'web/node_modules/vite/bin
   db=await getDB(); assert.equal(db.access.policy.mode,'TOKEN'); assert.equal(db.access.provider.header_name,'X-API-Key'); assert.equal(db.access.policy.business_user_id,10);
   await page.reload(); await choice('Token / API Key（token）').waitFor(); assert.equal(await choice('Token / API Key（token）').isChecked(),true);
   if(output)await card.screenshot({path:resolve(output,'business-auth-token.png')});
+  const generate=async()=>{
+   await card.getByRole('button',{name:'生成或重置 API Key',exact:true}).click();
+   const confirmation=page.getByRole('dialog').filter({hasText:'旧 API Key 将立即失效，请同步更新连接器。'});
+   await confirmation.getByRole('button',{name:/确\s*定/}).click();
+   const issued=page.getByRole('dialog').filter({hasText:'API Key 已生成'});
+   await issued.getByLabel('API Key',{exact:true}).waitFor();
+   const key=await issued.getByLabel('API Key',{exact:true}).inputValue();
+   assert.ok(key.startsWith('ds_'));
+   await issued.getByRole('button',{name:'已保存，关闭',exact:true}).click();
+   return key;
+  };
+  const probe=async key=>{
+   const response=await context.request.post('http://127.0.0.1:18090/mcp/default',{headers:{'X-API-Key':key,Accept:'application/json, text/event-stream'},data:{jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'api-key-ui-test',version:'1'}}}});
+   return response.status();
+  };
+  const firstKey=await generate();assert.equal(await probe(firstKey),200);
+  const secondKey=await generate();assert.equal(await probe(firstKey),401);assert.equal(await probe(secondKey),200);
+  const persisted=await page.evaluate(()=>JSON.stringify({...localStorage,...sessionStorage}));
+  assert.ok(!persisted.includes(firstKey)&&!persisted.includes(secondKey));
+  await page.reload();await card.getByRole('button',{name:'撤销 API Key',exact:true}).waitFor();
+  assert.equal(await page.getByLabel('API Key',{exact:true}).count(),0);
+  await card.getByRole('button',{name:'撤销 API Key',exact:true}).click();
+  await page.getByRole('dialog').filter({hasText:'撤销后，该密钥不能继续访问本数据库。'}).getByRole('button',{name:/确\s*定/}).click();
+  await page.getByText('API Key 已撤销',{exact:true}).waitFor();assert.equal(await probe(secondKey),401);
+
   await page.setViewportSize({width:720,height:1000});
   if(output)await card.screenshot({path:resolve(output,'business-auth-narrow.png')});
   const width=await page.evaluate(()=>({viewport:innerWidth,body:document.documentElement.scrollWidth}));

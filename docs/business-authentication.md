@@ -45,9 +45,11 @@ authentication:
 
 ## Token / API Key
 
-选择“Token / API Key → 本库独立配置 → Token / API Key”，填写密钥环境变量名，例如 `DATASCOPE_AUTH_FINANCE_KEY`，以及固定的正整数业务身份和能力。密钥本身至少 16 字符，由部署环境提供；配置、API 响应、审计均只保存变量名。变量未设置、为空或过短时拒绝所有请求。修改部署环境变量后需重新创建/启动持有该环境的容器。
+选择“Token / API Key → 本库独立配置 → Token / API Key”，填写固定的正整数业务身份及能力。保存后点击“生成或重置 API Key”。服务端生成 32 字节随机密钥，只在该次响应中返回原文；关闭弹窗后不能再次查看。重置后旧密钥立即失效，也可直接撤销。
 
-请求头留空时使用 `Authorization: Bearer <密钥>`，Platform 选择 `token` 的 Bearer 类型。配置 `X-API-Key` 等自定义头时，Platform 选择 Header 类型并填写同一请求头名；此时 Authorization Bearer 不作为替代入口。禁止 Host、Cookie、Authorization、MCP 协议等保留请求头。API Key 使用固定业务身份和当前配置能力，每次请求重新解析策略，配置撤销即时生效。
+每个数据库独立保存 SHA-256 校验摘要：`data/databases/<ID>/auth/api-key.sha256`。API Key 原文不写入 YAML、`.env` 或审计。认证配置只定义方式、请求头、业务身份与能力，不包含密钥或摘要。摘要文件与目录权限分别为 `0600`、`0700`；删除或损坏摘要后拒绝认证，不回退到其他数据库的密钥。旧部署明确配置的 `secretEnv` 引用保留兼容，点击生成/撤销时会移除本库的旧环境变量引用。
+
+请求头留空时使用 `Authorization: Bearer <密钥>`，连接器选择 Bearer；配置 `X-API-Key` 时，选择 Header 并填写同名请求头。此时 Authorization Bearer 不作为替代入口。
 
 ```yaml
 authentication:
@@ -65,9 +67,10 @@ authentication:
     name: Finance API Key
     type: STATIC_TOKEN
     enabled: true
-    secretEnv: DATASCOPE_AUTH_FINANCE_KEY
     headerName: X-API-Key
 ```
+
+普通 API Key 是随机共享秘密，使用摘要比较，不依赖公私钥。登录签发的个人 JWT 则使用 RSA 私钥签名与公钥验签。业务库的密钥对保存在各自 `data/databases/<ID>/auth/signing.pem` 和 `public.pem`，公钥通过 `/auth/databases/<ID>/oauth/jwks.json` 发布；平台管理令牌继续使用平台自己的签名密钥。升级到逐库密钥后，旧业务 Token 需重新登录获取。
 
 账号密码子方式沿用 BUSINESS_ACCOUNT 或 ENTERPRISE_ACCOUNT_API；Platform 可选择 `token` 的 Basic 类型，填写账号密码。也可先从本库账号接口获取短期业务 Token，再手动填入 Platform Bearer 表单。
 
@@ -76,3 +79,13 @@ authentication:
 业务工作台允许粘贴业务 Bearer/ID Token/API Key，仅在页面内存保留；自定义 API Key 由后端按配置写入对应上游请求头。OneID 本人确认页通过重新验证本人 ID Token，比对原预览主体和配置版本后执行。共享 Token/API Key 不能代替个人确认，需要本人确认的动作须使用账号、OAuth 或 OneID；无需本人确认的动作仍按当前业务权限和写入策略检查。
 
 ONEID/TOKEN 不发布浏览器 OAuth 授权服务器元数据。切换模式后应在 Platform 使用相应模式重新配置连接器；仅 OAuth 模式应发起浏览器授权。
+
+## 业务登录与个人 Token
+
+账号密码方式（`ACCOUNT`）的数据库可使用独立登录页：`/#/business-login?database=<数据库 ID>`。数据库业务认证卡片提供“登录并获取个人 Token”入口，不要求先登录平台管理后台。
+
+页面使用公开的 `GET /auth/databases/<ID>/login-info` 获取数据库名称、MCP 地址和有效期，再调用已有的 `POST /auth/databases/<ID>/token` 验证业务账号密码，签发有效期为一小时的个人 Bearer Token。连接器选择 **Token → Bearer**，粘贴 Token。权限来自当前业务账号；账号停用、密码或权限变更、认证配置变更后，旧 Token 按现有校验机制失效。
+
+密码和 Token 不写入浏览器存储、URL 或平台登录会话。Token 在当前页面内存中保留，刷新、关闭或到期后清除；页面清除不等于服务端撤销。共享 API Key（`TOKEN`）、OAuth 和 OneID 配置不通过此页面换票。使用账号登录时，应在管理后台选择“Token / API Key → 账号密码 / 业务 Token”，并建立该库自己的业务账号。
+
+前端代理需将 `/auth` 转发到管理 API，与 `/api` 的目标相同；本地 Vite 已配置此规则。外部部署应使用 HTTPS。

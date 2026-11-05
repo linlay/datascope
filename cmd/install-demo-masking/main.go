@@ -44,7 +44,7 @@ func main() {
 }
 
 func run() error {
-	id := flag.String("database", "default", "证券演示库 ID")
+	id := flag.String("database", envflag.String("MCP_DATABASE", "default"), "证券演示库 ID")
 	check := flag.Bool("check", false, "仅检查目标库并列出缺少规则的字段，不修改配置")
 	flag.Parse()
 	ctx := context.Background()
