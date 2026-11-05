@@ -144,6 +144,11 @@ func code(t *testing.T, e *env, id, emp string) string {
 	if !strings.Contains(headers.Get("Content-Security-Policy"), "form-action 'self' http://127.0.0.1;") {
 		t.Fatal("CSP blocks registered loopback callback")
 	}
+	for _, removed := range []string{"Integration test", "资源：", "请求权限", "sql:query", "切换账号请重新发起授权"} {
+		if strings.Contains(string(body), removed) {
+			t.Fatalf("login page exposes unnecessary content %q", removed)
+		}
+	}
 	if strings.Contains(string(body), "debug_employee") {
 		t.Fatal("debug login present in normal mode")
 	}
@@ -158,9 +163,20 @@ func code(t *testing.T, e *env, id, emp string) string {
 	if status != 400 {
 		t.Fatal("missing CSRF accepted")
 	}
-	status, _, _ = request(t, c, "POST", u.String(), url.Values{"nonce": {nonce}, "emp_no": {emp}, "password": {"wrong"}}, "")
+	status, headers, body = request(t, c, "POST", u.String(), url.Values{"nonce": {nonce}, "emp_no": {emp}, "password": {"wrong"}}, "")
 	if status != 401 {
 		t.Fatal("wrong password accepted")
+	}
+	for _, want := range []string{`<form method="post" action="/oauth/authorize">`, `name="nonce" value="` + nonce + `"`, `value="` + emp + `"`, `role="alert"`, "用户名或密码错误，请重新输入。"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing retry form content %q: %s", want, body)
+		}
+	}
+	if headers.Get("Cache-Control") != "no-store" || !strings.HasPrefix(headers.Get("Content-Type"), "text/html") || headers.Get("Location") != "" {
+		t.Fatalf("invalid retry response headers: %v", headers)
+	}
+	if strings.Contains(string(body), `value="wrong"`) || strings.Contains(string(body), "test-demo-password") {
+		t.Fatal("password reflected in retry page")
 	}
 	status, h, body := request(t, c, "POST", u.String(), url.Values{"nonce": {nonce}, "emp_no": {emp}, "password": {"test-demo-password"}}, "")
 	if emp == "E0176" {

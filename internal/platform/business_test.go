@@ -126,7 +126,7 @@ func employeeTokens(t *testing.T, env *realmEnv, database, password string) (map
 	must(t, e)
 	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	status, headers, body := formRequest(t, client, "GET", realm+"/oauth/authorize?"+params.Encode(), nil)
-	if status != 200 || !strings.Contains(body, "账号授权") && !strings.Contains(body, "员工认证") {
+	if status != 200 || !strings.Contains(body, "登录并授权") {
 		t.Fatalf("authorize %d: %s", status, body)
 	}
 	var nonce string
@@ -134,6 +134,18 @@ func employeeTokens(t *testing.T, env *realmEnv, database, password string) (map
 	for _, cookie := range jar.Cookies(endpoint) {
 		if strings.HasPrefix(cookie.Name, "oauth_login_") {
 			nonce = cookie.Value
+		}
+	}
+	if password == "employee-"+database+"-password" {
+		// A failed submission must keep the same database authorization usable.
+		status, headers, body = formRequest(t, client, "POST", realm+"/oauth/authorize", url.Values{"nonce": {nonce}, "emp_no": {"E0001"}, "password": {"incorrect-password"}})
+		for _, want := range []string{`action="/auth/databases/` + database + `/oauth/authorize"`, `name="nonce" value="` + nonce + `"`, `value="E0001"`, "用户名或密码错误，请重新输入。"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing realm retry content %q: %s", want, body)
+			}
+		}
+		if status != 401 || headers.Get("Location") != "" || headers.Get("Cache-Control") != "no-store" || strings.Contains(body, "incorrect-password") {
+			t.Fatalf("invalid realm retry response: %d %s", status, body)
 		}
 	}
 	status, headers, body = formRequest(t, client, "POST", realm+"/oauth/authorize", url.Values{"nonce": {nonce}, "emp_no": {"E0001"}, "password": {password}})
