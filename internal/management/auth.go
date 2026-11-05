@@ -33,6 +33,9 @@ type AuthProvider struct {
 	SubjectClaim    string `json:"subject_claim,omitempty" yaml:"subjectClaim,omitempty"`
 	UsernameClaim   string `json:"username_claim,omitempty" yaml:"usernameClaim,omitempty"`
 	BusinessIDClaim string `json:"business_id_claim,omitempty" yaml:"businessIdClaim,omitempty"`
+	JWKSURL         string `json:"jwks_url,omitempty" yaml:"jwksUrl,omitempty"`
+	Audience        string `json:"audience,omitempty" yaml:"audience,omitempty"`
+	HeaderName      string `json:"header_name,omitempty" yaml:"headerName,omitempty"`
 }
 type AuthPolicy struct {
 	ID             string   `json:"id" yaml:"id"`
@@ -174,7 +177,7 @@ func authURL(raw string) bool {
 	return e == nil && u.Host != "" && u.User == nil && u.Fragment == "" && (u.Scheme == "https" || u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1"))
 }
 func validateAuthProvider(p AuthProvider) error {
-	if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "DEMO_OAUTH", "ENTERPRISE_OAUTH", "ENTERPRISE_ACCOUNT_API"}, p.Type) {
+	if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "DEMO_OAUTH", "ENTERPRISE_OAUTH", "ENTERPRISE_ACCOUNT_API", "ONEID", "STATIC_TOKEN"}, p.Type) {
 		return fmt.Errorf("认证提供方无效: %s", p.ID)
 	}
 	if p.Type == "ENTERPRISE_OAUTH" {
@@ -193,7 +196,27 @@ func validateAuthProvider(p AuthProvider) error {
 	if p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) {
 		return fmt.Errorf("认证密钥需使用 DATASCOPE_AUTH_ 开头的环境变量")
 	}
+	if p.Type == "ONEID" && (!authURL(p.Issuer) || !authURL(p.JWKSURL) || strings.TrimSpace(p.Audience) == "") {
+		return fmt.Errorf("OneID 需要有效的 issuer、JWKS 地址和 audience")
+	}
+	if p.Type == "STATIC_TOKEN" && (!regexpEnv.MatchString(p.SecretEnv) || !validTokenHeader(p.HeaderName)) {
+		return fmt.Errorf("Token 需要 DATASCOPE_AUTH_ 密钥环境变量及有效的自定义请求头（留空使用 Bearer）")
+	}
 	return nil
+}
+
+func authProviderMatches(mode, provider string) bool {
+	switch mode {
+	case "ACCOUNT":
+		return slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "ENTERPRISE_ACCOUNT_API"}, provider)
+	case "OAUTH":
+		return provider == "DEMO_OAUTH" || provider == "ENTERPRISE_OAUTH"
+	case "ONEID":
+		return provider == "ONEID"
+	case "TOKEN":
+		return provider == "STATIC_TOKEN"
+	}
+	return false
 }
 func validateAuth(cfg AuthConfig) error {
 	providers := map[string]AuthProvider{}
@@ -208,7 +231,7 @@ func validateAuth(cfg AuthConfig) error {
 	}
 	policies := map[string]AuthPolicy{}
 	for _, p := range cfg.Policies {
-		if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"ACCOUNT", "OAUTH", "NONE"}, p.Mode) {
+		if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"ACCOUNT", "OAUTH", "NONE", "ONEID", "TOKEN"}, p.Mode) {
 			return fmt.Errorf("认证策略无效")
 		}
 		if _, ok := policies[p.ID]; ok {
@@ -219,9 +242,12 @@ func validateAuth(cfg AuthConfig) error {
 			if !ok || !provider.Enabled {
 				return fmt.Errorf("策略引用不可用的认证提供方")
 			}
-			if p.Mode == "ACCOUNT" && !slices.Contains([]string{"PLATFORM_ACCOUNT", "BUSINESS_ACCOUNT", "ENTERPRISE_ACCOUNT_API"}, provider.Type) || p.Mode == "OAUTH" && !slices.Contains([]string{"DEMO_OAUTH", "ENTERPRISE_OAUTH"}, provider.Type) {
+			if !authProviderMatches(p.Mode, provider.Type) {
 				return fmt.Errorf("认证方式与提供方类型不匹配")
 			}
+		}
+		if p.Mode == "TOKEN" && p.BusinessUserID <= 0 {
+			return fmt.Errorf("Token 策略需要正整数业务身份")
 		}
 		for _, cap := range p.Permissions {
 			if !slices.Contains(BusinessPermissions, cap) {
@@ -245,7 +271,7 @@ func validateAuth(cfg AuthConfig) error {
 		if !ok || seen[b.TargetType+"/"+b.TargetID] {
 			return fmt.Errorf("认证绑定重复或策略不存在")
 		}
-		if b.TargetType == "API" && (p.Mode == "NONE" || providers[p.ProviderID].Type == "BUSINESS_ACCOUNT" || providers[p.ProviderID].Type == "DEMO_OAUTH") {
+		if b.TargetType == "API" && (p.Mode == "NONE" || p.Mode == "ONEID" || p.Mode == "TOKEN" || providers[p.ProviderID].Type == "BUSINESS_ACCOUNT" || providers[p.ProviderID].Type == "DEMO_OAUTH") {
 			return fmt.Errorf("平台管理入口需要平台账号或企业认证")
 		}
 		if b.TargetType == "DATABASE" && providers[p.ProviderID].Type == "PLATFORM_ACCOUNT" {
@@ -419,7 +445,7 @@ func validateDatabaseAuth(connection DatabaseAuthConnection, providers []AuthPro
 	}
 	if connection.Source == "DATABASE" {
 		if connection.Provider == nil || connection.Access == nil || connection.Access.Mode == "NONE" {
-			return fmt.Errorf("本库独立认证需要提供方和账号密码或 OAuth 策略")
+			return fmt.Errorf("本库独立认证需要提供方及认证策略")
 		}
 		if err := validateAuthProvider(*connection.Provider); err != nil {
 			return err
@@ -434,7 +460,7 @@ func validateDatabaseAuth(connection DatabaseAuthConnection, providers []AuthPro
 	return validateBusinessAuth(*connection.Access, providers)
 }
 func validateBusinessAuth(p AuthPolicy, providers []AuthProvider) error {
-	if !slices.Contains([]string{"NONE", "ACCOUNT", "OAUTH"}, p.Mode) {
+	if !slices.Contains([]string{"NONE", "ACCOUNT", "OAUTH", "ONEID", "TOKEN"}, p.Mode) {
 		return fmt.Errorf("认证方式无效")
 	}
 	if p.ID == "" || p.Name == "" || p.BusinessUserID < 0 {
@@ -443,13 +469,16 @@ func validateBusinessAuth(p AuthPolicy, providers []AuthProvider) error {
 	if p.Mode == "NONE" && p.ProviderID != "" {
 		return fmt.Errorf("无需认证时不能指定提供方")
 	}
+	if p.Mode == "TOKEN" && p.BusinessUserID <= 0 {
+		return fmt.Errorf("Token 策略需要正整数业务身份")
+	}
 	if p.Mode != "NONE" {
 		valid := false
 		for _, provider := range providers {
 			if provider.ID != p.ProviderID || !provider.Enabled {
 				continue
 			}
-			valid = p.Mode == "ACCOUNT" && slices.Contains([]string{"BUSINESS_ACCOUNT", "ENTERPRISE_ACCOUNT_API"}, provider.Type) || p.Mode == "OAUTH" && slices.Contains([]string{"DEMO_OAUTH", "ENTERPRISE_OAUTH"}, provider.Type)
+			valid = provider.Type != "PLATFORM_ACCOUNT" && authProviderMatches(p.Mode, provider.Type)
 		}
 		if !valid {
 			return fmt.Errorf("请选择与认证方式匹配且已启用的业务认证提供方")
@@ -560,6 +589,16 @@ func providerRequest(ctx context.Context, p AuthProvider, endpoint, method, toke
 	return claims, nil
 }
 func (r ResolvedAuth) VerifyBearer(ctx context.Context, database, token string) (BusinessAccount, error) {
+	if r.Policy.Mode == "ONEID" && r.Provider.Type == "ONEID" {
+		claims, err := verifyOneID(ctx, r.Provider, token)
+		if err != nil {
+			return BusinessAccount{}, err
+		}
+		return r.Identity(database, claims)
+	}
+	if r.Policy.Mode == "TOKEN" && r.Provider.Type == "STATIC_TOKEN" {
+		return r.verifyStaticToken(database, token)
+	}
 	if r.Policy.Mode != "OAUTH" || r.Provider.Type != "ENTERPRISE_OAUTH" || token == "" {
 		return BusinessAccount{}, ErrDenied
 	}

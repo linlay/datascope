@@ -214,8 +214,8 @@ export interface ActionLibrary { name: string; title: string; description: strin
 export interface ActionSchema { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, {type:string;description?:string;enum?:unknown[];minimum?:number;maximum?:number;maxLength?:number;pattern?:string}> }
 export interface ActionDescription { view_id?:string; view_uri?:string; name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }
 export interface ActionPreview { status:string;message?:string;result?:unknown;preview?:{result:unknown;writes:{sql:string;rows:number;binds:unknown[]}[]};sql?:unknown[] }
-export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string}
-export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE';provider_id?:string;permissions?:string[];business_user_id?:number}
+export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string;jwks_url?:string;audience?:string;header_name?:string}
+export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'|'ONEID'|'TOKEN';provider_id?:string;permissions?:string[];business_user_id?:number}
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {

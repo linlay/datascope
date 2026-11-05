@@ -21,12 +21,16 @@ import (
 
 // This client uses only a human-supplied business bearer, never platform
 // impersonation headers. Tokens live in the request and are never audited.
-type businessBearer struct{ token string }
+type businessBearer struct{ token, header string }
 
 func (b businessBearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	if b.token != "" {
-		r.Header.Set("Authorization", "Bearer "+b.token)
+		if b.header != "" {
+			r.Header.Set(b.header, b.token)
+		} else {
+			r.Header.Set("Authorization", "Bearer "+b.token)
+		}
 	}
 	return http.DefaultTransport.RoundTrip(r)
 }
@@ -96,7 +100,11 @@ func businessWorkbench(app *application.Service, w http.ResponseWriter, r *http.
 		if p.Policy.Mode == "NONE" {
 			token = ""
 		}
-		client := &http.Client{Transport: businessBearer{token}, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		header := ""
+		if p.Policy.Mode == "TOKEN" {
+			header = p.Provider.HeaderName
+		}
+		client := &http.Client{Transport: businessBearer{token: token, header: header}, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		session, e := mcp.NewClient(&mcp.Implementation{Name: "datascope-business-workbench", Version: "1"}, nil).Connect(ctx, &mcp.StreamableClientTransport{Endpoint: resource, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 		if e != nil {
 			platformError(w, fmt.Errorf("业务 MCP 连接失败，请检查认证和服务状态"))

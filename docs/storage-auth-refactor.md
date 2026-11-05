@@ -73,7 +73,11 @@ go run ./cmd/migrate-state -data-dir data
 | ACCOUNT | ENTERPRISE_ACCOUNT_API | 企业账号密码验证接口 |
 | OAUTH | DEMO_OAUTH | 当前库本地业务账号 |
 | OAUTH | ENTERPRISE_OAUTH | 企业授权、令牌、UserInfo 地址 |
+| ONEID | ONEID | Desktop ID Token，经配置的 JWKS 验签并映射业务身份 |
+| TOKEN | STATIC_TOKEN | 环境变量中的 Bearer/API Key，绑定固定业务身份及能力 |
 | NONE | 无 | 配置的固定业务身份及能力 |
+
+业务页面对应 Platform 的 none、mcp、oneid、token 四项，旧 ACCOUNT 保留为 Token 下的账号密码方式。OneID、公钥缓存、凭据请求头及部署配置示例见 [业务 MCP 认证](business-authentication.md)。
 
 企业提供方字段、HTTPS 与 loopback HTTP 限制保持现有接口约定。企业账号接口接收 POST JSON username/password，返回可信 sub、username、employee_id、name、active；身份与能力不由客户端自行指定。`subject_claim` 默认 sub，`business_id_claim` 默认 employee_id。企业 OAuth 使用 code + S256 PKCE、一次性 state，再请求 UserInfo。企业密钥仍只引用 `DATASCOPE_AUTH_*` 环境变量。
 

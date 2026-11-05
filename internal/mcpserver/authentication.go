@@ -58,11 +58,14 @@ func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Data
 			if e == nil && p.Provider.Type == "BUSINESS_ACCOUNT" {
 				a, e = c.BusinessAccount(r.Context(), d, username)
 			}
-		case "OAUTH":
+		case "OAUTH", "ONEID", "TOKEN":
 			token := ""
 			parts := strings.Fields(r.Header.Get("Authorization"))
 			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 				token = parts[1]
+			}
+			if p.Policy.Mode == "TOKEN" && p.Provider.HeaderName != "" {
+				token = r.Header.Get(p.Provider.HeaderName)
 			}
 			a, e = p.VerifyBearer(r.Context(), d.ID, token)
 		default:
@@ -72,6 +75,8 @@ func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Data
 			if p.Policy.Mode == "OAUTH" {
 				u, _ := url.Parse(resource)
 				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+u.Scheme+"://"+u.Host+"/.well-known/oauth-protected-resource"+u.Path+`"`)
+			} else if p.Policy.Mode == "ONEID" || p.Policy.Mode == "TOKEN" && p.Provider.HeaderName == "" {
+				w.Header().Set("WWW-Authenticate", `Bearer realm="DataScope"`)
 			}
 			http.Error(w, "身份认证失败", 401)
 			return

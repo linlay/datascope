@@ -162,8 +162,8 @@ export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db:
    <Space orientation="vertical" style={{ width: '100%' }}>
     <Select aria-label={t('选择业务动作')} style={{ width: '100%' }} disabled={busy || attempted} value={detail?.name||route.selection} placeholder={t('选择业务动作')} options={actions.map(a => ({ value: a.name, label: `${a.title} (${a.name})` }))} onChange={name => void describe(name)} />
     {detail && <><Typography.Paragraph>{detail.description}</Typography.Paragraph><JsonData value={detail.parameters} /><CodeEditor language="json" height="160px" value={args} readOnly={busy || attempted} onChange={setArgs} /><Typography.Text code>request_id: {requestID}</Typography.Text>
-     {info?.mode === 'NONE' && detail.confirm && <Alert type="warning" showIcon title={t('此动作需要本人确认，请先配置账号或 OAuth 认证。匿名身份不能由其他账号代签。')} />}
-     <Space wrap><Button danger type="primary" disabled={busy || !ready || attempted || info?.mode === 'NONE' && detail.confirm} onClick={execute}>{t('正式调用')}</Button><Button disabled={busy || !ready || !attempted} onClick={() => void lookup()}>{t('查询同一请求结果')}</Button><Button disabled={busy} onClick={reset}>{t('新请求')}</Button></Space>
+     {(info?.mode === 'NONE' || info?.mode === 'TOKEN') && detail.confirm && <Alert type="warning" showIcon title={t('此动作需要本人确认，请使用业务账号、OAuth 或 OneID。匿名身份和共享 API Key 不能代签。')} />}
+     <Space wrap><Button danger type="primary" disabled={busy || !ready || attempted || (info?.mode === 'NONE' || info?.mode === 'TOKEN') && detail.confirm} onClick={execute}>{t('正式调用')}</Button><Button disabled={busy || !ready || !attempted} onClick={() => void lookup()}>{t('查询同一请求结果')}</Button><Button disabled={busy} onClick={reset}>{t('新请求')}</Button></Space>
     </>}
    </Space>
   </Card>

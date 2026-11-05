@@ -143,7 +143,7 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 ## 每个数据库独立的业务认证
 
-在系统设置的全局认证配置中，先定义普通账号（ACCOUNT）、OAuth（OAUTH）、不需要认证（NONE）三类策略，再绑定平台接口与业务数据库。普通账号支持平台账号、逐库演示账号、企业账号验证接口；OAuth 支持演示与企业提供方。企业身份由配置的接口或 UserInfo 验证，不要求先创建 BUSINESS_ACCOUNT。
+业务 MCP 对应 Platform 的 `none`、`mcp`、`oneid`、`token` 四种接入模式，配置与示例见 [业务 MCP 认证](docs/business-authentication.md)。全局提供方可由业务库引用，也可使用本库独立配置。普通账号支持平台账号、逐库演示账号、企业账号验证接口；OAuth 支持演示与企业提供方。平台管理登录继续使用普通账号或企业 OAuth。
 
 演示账号的兼容 `authentication` 配置用于设置登录页名称和员工目录校验：
 
@@ -196,7 +196,7 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数据库的令牌不能混用。业务 MCP 按数据库认证来源重新检查当前业务账号、能力和工具启停；管理 MCP 检查平台账号及管理授权。已有连接不能保留已撤销权限。
 
-管理端登记的业务 MCP 统一要求 HTTP OAuth，使用当前数据库的独立业务账号。`header`、`none` 及 stdio 不提供平台账号访问业务 MCP 的替代入口。底层独立演示测试仍可使用无管理库的传输模式。
+管理端登记的业务 MCP 按数据库保存的认证策略检查身份，支持 OAuth、OneID、Token/API Key 及显式无需认证。环境变量 `MCP_AUTH_MODE` 不覆盖逐库策略。平台账号不能代替业务身份。底层独立演示测试仍可使用无管理库的传输模式。
 
 ## SELECT 与绑定变量
 
