@@ -25,7 +25,10 @@ func httpHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer
 	if mode != "oauth" && mode != "header" && mode != "none" {
 		return nil, fmt.Errorf("unknown MCP_AUTH_MODE %q", mode)
 	}
-	h := http.Handler(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: stateless}))
+	h := http.Handler(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		Stateless:                  stateless,
+		DisableLocalhostProtection: true,
+	}))
 	mux := http.NewServeMux()
 	if mode == "oauth" {
 		issuer = strings.TrimRight(issuer, "/")
