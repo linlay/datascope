@@ -216,6 +216,35 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		default:
 			return nil, s.Management.ResetPassword(ctx, in.UserID, in.Password)
 		}
+	case "rotate_database_api_key", "revoke_database_api_key":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if e := require("mcp.write"); e != nil {
+			return nil, e
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		if d.Authentication == nil || d.Authentication.Source != "DATABASE" || d.Authentication.Provider == nil || d.Authentication.Provider.Type != "STATIC_TOKEN" || d.Authentication.Access == nil || d.Authentication.Access.Mode != "TOKEN" {
+			return nil, errors.New("请先保存本库独立的 Token / API Key 认证配置")
+		}
+		// Remove a legacy env reference before issuing/revoking the database key.
+		if d.Authentication.Provider.SecretEnv != "" {
+			d.Authentication.Provider.SecretEnv = ""
+			if _, e = s.Call(ctx, "save_database", Input{DatabaseID: d.ID, Database: d}); e != nil {
+				return nil, e
+			}
+		}
+		if action == "revoke_database_api_key" {
+			return map[string]bool{"revoked": true}, s.Management.RevokeDatabaseAPIKey(ctx, d.ID)
+		}
+		key, e := s.Management.GenerateDatabaseAPIKey(ctx, d.ID)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]string{"api_key": key, "header_name": d.Authentication.Provider.HeaderName, "mcp_endpoint": strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute()}, nil
 	case "list_business_accounts", "save_business_account":
 		if e := require("grant"); e != nil {
 			return nil, e
@@ -438,6 +467,15 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
+		_, maskingChanged, maskErr := catalog.MergeColumnMasking(old.Discovery, in.Database.Discovery)
+		if maskErr != nil {
+			return nil, maskErr
+		}
+		if maskingChanged {
+			if e := require("policy.write"); e != nil {
+				return nil, e
+			}
+		}
 		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
 			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
@@ -472,7 +510,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
+		if !maskingChanged && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {

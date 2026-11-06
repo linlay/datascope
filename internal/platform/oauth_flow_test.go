@@ -56,6 +56,10 @@ func TestPlatformOAuthLoginCodeAndRefresh(t *testing.T) {
 	if len(matches) != 2 {
 		t.Fatalf("missing login nonce: %s", body)
 	}
+	status, headers, retryBody := formRequest(t, browser, "POST", issuer+"/oauth/authorize", url.Values{"nonce": {string(matches[1])}, "emp_no": {"reader"}, "password": {"incorrect-platform-password"}})
+	if status != 401 || headers.Get("Location") != "" || !strings.Contains(retryBody, `name="nonce" value="`+string(matches[1])+`"`) || !strings.Contains(retryBody, `value="reader"`) || !strings.Contains(retryBody, "用户名或密码错误，请重新输入。") || strings.Contains(retryBody, "incorrect-platform-password") {
+		t.Fatalf("invalid platform retry response: %d %s", status, retryBody)
+	}
 	// Platform passwords are checked independently of business employee tables.
 	res, e = browser.PostForm(issuer+"/oauth/authorize", url.Values{"nonce": {string(matches[1])}, "emp_no": {"reader"}, "password": {"reader-test-password"}})
 	must(t, e)

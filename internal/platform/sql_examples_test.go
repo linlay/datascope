@@ -23,13 +23,34 @@ func TestDatabaseSQLExamplesPersistenceAndIsolation(t *testing.T) {
 	if !reflect.DeepEqual(out.(application.DatabaseView).SQLExamples, d.SQLExamples) {
 		t.Fatal("save omitted SQL examples")
 	}
+	// The workbench receives examples from the database list, not the detail endpoint.
+	listed, err := f.app.Call(f.ctx, "list_databases", application.Input{})
+	must(t, err)
+	found := false
+	for _, database := range listed.([]application.DatabaseView) {
+		if database.ID == d.ID {
+			found = true
+			if !reflect.DeepEqual(database.SQLExamples, d.SQLExamples) {
+				t.Fatal("workbench database list omitted SQL examples")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("workbench database missing from list")
+	}
+
 	source, err := f.m.Source(f.ctx, d.ID)
 	must(t, err)
-	path := filepath.Join(source.Path, "database.yml")
+	databaseYAML, err := os.ReadFile(filepath.Join(source.Path, "database.yml"))
+	must(t, err)
+	if strings.Contains(string(databaseYAML), "sqlExamples:") {
+		t.Fatal("examples remain embedded in database.yml")
+	}
+	path := filepath.Join(source.Path, "sql-examples.yml")
 	raw, err := os.ReadFile(path)
 	must(t, err)
 	if !strings.Contains(string(raw), "sqlExamples:") || !strings.Contains(string(raw), "SELECT id FROM items") {
-		t.Fatal("examples were not persisted in the database YAML")
+		t.Fatal("examples were not persisted in the database sql-examples.yml")
 	}
 	// A YAML edit must reach the database response without a global fallback.
 	must(t, os.WriteFile(path, []byte(strings.Replace(string(raw), "SELECT id FROM items", "SELECT name FROM items", 1)), 0600))

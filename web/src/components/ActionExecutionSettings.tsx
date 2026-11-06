@@ -1,9 +1,11 @@
+import { useSaveModalProps } from './IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Form, Input, Modal, Space, Switch, Tooltip, message } from 'antd';
 import { managementCall, type Database, type DatabaseConnection } from '../api';
 import { useI18n } from '../ui/preferences';
 
 export function ActionExecutionSettings({ db, dirty, onSaved, onError }: { db: Database; dirty: boolean; onSaved: () => void; onError: (error: string) => void }) {
+ const saveModalProps = useSaveModalProps();
  const t = useI18n();
  const [busy, setBusy] = useState(false);
  const [open, setOpen] = useState(false);
@@ -37,7 +39,7 @@ export function ActionExecutionSettings({ db, dirty, onSaved, onError }: { db: D
    </Tooltip>
    {db.driver !== 'sqlite' && <Button size="small" disabled={!canWrite || dirty || busy} onClick={configure}>{t('写入账号')}</Button>}
   </Space>
-  <Modal title={t('写入账号')} open={open} onCancel={() => setOpen(false)} onOk={() => void saveConnection()} confirmLoading={busy} okText={t('保存并启用')}>
+  <Modal title={t('写入账号')} open={open} onCancel={() => setOpen(false)} onOk={() => void saveConnection()} confirmLoading={busy} {...saveModalProps}>
    {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
    <Form form={form} layout="vertical">
     <Form.Item name="username" label={t('写入账号')} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>

@@ -1,21 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
-import { PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
 import { databases, managementCall, type Database, type ActionDefinition } from '../api';
 import { ActionLibraries } from '../components/ActionLibraries';
 import { CodeEditor } from '../components/CodeEditor';
+import { PublicationSwitch } from '../components/PublicationSwitch';
+import { ActionConfirmationHelp } from '../components/ActionConfirmationHelp';
+import { IconButton, SaveButton } from '../components/IconButton';
 import { HelpTip } from '../components/HelpTip';
 import { ParameterEditor, parameterMap, parameterRows, type ParameterRow } from '../components/ParameterEditor';
 import { useI18n } from '../ui/preferences';
 import { selectResource, useNavigationBlocker, useRoute } from '../navigation';
 
 const example: ActionDefinition = {
- name: '', title: '', description: '', confirm: true,
+ name: '', title: '', description: '', confirm: true, published: false,
  parameters: { id: { type: 'integer', description: '记录编号' }, value: { type: 'string', description: '新值', max_length: 200 } },
  script: 'function run(args, ctx) {\n  const row = my.one`SELECT id FROM records WHERE id = ${args.id}`;\n  if (!row) deny("记录不存在或无权查看");\n  const n = db.exec`UPDATE records SET value = ${args.value} WHERE id = ${args.id}`;\n  if (n !== 1) deny("记录已变化，请重试");\n  return { id: args.id, updated: n };\n}',
 };
 type ActionFields = Omit<ActionDefinition, 'parameters'>;
-const fieldsOf = (action: ActionFields): ActionFields => ({ view_id: action.view_id, name: action.name, title: action.title, description: action.description, confirm: action.confirm, script: action.script });
+const fieldsOf = (action: ActionFields): ActionFields => ({ published: action.published !== false, view_id: action.view_id, name: action.name, title: action.title, description: action.description, confirm: action.confirm, script: action.script });
 
 export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) {
  const t = useI18n();
@@ -27,6 +30,7 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
  const [parameters, setParameters] = useState<ParameterRow[]>([]);
  const [search, setSearch] = useState('');
  const [busy, setBusy] = useState(false);
+ const [publishing, setPublishing] = useState<string>();
  const [error, setError] = useState('');
  const [remoteChanged, setRemoteChanged] = useState(false);
  const [trialName, setTrialName] = useState<string>();
@@ -100,11 +104,21 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    await persist(next, definition.name);
   } catch (e) { if (e instanceof Error) setError(e.message); }
  };
+ const publish = async (item: ActionDefinition, published: boolean) => {
+  if (locked || !canWrite || remoteChanged) return;
+  setBusy(true); setPublishing(item.name); setError('');
+  try {
+   const next = await managementCall<Database>('configure_actions', { database_id: currentDB.id, database: { ...currentDB, discovery: undefined, actions: items.map(action => action.name === item.name ? { ...action, published } : action) } });
+   setCurrentDB(next); setRemoteChanged(false);
+   if (!creating && selectedName === item.name) { setDraft(value => value && { ...value, published }); form.setFieldValue('published', published); }
+   onSaved(); message.success(t(published ? '已发布' : '已取消发布'));
+  } catch(e) { setError((e as Error).message); } finally { setBusy(false); setPublishing(undefined); }
+ };
  const copy = () => {
   if (!selected) return;
   let index = 1; let name: string;
   do { const suffix = `_copy${index === 1 ? '' : index}`; name = selected.name.slice(0, 64 - suffix.length) + suffix; index++; } while (items.some(action => action.name === name));
-  setSearch(''); edit({ ...selected, name, title: `${selected.title} ${t('副本')}` }, true);
+  setSearch(''); edit({ ...selected, name, title: `${selected.title} ${t('副本')}`, published: false }, true);
  };
  const remove = () => Modal.confirm({
   title: t('删除动作 {0}？', { '0': draft?.title || draft?.name || t('未命名动作') }),
@@ -135,29 +149,30 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
     </div>
     <ul ref={listRef} className="action-list" aria-label={t('动作列表')}>
      {creating && <li><button type="button" className="action-list-item selected" aria-current="true"><strong>{draft?.title || t('未命名动作')}</strong><span>{draft?.name || t('新动作')}</span><Tag color="orange">{t('未保存')}</Tag></button></li>}
-     {visible.map(action => <li key={action.name}><button type="button" className={`action-list-item${!creating && selectedName === action.name ? ' selected' : ''}`} aria-current={!creating && selectedName === action.name ? 'true' : undefined} disabled={locked} onClick={() => { if (creating || action.name !== selectedName) navigate(() => edit(action,false,false)); }}>
+     {visible.map(action => <li key={action.name} className="resource-list-row"><button type="button" className={`action-list-item${!creating && selectedName === action.name ? ' selected' : ''}`} aria-current={!creating && selectedName === action.name ? 'true' : undefined} disabled={locked} onClick={() => { if (creating || action.name !== selectedName) navigate(() => edit(action,false,false)); }}>
       <strong>{action.title}</strong><span>{action.name}</span>
-     </button></li>)}
+     </button><PublicationSwitch name={action.title} published={action.published !== false} disabled={!canWrite || locked || remoteChanged} loading={publishing === action.name} onChange={published => void publish(action, published)} /></li>)}
      {!visible.length && !creating && <li><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无动作')} /></li>}
     </ul>
    </Card>
    <Card className="action-editor-panel" title={<Space>{creating ? t('新增动作') : selected?.title || t('选择动作')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
     {draft && <Space wrap>
-    <Tooltip title={dirty ? t('保存后可试运行') : undefined}><Button disabled={!canTrial || locked} onClick={() => { setTrialName(selectedName); setResult(undefined); setTrialError(''); }}>{t('试运行')}</Button></Tooltip>
-    <Button disabled={!canWrite || dirty || creating || locked} onClick={copy}>{t('复制')}</Button>
-    <Button danger disabled={!canWrite || locked} onClick={remove}>{t('删除')}</Button>
-    <Button type="primary" loading={busy} disabled={!canWrite || !dirty || trialBusy || remoteChanged} onClick={() => void save()}>{t('保存动作')}</Button>
+    <IconButton label={t('试运行')} help={dirty ? t('保存后可试运行') : undefined} icon={<PlayCircleOutlined />} disabled={!canTrial || locked} onClick={() => { setTrialName(selectedName); setResult(undefined); setTrialError(''); }} />
+    <IconButton label={t('复制')} icon={<CopyOutlined />} disabled={!canWrite || dirty || creating || locked} onClick={copy} />
+    <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={!canWrite || locked} onClick={remove} />
+    <SaveButton loading={busy} disabled={!canWrite || !dirty || trialBusy || remoteChanged} onClick={() => void save()} />
     </Space>}
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-     {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<Button size="small" onClick={reload}>{t('重新载入')}</Button>} />}
+     {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<IconButton label={t('刷新')} icon={<ReloadOutlined />} onClick={reload} />} />}
      {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
+      <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
       <div className="action-fields-grid">
        <Form.Item name="name" label={t('名称')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/ }]}><Input /></Form.Item>
        <Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item>
        <Form.Item name="description" label={t('说明')} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
        <Form.Item name="view_id" label={t("关联视图")}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
-       <Form.Item name="confirm" label={t('人工确认')} valuePropName="checked"><Switch /></Form.Item>
+       <Form.Item name="confirm" label={<Space size={4}>{t('人工确认')}<ActionConfirmationHelp /></Space>} valuePropName="checked"><Switch /></Form.Item>
       </div>
       <Form.Item name="script" label={<Space size={4}>JavaScript · run(args, ctx)<HelpTip label={t('动作代码')}>{t('my.one / my.all 按查询权限读取，db.exec 使用 SQL 模板写入。人工确认动作先预览，再由用户确认执行。')}{' '}{t('可用 import { fn1, fn2 } from "库名称" 引用当前数据库的公共函数。')}</HelpTip></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
       <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>

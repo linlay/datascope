@@ -443,6 +443,21 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 }
 
 func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, password string) error {
+	// Provision only when HMAC is first enabled; later reads/edits must fail if
+	// its key has been lost, rather than silently producing new identities.
+	if hasHMAC(d.Discovery) {
+		if c.Management == nil {
+			return fmt.Errorf("哈希脱敏需要管理存储")
+		}
+		current, err := c.Get(d.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := c.Management.MaskingKey(d.ID, !hasHMAC(current.Discovery)); err != nil {
+			return err
+		}
+	}
+
 	if d.Authentication != nil {
 		if c.Management == nil {
 			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
@@ -493,7 +508,11 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				if old.Revision != d.Revision || old.ETag != d.ETag {
 					return fmt.Errorf("配置已被其他窗口修改，请刷新后重试")
 				}
-				d.Discovery = old.Discovery
+				var maskErr error
+				d.Discovery, _, maskErr = MergeColumnMasking(old.Discovery, d.Discovery)
+				if maskErr != nil {
+					return maskErr
+				}
 				d.AuthenticationRevision = old.AuthenticationRevision
 				if !reflect.DeepEqual(d.Authentication, old.Authentication) {
 					d.AuthenticationRevision++

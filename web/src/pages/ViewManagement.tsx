@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { DownOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownOutlined, EditOutlined, EyeOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Dropdown, Empty, Form, Input, Modal, Select, Space, Switch, Tag, Tooltip, message } from 'antd';
 import { databases, managementCall, type Database, type ViewDefinition } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
+import { PublicationSwitch } from '../components/PublicationSwitch';
+import { IconButton, SaveButton } from '../components/IconButton';
 import { ViewFrame } from '../components/ViewFrame';
-import BusinessActionWorkbench from '../components/BusinessActionWorkbench';
-import { selectResource, useNavigationBlocker, useRoute, useRouteChoice } from '../navigation';
+import { navigate, selectResource, useNavigationBlocker, useRoute, useRouteChoice } from '../navigation';
 import { useI18n } from '../ui/preferences';
 
 const comparable = (v?:ViewDefinition) => v && JSON.stringify([v.id,v.name,v.description,v.type,v.html,v.published]);
@@ -18,7 +19,8 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
  const [defaultView, setDefaultView] = useState(db.query_view_id || '');
  const [templates, setTemplates] = useState<ViewDefinition[]>([]), [search, setSearch] = useState('');
  const [mode, setMode] = useRouteChoice('view', 'edit', ['edit', 'preview']);
- const [businessOpen, setBusinessOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
+ const [busy, setBusy] = useState(false), [error, setError] = useState('');
+ const [publishing, setPublishing] = useState<string>();
  const listRef = useRef<HTMLUListElement>(null);
  const [remoteChanged, setRemoteChanged] = useState(false);
  const [form] = Form.useForm<ViewDefinition>();
@@ -30,6 +32,7 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
   if (sync && !isNew) selectResource(v?.id, true);
  };
  useEffect(() => {
+  if (db.id === current.id && db.revision <= current.revision && (draft || creating)) return;
   if (db.id !== current.id || !dirty) {
    setCurrent(db); setDefaultView(db.query_view_id || ''); setRemoteChanged(false); edit(db.views?.find(v => v.id === route.selection) || db.views?.[0]);
   } else if (db.revision > current.revision) setRemoteChanged(true);
@@ -62,6 +65,17 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
    await persist(v ? creating ? [...items, v] : items.map(x => x.id === selected ? v : x) : items, v?.id);
   } catch(e) { if (e instanceof Error) setError(e.message); }
  };
+ const publish = async (item: ViewDefinition, published: boolean) => {
+  if (busy || remoteChanged) return;
+  setBusy(true); setPublishing(item.id); setError('');
+  try {
+   const saved = await managementCall<Database>('configure_views', { database_id: db.id, database: { ...current, discovery: undefined, views: items.map(v => v.id === item.id ? { ...v, published } : v) } });
+   setCurrent(saved); setRemoteChanged(false);
+   if (!creating && selected === item.id) { setDraft(value => value && { ...value, published }); form.setFieldValue('published', published); }
+   onSaved(); message.success(t(published ? '已发布' : '已取消发布'));
+  } catch(e) { setError((e as Error).message); } finally { setBusy(false); setPublishing(undefined); }
+ };
+ const publicationReason = (v: ViewDefinition) => v.published && (current.query_view_id === v.id || current.actions?.some(a => a.view_id === v.id)) ? t('先取消默认查询视图或动作关联，再取消发布。') : undefined;
  const add = (template?: ViewDefinition) => change(() => {
   const v = { ...(template || blank), published: false }; if (v.id) { let n = 1; const base = v.id; while (items.some(x => x.id === v.id)) v.id = `${base.slice(0,54)}_copy${n++}`; }
   edit(v, true);
@@ -81,18 +95,17 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
     </div>
     <ul ref={listRef} className="action-list" aria-label={t('视图列表')}>
      {creating && <li><button type="button" className="action-list-item view-list-item selected" aria-current="true"><strong title={draft?.name}>{draft?.name || t('新视图')}</strong><span className="view-entry-id" title={draft?.id}>{draft?.id}</span><Tag className="view-entry-status" color="orange">{t('未保存')}</Tag></button></li>}
-     {visible.map(v => <li key={v.id}><button type="button" className={`action-list-item view-list-item${!creating && selected === v.id ? ' selected' : ''}`} aria-current={!creating && selected === v.id ? 'true' : undefined} disabled={busy} onClick={() => { if (creating || v.id !== selected) change(() => { edit(v, false, false); selectResource(v.id); }); }}><strong title={v.name}>{v.name}</strong><span className="view-entry-id" title={v.id}>{v.id}</span><Tag className="view-entry-status" color={v.published ? 'green' : 'default'}>{t(v.published ? '已发布' : '草稿')}</Tag></button></li>)}
+     {visible.map(v => <li key={v.id} className="resource-list-row"><button type="button" className={`action-list-item view-list-item${!creating && selected === v.id ? ' selected' : ''}`} aria-current={!creating && selected === v.id ? 'true' : undefined} disabled={busy} onClick={() => { if (creating || v.id !== selected) change(() => { edit(v, false, false); selectResource(v.id); }); }}><strong title={v.name}>{v.name}</strong><span className="view-entry-id" title={v.id}>{v.id}</span></button><PublicationSwitch name={v.name} published={v.published} disabled={busy || remoteChanged || !db.permissions?.includes('view.write') || !!publicationReason(v)} loading={publishing === v.id} reason={publicationReason(v)} onChange={published => void publish(v, published)} /></li>)}
      {!visible.length && !creating && <li><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('暂无视图，可从模板创建。')} /></li>}
     </ul>
    </Card>
    <Card className="action-editor-panel" title={<Space>{creating ? t('新增视图') : original?.name || t('选择视图')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
-    <Button size="small" disabled={busy} onClick={reload}>{t('刷新')}</Button>
+    <IconButton label={t('刷新')} icon={<ReloadOutlined />} disabled={busy} onClick={reload} />
     {draft && <>
-     <Button size="small" disabled={busy} onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')}>{t(mode === 'preview' ? '编辑 HTML' : '预览')}</Button>
-     <Button size="small" disabled={busy || dirty || creating} onClick={() => setBusinessOpen(true)}>{t('业务预览')}</Button>
-     <Button size="small" danger disabled={busy} onClick={() => Modal.confirm({ title: t('删除当前视图？'), onOk: () => creating ? edit(items[0]) : persist(items.filter(v => v.id !== selected)) })}>{t('删除')}</Button>
+     <IconButton label={t('视图工作台')} icon={<PlayCircleOutlined />} disabled={busy || dirty || creating} onClick={() => navigate('view-workbench', selected)} />
+     <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={busy} onClick={() => Modal.confirm({ title: t('删除当前视图？'), onOk: () => creating ? edit(items[0]) : persist(items.filter(v => v.id !== selected)) })} />
     </>}
-    <Button size="small" type="primary" disabled={!dirty || remoteChanged} loading={busy} onClick={() => void save()}>{t('保存视图')}</Button>
+    <SaveButton disabled={!dirty || remoteChanged} loading={busy} onClick={() => void save()} />
    </Space>}>
     {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} style={{ marginBottom: 16 }} />}
     {draft ? <Form form={form} layout="vertical" disabled={busy} onValuesChange={(_, values) => setDraft({ ...values, type: 'view' })}>
@@ -100,13 +113,14 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
       <Form.Item name="id" label={t('标识')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ }]}><Input disabled={!creating} /></Form.Item>
       <Form.Item name="name" label={t('名称')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
       <Form.Item name="description" label={t('描述')}><Input.TextArea rows={3} maxLength={2000} /></Form.Item>
-      <div><Form.Item name="published" label={t('发布')} valuePropName="checked"><Switch /></Form.Item><Form.Item label={t('默认查询视图')}><Select aria-label={t('默认查询视图')} allowClear value={defaultView || undefined} disabled={busy} placeholder={t('使用原始查询结果')} options={items.filter(v => v.published).map(v => ({ value: v.id, label: v.name }))} onChange={v => setDefaultView(v || '')} /></Form.Item></div>
+      <Form.Item label={t('默认查询视图')}><Select aria-label={t('默认查询视图')} allowClear value={defaultView || undefined} disabled={busy} placeholder={t('使用原始查询结果')} options={items.filter(v => v.published).map(v => ({ value: v.id, label: v.name }))} onChange={v => setDefaultView(v || '')} /></Form.Item>
      </div>
-     <Form.Item name="html" label="HTML" rules={[{ required: true }]} hidden={mode === 'preview'}><CodeEditor language="html" height="440px" readOnly={busy} /></Form.Item>
+     <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
+     <div className="content-field-header"><span>HTML</span><IconButton label={t(mode === 'preview' ? '编辑 HTML' : '预览 HTML')} icon={mode === 'preview' ? <EditOutlined /> : <EyeOutlined />} disabled={busy} onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')} /></div>
+     <Form.Item name="html" rules={[{ required: true, message: t('请输入 HTML') }]} hidden={mode === 'preview'}><CodeEditor language="html" height="440px" readOnly={busy} /></Form.Item>
      {mode === 'preview' && <ViewFrame html={draft.html} />}
     </Form> : <Empty description={t('从左侧选择视图，或从模板创建。')} />}
    </Card>
   </div>
-  <Modal title={t('业务预览')} open={businessOpen} onCancel={() => setBusinessOpen(false)} footer={null} width={1200} styles={{ body: { maxHeight: '78vh', overflowY: 'auto' } }}><BusinessActionWorkbench db={current} viewsOnly /></Modal>
  </>;
 }

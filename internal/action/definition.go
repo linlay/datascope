@@ -24,6 +24,7 @@ type Parameter struct {
 }
 type Definition struct {
 	ViewID      string               `json:"view_id,omitempty" yaml:"viewId,omitempty"`
+	Published   *bool                `json:"published,omitempty" yaml:"published,omitempty"`
 	Name        string               `json:"name" yaml:"name"`
 	Title       string               `json:"title" yaml:"title"`
 	Description string               `json:"description" yaml:"description"`
@@ -31,6 +32,9 @@ type Definition struct {
 	Parameters  map[string]Parameter `json:"parameters" yaml:"parameters"`
 	Script      string               `json:"script" yaml:"script"`
 }
+
+// Existing action configurations predate publication controls and remain live.
+func (d Definition) IsPublished() bool { return d.Published == nil || *d.Published }
 
 var namePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,63}$`)
 

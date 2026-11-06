@@ -1,13 +1,15 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
 import { Alert, Badge, Button, Card, Checkbox, Col, Descriptions, Input, Modal, Row, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
+import { EditOutlined, HistoryOutlined, ReloadOutlined, SaveOutlined, ScanOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { databases, type Annotation, type Column, type Database, type PolicyView, type SchemaChange, type TableSchema } from '../api';
+import { databases, type Annotation, type Column, type Masking, type Database, type PolicyView, type SchemaChange, type TableSchema } from '../api';
 import { useAuth } from '../Auth';
 import { TablePolicyEditor } from './DatabaseManager';
 import { setAllTableAccess } from '../tableAccess';
-import { IconButton } from '../components/IconButton';
+import { MaskingEditor } from '../components/MaskingEditor';
+import { MaskingControl } from '../components/MaskingControl';
+import { IconButton, useSaveModalProps } from '../components/IconButton';
 import { navigate, selectResource, useNavigationBlocker, useRoute } from '../navigation';
 
 const { Text } = Typography;
@@ -17,6 +19,7 @@ const date = (value?:string) => value && !value.startsWith('0001-') ? new Date(v
 const changeKey = (change:SchemaChange) => JSON.stringify([change.table,change.column??'']);
 
 export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
+ const saveModalProps = useSaveModalProps();
  const t=useI18n();
  const route=useRoute();
  const { user } = useAuth();
@@ -30,6 +33,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  const [report,setReport] = useState<number>();
  const [comparison,setComparison] = useState<'pending'|'history'>();
  const [choices,setChoices] = useState<Record<string,boolean>>({});
+ const [maskingEditor,setMaskingEditor] = useState<{table:string;column:Column}>();
  const [editor,setEditor] = useState<{table:string;column:string;source:string;annotation:Annotation}>();
  useNavigationBlocker(dirty,t('当前配置尚未保存，确定离开？'),busy);
  useEffect(()=>{
@@ -48,7 +52,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  useEffect(()=>{
   let live=true;
   const timer=window.setInterval(()=>{
-   if(busy||editor)return;
+   if(busy||editor||maskingEditor)return;
    void databases.get(id).then(next=>{
     if(!live)return;
     if(!dirty){accept(next);return;}
@@ -60,7 +64,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
    }).catch(()=>undefined);
   },15000);
   return()=>{live=false;window.clearInterval(timer)};
- },[id,dirty,busy,editor]);
+ },[id,dirty,busy,editor,maskingEditor]);
  const run = async (work:()=>Promise<Database>,text:string|((d:Database)=>string)) => {
   setBusy(true);setError(undefined);
   try {const next=await work();accept(next);message.success(typeof text==='string'?text:text(next));onSaved();return true}
@@ -87,6 +91,10 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
  };
  const setAllEnabled=(enabled:boolean)=>{
   setDB({...db,config:{...db.config,tables:setAllTableAccess(db.config.tables,tables,enabled)}});
+  setDirty(true);
+ };
+ const setMasking=(tableName:string,columnName:string,masking?:Masking)=>{
+  setDB({...db,discovery:state?{...state,tables:state.tables.map(table=>table.name===tableName?{...table,columns:table.columns.map(column=>column.name===columnName?{...column,masking}:column)}:table)}:state});
   setDirty(true);
  };
  const editAnnotation = (table:string,column:string,source:string,a?:Annotation) => {setError(undefined);setEditor({table,column,source,annotation:a?{display_name:a.display_name,comment:a.comment}:{display_name:'',comment:null}})};
@@ -124,25 +132,35 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
      {title:<Tooltip title={`${t(allTablesEnabled?'全部关闭':'全部开放')}：${t('作用于当前数据库的全部已登记表，保存后生效。')}`}><Checkbox className="discovery-table-access-header" aria-label={t('全部表开放')} checked={allTablesEnabled} indeterminate={enabledTableCount>0&&!allTablesEnabled} disabled={busy||!can('policy.write')||tables.length===0} onChange={e=>setAllEnabled(e.target.checked)}>{t('开放')}</Checkbox></Tooltip>,width:80,render:(_,tableInfo)=><Switch size="small" aria-label={t("开放表 {0}", {"0":(tableInfo.name)})} disabled={busy||!can('policy.write')} checked={db.config.tables.find(p=>p.table.toLowerCase()===tableInfo.name.toLowerCase())?.enabled!==false} onClick={(_,e)=>e.stopPropagation()} onChange={enabled=>setPolicy(tableInfo.name,{enabled})}/>},
     ]}/>
    </Card></Col>
-   <Col xs={24} xl={16}><Card title={current?t("表与字段 · {0}", {"0":(annotation?.display_name||current.name)}):t("选择数据表")} extra={current&&<Space><Button aria-label={t("编辑表名称与注释")} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,'',current.comment,annotation)}>{t("编辑")}</Button>{can('raw_query')&&<Button onClick={()=>{navigate('table',current.name)}}>{t("浏览数据")}</Button>}</Space>}>
+   <Col xs={24} xl={16}><Card title={current?t("表与字段 · {0}", {"0":(annotation?.display_name||current.name)}):t("选择数据表")} extra={current&&<Space><IconButton label={t("编辑表名称与注释")} icon={<EditOutlined />} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,'',current.comment,annotation)} />{can('raw_query')&&<Button onClick={()=>{navigate('table',current.name)}}>{t("浏览数据")}</Button>}</Space>}>
     {current&&<Space orientation="vertical" size="middle" style={{width:'100%'}}>
      <Descriptions size="small" column={{xs:1,md:2}} items={[
       {key:'name',label:t("名称"),children:annotation?.display_name||current.name},
       {key:'comment',label:t("注释"),children:(annotation?.comment??current.comment)||t('（空）')},
      ]}/>
      {policy&&<TablePolicyEditor key={`policy:${current.name}`} policy={policy} disabled={busy||!can('policy.write')} onChange={patch=>setPolicy(current.name,patch)}/>}
-     <Text strong>{t("字段权限")}</Text>
+     <div className="discovery-fields-heading">
+      <Space orientation="vertical" size={2}><Text strong>{t("字段权限与脱敏")}</Text><Text type="secondary">{t('直接选择字段脱敏规则，调整后保存配置生效。')}</Text></Space>
+      <Button type="primary" icon={<SaveOutlined/>} loading={busy} disabled={!dirty||!can('policy.write')} onClick={()=>void save()}>{t('保存配置')}</Button>
+     </div>
      <Space wrap><Checkbox disabled={busy||!can('policy.write')||!policy} checked={policy?.columns==null} onChange={e=>setPolicy(current.name,{columns:e.target.checked?null:current.columns.map(c=>c.name)})}>{t("包含未来新增字段")}</Checkbox><Button size="small" disabled={busy||!can('policy.write')} onClick={()=>setPolicy(current.name,{columns:current.columns.map(c=>c.name)})}>{t("选择当前全部字段")}</Button></Space>
-     <Table<Column> key={`columns:${current.name}`} rowKey="name" size="small" dataSource={current.columns} pagination={false} scroll={{x:700}} columns={[
+     <Table<Column> key={`columns:${current.name}`} rowKey="name" size="small" dataSource={current.columns} pagination={false} scroll={{x:870}} columns={[
       {title:t("开放"),width:60,render:(_,c)=><Checkbox aria-label={t("开放字段 {0}", {"0":(c.name)})} disabled={busy||!can('policy.write')} checked={policy?.columns==null||policy.columns.includes(c.name)} onChange={e=>{const cols=policy?.columns??current.columns.map(col=>col.name);setPolicy(current.name,{columns:e.target.checked?[...cols,c.name]:cols.filter(n=>n!==c.name)})}}/>},
-      {title:t("字段 / 类型"),render:(_,c)=><><Text code>{c.name}</Text>{c.primary_key&&<Tag color="gold">{t("主键")}</Tag>}<div><Text type="secondary">{c.type}{c.not_null?t(" · 非空"):''}</Text></div></>},
-      {title:t("名称"),render:(_,c)=>annotation?.columns?.[c.name]?.display_name||c.name},
-      {title:t("注释"),render:(_,c)=>(annotation?.columns?.[c.name]?.comment??c.comment)||<Text type="secondary">{t("（空）")}</Text>},
-      {title:t("操作"),width:70,render:(_,c)=><Button type="link" size="small" aria-label={t("编辑字段 {0}",{"0":c.name})} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,c.name,c.comment,annotation?.columns?.[c.name])}>{t("编辑")}</Button>},
+      {title:t("字段 / 类型"),width:175,render:(_,c)=><><Text code>{c.name}</Text>{c.primary_key&&<Tag color="gold">{t("主键")}</Tag>}<div><Text type="secondary">{c.type}{c.not_null?t(" · 非空"):''}</Text></div></>},
+      {title:t("脱敏规则"),width:280,render:(_,c)=><MaskingControl column={c} disabled={busy||!can('policy.write')} onChange={masking=>setMasking(current.name,c.name,masking)} onPreview={()=>setMaskingEditor({table:current.name,column:c})}/>},
+      {title:t('名称与说明'),render:(_,c)=>{
+       const displayName=annotation?.columns?.[c.name]?.display_name;
+       const comment=annotation?.columns?.[c.name]?.comment??c.comment;
+       return <Space orientation="vertical" size={2}>{displayName&&<Text>{displayName}</Text>}<Text type={displayName?'secondary':undefined}>{comment||t('（空）')}</Text></Space>;
+      }},
+      {title:t("操作"),width:70,render:(_,c)=><IconButton label={t("编辑字段 {0}",{"0":c.name})} icon={<EditOutlined />} disabled={busy||dirty||!can('config.write')} onClick={()=>editAnnotation(current.name,c.name,c.comment,annotation?.columns?.[c.name])} />},
      ]}/>
     </Space>}
    </Card></Col>
   </Row>
+  {maskingEditor&&<MaskingEditor key={`${maskingEditor.table}.${maskingEditor.column.name}`} table={maskingEditor.table} column={maskingEditor.column} onCancel={()=>setMaskingEditor(undefined)} onApply={masking=>{
+   setMasking(maskingEditor.table,maskingEditor.column.name,masking);setMaskingEditor(undefined);
+  }}/>}
   <Modal width={1120} title={comparison==='pending'?t("数据库结构变化对比"):t("结构变更记录")} open={!!comparison} onCancel={()=>setComparison(undefined)} okText={t("确认并更新配置")} confirmLoading={busy} okButtonProps={{disabled:dirty||!pending||!can('config.write')||!can('policy.write')}} onOk={async()=>{
    if(!pending)return;
    const resolutions=pending.changes.filter(c=>c.property==='comment'&&c.manual!==undefined).map(c=>({table:c.table,column:c.column,follow_source:choices[changeKey(c)]??false}));
@@ -153,7 +171,7 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
    <Table<SchemaChange> rowKey={change=>JSON.stringify([change.table,change.column,change.property,change.kind])} size="small" dataSource={changes} pagination={false} scroll={{x:950,y:'min(56vh, 600px)'}} columns={diffColumns}/>
    {error&&<Alert type="error" title={error}/>}
   </Modal>
-  <Modal title={t("编辑名称与注释 · {0}{1}", {"0":(editor?.table??''),"1":(editor?.column?`.${editor.column}`:'')})} open={!!editor} confirmLoading={busy} onCancel={()=>setEditor(undefined)} onOk={async()=>{if(!editor)return;const value=editor;if(await run(()=>databases.annotate(id,value.table,value.column,db.revision,value.annotation),t("名称与说明已保存")))setEditor(undefined)}} okText={t("保存")}>
+  <Modal title={t("编辑名称与注释 · {0}{1}", {"0":(editor?.table??''),"1":(editor?.column?`.${editor.column}`:'')})} open={!!editor} confirmLoading={busy} onCancel={()=>setEditor(undefined)} onOk={async()=>{if(!editor)return;const value=editor;if(await run(()=>databases.annotate(id,value.table,value.column,db.revision,value.annotation),t("名称与说明已保存")))setEditor(undefined)}} {...saveModalProps}>
    {error&&<Alert type="error" showIcon title={error} style={{marginBottom:12}}/>}
    {editor&&<Space orientation="vertical" style={{width:'100%'}}>
     <Descriptions size="small" column={1} items={[

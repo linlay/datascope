@@ -1,4 +1,4 @@
-# 证券演示库示例；将 sqlExamples 配置到对应数据库，其他数据库可省略。
+# 证券演示库 SQL 示例；安装到该数据库的 management/sql-examples.yml。
 sqlExamples:
   - label: "各营业部客户数"
     sql: "SELECT department_code, COUNT(DISTINCT customer_no) AS customers FROM fund_accounts GROUP BY department_code ORDER BY department_code"

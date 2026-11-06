@@ -1,3 +1,5 @@
+import { ReloadOutlined } from '@ant-design/icons';
+import { IconButton } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Empty, Input, Select, Space, Tag, Typography } from 'antd';
@@ -28,7 +30,7 @@ export function McpInspector() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Card size="small" title={t("连接状态")} extra={<Button onClick={loadInfo} loading={loadingInfo}>{t("刷新")}</Button>}>
+      <Card size="small" title={t("连接状态")} extra={<IconButton label={t('刷新')} icon={<ReloadOutlined />} onClick={loadInfo} loading={loadingInfo} />}>
         {infoError && <Alert type="error" showIcon message={t("无法连接 MCP server")} description={infoError} />}
         {info && (
           <>

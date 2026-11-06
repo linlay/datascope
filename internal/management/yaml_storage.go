@@ -440,6 +440,16 @@ func stateFiles(state *sourceState) (map[string]any, error) {
 	if err := normalizeDatabase(d); err != nil {
 		return nil, err
 	}
+	// Examples belong to the database's management generation, alongside its
+	// other split configuration files. Keep the API representation unchanged.
+	examples := d["sql_examples"]
+	if examples == nil {
+		examples = []any{}
+	}
+	delete(d, "sql_examples")
+	if state.Database != nil {
+		files["sql-examples.yml"] = map[string]any{"sql_examples": examples}
+	}
 	auth := d["authentication"]
 	delete(d, "authentication")
 	files["authentication.yml"] = map[string]any{"authentication": auth, "policy_id": state.BindingPolicyID}
@@ -592,7 +602,7 @@ func readStateUsing(path string, read func(string, any) error) (*sourceState, er
 	if e != nil {
 		return nil, e
 	}
-	allowed := map[string]bool{"database.yml": false, "authentication.yml": false, "account.yml": false, "grant.yml": false, "tables": true, "actions": true, "action-libraries": true, "views": true, "knowledges": true}
+	allowed := map[string]bool{"database.yml": false, "sql-examples.yml": false, "authentication.yml": false, "account.yml": false, "grant.yml": false, "tables": true, "actions": true, "action-libraries": true, "views": true, "knowledges": true}
 	for _, entry := range entries {
 		dir, ok := allowed[entry.Name()]
 		if !ok || entry.IsDir() != dir {
@@ -610,6 +620,33 @@ func readStateUsing(path string, read func(string, any) error) (*sourceState, er
 		} `json:"records"`
 	}
 	if err := read(filepath.Join(path, "database.yml"), &root); err != nil {
+		return nil, err
+	}
+	// Older generations may still contain database.sqlExamples. Reading them
+	// remains supported; the next atomic publication moves them to this file.
+	examplesPath := filepath.Join(path, "sql-examples.yml")
+	if _, err := os.Stat(examplesPath); err == nil {
+		if _, inline := root.Database["sql_examples"]; inline {
+			return nil, errors.New("SQL 示例不能同时配置在 database.yml 和 sql-examples.yml")
+		}
+		var examples struct {
+			Examples []struct {
+				Label string `json:"label"`
+				SQL   string `json:"sql"`
+			} `json:"sql_examples"`
+		}
+		if err := read(examplesPath, &examples); err != nil {
+			return nil, err
+		}
+		if root.Database == nil {
+			return nil, errors.New("SQL 示例缺少所属数据库配置")
+		}
+		if len(examples.Examples) > 0 {
+			root.Database["sql_examples"] = jsonValue(examples.Examples)
+		} else {
+			delete(root.Database, "sql_examples")
+		}
+	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	state.Database = root.Database

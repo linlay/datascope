@@ -1,6 +1,8 @@
 # 业务操作 Action
 
-Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保存到 `management/actions/<action>.yml`，并使用数据库当前 revision 控制并发保存。每项仅有 `name`、`title`、`description`、`confirm`、`parameters`、`script` 六个字段。
+Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保存到 `management/actions/<action>.yml`，并使用数据库当前 revision 控制并发保存。每项包含 `name`、`title`、`description`、`confirm`、`parameters`、`script`，以及可选的 `view_id`（YAML 为 `viewId`）和 `published`。
+
+动作、知识与视图列表右侧的开关直接保存发布状态，不提交详情中尚未保存的编辑。新增和复制的动作默认是草稿；旧动作未配置 `published` 时保持已发布。动作取消发布后，业务 MCP 不再列出或描述它，也拒绝直接调用和未完成的确认；平台编辑者仍可查看与回滚试运行。发布与人工确认分别控制“是否可供业务调用”和“调用是否需要本人审核”。人工确认开关旁的帮助入口提供侧边说明。视图被默认查询或动作引用时，需先取消关联才能取消发布。
 
 ## 配置和权限
 

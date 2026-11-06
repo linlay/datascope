@@ -748,8 +748,8 @@ INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','gender','性别');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','birth_date','出生日期');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','id_type','证件类型');
-INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','id_no','证件号码（预先脱敏）');
-INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','mobile','手机号码（预先脱敏）');
+INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','id_no','证件号码');
+INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','mobile','手机号码');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','risk_level','客户风险等级 C1–C5');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','investor_type','投资者类型（普通/专业）');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('customers','open_date','开户日期');
@@ -799,7 +799,7 @@ INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','branch_code','分公司代码，关联 branches.code');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','department_code','营业部代码，关联 departments.code');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','title','职务');
-INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','mobile','手机号码（预先脱敏）');
+INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','mobile','手机号码');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','hire_date','入职日期');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('employees','status','状态（员工 active/resigned；账户 active）');
 INSERT INTO schema_comments(table_name,column_name,comment_zh) VALUES('fund_accounts','','资金账户');

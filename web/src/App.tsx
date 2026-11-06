@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Spin, Tag, type MenuProps } from 'antd';
-import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined, LayoutOutlined } from '@ant-design/icons';
+import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined, LayoutOutlined, DesktopOutlined } from '@ant-design/icons';
 import { SystemSettings } from './components/SystemSettings';
 import { usePreferences } from './ui/preferences';
 import { QueryConfiguration } from './pages/QueryConfiguration';
@@ -16,15 +16,16 @@ import { ConnectionFields } from './components/ConnectionFields';
 import { NavigationContext, navigate, readRoute, setRouteParams, startNavigation, type Page } from './navigation';
 
 const ViewManagement = lazy(() => import('./pages/ViewManagement'));
+const ViewWorkbench = lazy(() => import('./pages/ViewWorkbench'));
 const KnowledgeWorkbench = lazy(() => import('./pages/KnowledgeWorkbench'));
 const ActionWorkbench = lazy(() => import('./pages/ActionWorkbench'));
 const KnowledgePage = lazy(() => import('./pages/KnowledgeManagement').then(module => ({ default: module.KnowledgePage })));
 
-const icons={views:<LayoutOutlined/>,database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,'knowledge-workbench':<FileSearchOutlined/>,'action-workbench':<PlayCircleOutlined/>,sql:<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
-const titles:Record<Page,string>={views:'视图配置',database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识配置',sql:'查询工作台','knowledge-workbench':'知识工作台','action-workbench':'动作工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
+const icons={views:<LayoutOutlined/>,database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,'knowledge-workbench':<FileSearchOutlined/>,'action-workbench':<PlayCircleOutlined/>,'view-workbench':<DesktopOutlined/>,'sql-workbench':<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
+const titles:Record<Page,string>={views:'视图配置',database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识配置','sql-workbench':'查询工作台','knowledge-workbench':'知识工作台','action-workbench':'动作工作台','view-workbench':'视图工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
 const navigationGroups: Page[][] = [
  ['database', 'tables', 'actions', 'knowledge', 'views', 'mcp'],
- ['sql', 'knowledge-workbench', 'action-workbench', 'table'],
+ ['sql-workbench', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'table'],
  ['audit'],
 ];
 
@@ -73,7 +74,7 @@ export function App() {
 
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
- const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='views'?can('config.read')&&can('view.write'):p==='knowledge'?can('knowledge.write'):p==='knowledge-workbench'?can('knowledge.read'):p==='action-workbench'?can('action.write'):p==='table'?can('raw_query'):p==='sql'?can('query'):(can('mcp.write')||can('action.write')));
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='views'||p==='view-workbench'?can('config.read')&&can('view.write'):p==='knowledge'?can('knowledge.write'):p==='knowledge-workbench'?can('knowledge.read'):p==='action-workbench'?can('action.write'):p==='table'?can('raw_query'):p==='sql-workbench'?can('query'):(can('mcp.write')||can('action.write')));
  const navigationItems: NonNullable<MenuProps['items']> = [];
  navigationGroups.forEach((group, index) => {
   const pages = group.filter(page => visiblePages.includes(page));
@@ -103,13 +104,14 @@ export function App() {
  {activePage==='database'&&<DatabaseSettings db={current} onSaved={()=>void refresh()}/>}
  {activePage==='audit'&&<AuditPage databases={items}/>}
  {activePage==='views'&&current&&<Suspense fallback={<Spin/>}><ViewManagement db={current} onSaved={()=>void refresh()}/></Suspense>}
+ {activePage==='view-workbench'&&current&&<Suspense fallback={<Spin/>}><ViewWorkbench db={current} onSaved={()=>void refresh()}/></Suspense>}
  {activePage==='knowledge'&&current&&<Suspense fallback={<Spin/>}><KnowledgePage db={current}/></Suspense>}
  {activePage==='knowledge-workbench'&&current&&<Suspense fallback={<Spin/>}><KnowledgeWorkbench databaseID={dbID}/></Suspense>}
  {activePage==='action-workbench'&&current&&<Suspense fallback={<Spin/>}><ActionWorkbench db={current}/></Suspense>}
  {!activePage&&<Alert type="info" title={t("当前账号尚未获得数据库权限，请联系系统管理员。")}/>}
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.selection} onOpenTable={openTable} />}
-          {activePage === 'sql' && <SqlWorkbench examples={current?.sql_examples} views={current?.views} queryViewID={current?.query_view_id} permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
+          {activePage === 'sql-workbench' && <SqlWorkbench examples={current?.sql_examples} views={current?.views} queryViewID={current?.query_view_id} permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
           {activePage === 'actions' && current && <Actions db={current} onSaved={()=>void refresh()}/> }
           {activePage === 'tables' && <QueryConfiguration id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}

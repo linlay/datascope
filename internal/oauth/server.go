@@ -180,6 +180,7 @@ func oauthError(w http.ResponseWriter, code string) {
 func (s *Server) Handler(next http.Handler) http.Handler {
 	m := http.NewServeMux()
 	if s.cfg.AccountDatabase == "" && s.cfg.Catalog != nil {
+		m.HandleFunc("GET /auth/databases/{database}/login-info", s.accountLoginInfo)
 		m.HandleFunc("POST /auth/databases/{database}/token", s.accountToken)
 		m.HandleFunc("/auth/databases/{database}/", s.realmHandler)
 		m.HandleFunc("GET /.well-known/oauth-authorization-server/auth/databases/{database}", s.realmMetadata)
@@ -310,6 +311,11 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: loginCookieName(nonce), Value: nonce, Path: s.loginPath(), HttpOnly: true, Secure: strings.HasPrefix(s.cfg.Issuer, "https:"), SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	s.renderLogin(w, r, nonce, g, "", "", http.StatusOK)
+}
+
+func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, nonce string, g grant, username, message string, status int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	callback, _ := url.Parse(g.Redirect)
 	callbackOrigin := callback.Scheme + "://" + callback.Host
@@ -319,15 +325,17 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.DebugLogin && s.cfg.Management == nil {
 		users, _ = s.store.Users(r.Context())
 	}
-	label := "DataScope 管理账号授权"
+	label := "DataScope"
 	if d, e := s.localDatabase(); e == nil {
-		label = d.Name + " · 员工账号授权"
+		label = d.Name
 		if d.Authentication != nil && d.Authentication.Label != "" {
-			label = d.Authentication.Label + " · 授权"
+			label = d.Authentication.Label
 		}
 	}
-	loginPage.Execute(w, map[string]any{"Heading": label, "LoginPath": s.loginPath(), "Nonce": nonce, "Client": c.Name, "Scope": scope, "Resource": g.Resource, "Debug": s.cfg.DebugLogin && s.cfg.Management == nil, "Users": users})
+	w.WriteHeader(status)
+	loginPage.Execute(w, map[string]any{"Heading": label, "LoginPath": s.loginPath(), "Nonce": nonce, "Debug": s.cfg.DebugLogin && s.cfg.Management == nil, "Users": users, "Username": username, "Error": message})
 }
+
 func loginCookieName(nonce string) string {
 	return "oauth_login_" + hash(nonce)[:16]
 }
@@ -347,7 +355,43 @@ func loginProblem(w http.ResponseWriter, r *http.Request, message string) {
 	loginProblemPage.Execute(w, map[string]string{"Message": message, "Retry": retry})
 }
 
-var loginPage = template.Must(template.New("login").Parse("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>DataScope · 账号授权</title><style>body{font:16px system-ui;background:#eef2f7;margin:8vh auto;max-width:460px;padding:24px}form{background:white;padding:28px;border-radius:14px}input,select,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px}button{background:#1763ba;color:white;border:0;border-radius:6px}small{color:#526070;overflow-wrap:anywhere}</style><form method=\"post\" action=\"{{.LoginPath}}\"><h1>{{.Heading}}</h1><p>向 {{.Client}} 授权数据库代理访问</p><small>资源：{{.Resource}}<br>请求权限：{{.Scope}}</small><input type=\"hidden\" name=\"nonce\" value=\"{{.Nonce}}\"><label>用户名<input name=\"emp_no\" placeholder=\"用户名\" autocomplete=\"username\"></label><label>密码<input type=\"password\" name=\"password\" autocomplete=\"current-password\"></label>{{if .Debug}}<label>调试：模拟员工<select name=\"debug_employee\"><option value=\"\">使用工号密码登录</option>{{range .Users}}{{if eq .Status \"active\"}}<option value=\"{{.EmpNo}}\">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}<button type=\"submit\">登录并同意授权</button><small>切换账号请重新发起授权。</small></form></html>"))
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Heading}} · 登录</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100svh;display:grid;place-items:center;padding:32px 20px;background:#f2f2f7;color:#1d1d1f;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+main{width:100%;max-width:420px;padding:36px;background:#fff;border:1px solid rgba(60,60,67,.08);border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.04)}
+h1{margin:0;font-size:24px;line-height:1.4;font-weight:600;overflow-wrap:anywhere}
+form{margin-top:28px}
+label{display:block;margin-top:20px;font-size:14px;font-weight:500}
+input,select,button{width:100%;font:inherit;border-radius:10px}
+input,select{display:block;margin-top:8px;padding:12px 14px;border:1px solid #c7c7cc;background:#fff;color:inherit}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:3px solid rgba(0,113,227,.3);outline-offset:3px}
+input:focus{border-color:#0071e3}
+button{margin-top:28px;padding:13px 16px;border:0;background:#0071e3;color:#fff;font-weight:600;cursor:pointer}
+button:hover{background:#0062c4}
+.error{margin:0 0 20px;padding:12px 14px;border-radius:10px;background:#fff0ee;color:#b42318;font-size:14px}
+@media(max-width:480px){main{padding:28px 24px}}
+</style>
+</head>
+<body>
+<main>
+<h1>{{.Heading}}</h1>
+<form method="post" action="{{.LoginPath}}">
+{{if .Error}}<p class="error" id="login-error" role="alert">{{.Error}}</p>{{end}}
+<input type="hidden" name="nonce" value="{{.Nonce}}">
+<label>用户名<input name="emp_no" placeholder="请输入用户名" autocomplete="username" value="{{.Username}}"></label>
+<label>密码<input type="password" name="password" placeholder="请输入密码" autocomplete="current-password"{{if .Error}} aria-describedby="login-error" aria-invalid="true" autofocus{{end}}></label>
+{{if .Debug}}<label>调试：模拟员工<select name="debug_employee"><option value="">使用工号密码登录</option>{{range .Users}}{{if eq .Status "active"}}<option value="{{.EmpNo}}">{{.EmpNo}} {{.Name}} · {{.Roles}}</option>{{end}}{{end}}</select></label>{{end}}
+<button type="submit">登录并授权</button>
+</form>
+</main>
+</body>
+</html>`))
 
 func (s *Server) employee(ctx context.Context, emp string) (store.UserSummary, error) {
 	if s.cfg.AccountDatabase != "" {
@@ -446,7 +490,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err != nil {
-			http.Error(w, "用户名或密码错误", 401)
+			s.renderLogin(w, r, nonce, pending, emp, "用户名或密码错误，请重新输入。", http.StatusUnauthorized)
 			return
 		}
 		if s.cfg.AccountDatabase == "" {
@@ -456,13 +500,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		a := sha256.Sum256([]byte(r.PostForm.Get("password")))
 		b := sha256.Sum256([]byte(s.cfg.Password))
 		if !debug && subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
-			http.Error(w, "工号或密码错误", 401)
+			s.renderLogin(w, r, nonce, pending, emp, "用户名或密码错误，请重新输入。", http.StatusUnauthorized)
 			return
 		}
 		u, e = s.employee(r.Context(), emp)
 	}
 	if e != nil {
-		http.Error(w, "用户名或密码错误", 401)
+		s.renderLogin(w, r, nonce, pending, emp, "用户名或密码错误，请重新输入。", http.StatusUnauthorized)
 		return
 	}
 	tx, e := s.db.BeginTx(r.Context(), nil)
@@ -548,11 +592,19 @@ func (s *Server) signVersion(sub, scope, resource string, version int64) (string
 	return s.signClaims(map[string]any{"iss": s.cfg.Issuer, "aud": resource, "sub": sub, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": scope, "jti": random(), "version": version, "identity": s.identity(), "auth_config": s.authConfig()})
 }
 func (s *Server) signClaims(values map[string]any) (string, error) {
+	key := s.key
+	if identity, ok := values["identity"].(string); ok && strings.HasPrefix(identity, "database:") && s.cfg.Management != nil {
+		var err error
+		key, err = s.databaseKey(context.Background(), strings.TrimPrefix(identity, "database:"))
+		if err != nil {
+			return "", err
+		}
+	}
 	header, _ := json.Marshal(map[string]string{"alg": "RS256", "typ": "at+jwt", "kid": "demo-rsa-1"})
 	claims, _ := json.Marshal(values)
 	body := b64.EncodeToString(header) + "." + b64.EncodeToString(claims)
 	h := sha256.Sum256([]byte(body))
-	sig, e := rsa.SignPKCS1v15(rand.Reader, s.key, crypto.SHA256, h[:])
+	sig, e := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])
 	return body + "." + b64.EncodeToString(sig), e
 }
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {

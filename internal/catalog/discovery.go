@@ -74,6 +74,18 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 	}
 	if d.Discovery != nil {
 		st.Annotations = d.Discovery.Annotations
+		st.RegisteredSchema = d.Discovery.Tables
+		if hasHMAC(d.Discovery) {
+			if c.Management == nil {
+				st.Close()
+				return nil, fmt.Errorf("哈希脱敏需要管理存储")
+			}
+			st.MaskingKey, err = c.Management.MaskingKey(d.ID, false)
+			if err != nil {
+				st.Close()
+				return nil, err
+			}
+		}
 	}
 	return st, nil
 }
@@ -81,6 +93,7 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 func captureSchema(ctx context.Context, st *store.Store) ([]store.TableSchema, error) {
 	// Capture source comments, never the presentation overlay.
 	st.Annotations = nil
+	st.RegisteredSchema = nil
 	names, err := st.TableNames(ctx)
 	if err != nil {
 		return nil, err
@@ -272,7 +285,7 @@ func applyDiscovery(d *Database, tables []store.TableSchema) {
 	if s.Version == 0 || len(changes) > 0 {
 		s.Version++
 	}
-	s.Tables = tables
+	s.Tables = mergeDiscoveredColumns(s.Tables, tables)
 	reconcilePolicies(d.Config, tables)
 }
 

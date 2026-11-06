@@ -1,3 +1,4 @@
+import { useSaveModalProps } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, message } from 'antd';
@@ -5,6 +6,7 @@ import { managementCall, type Database } from '../api';
 
 type Account = { id?: number; database_id: string; username: string; name: string; business_user_id: number; permissions: string[]; active: boolean; revision: number };
 export function BusinessAccounts({ db }: { db: Database }) {
+ const saveModalProps = useSaveModalProps();
  const t=useI18n();
  const [accounts, setAccounts] = useState<Account[]>([]);
  const [editing, setEditing] = useState<Account>();
@@ -32,7 +34,7 @@ export function BusinessAccounts({ db }: { db: Database }) {
     { title: t("状态"), render: (_, a: Account) => <Tag>{a.active ? t("正常") : t("已禁用")}</Tag> },
     { title: t("操作"), render: (_, a: Account) => <Button onClick={() => edit(a)}>{t("编辑 / 重置密码")}</Button> },
    ]} />
-  <Modal title={editing?.revision ? t("编辑业务账号") : t("创建业务账号")} open={!!editing} onCancel={() => setEditing(undefined)} onOk={() => void saveAccount()} confirmLoading={busy}>
+  <Modal {...saveModalProps} title={editing?.revision ? t("编辑业务账号") : t("创建业务账号")} open={!!editing} onCancel={() => setEditing(undefined)} onOk={() => void saveAccount()} confirmLoading={busy}>
    {error && <Alert type="error" showIcon title={error} style={{marginBottom:12}}/>}
    <Form form={form} layout="vertical">
     <Form.Item name="username" label={t("工号 / 账号")} rules={[{ required: true }]}><Input disabled={!!editing?.revision} /></Form.Item>

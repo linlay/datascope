@@ -21,7 +21,10 @@ data/
     audit.db                     # 逐库审计，独立 SQLite
     credentials.key              # 独立 AES-256-GCM 密钥（如已生成）
     management.db                # 仅升级前历史文件，运行时不读取、不创建
-  oauth/signing.pem
+  oauth/signing.pem  # 平台管理令牌
+  databases/<ID>/auth/signing.pem
+  databases/<ID>/auth/public.pem
+  databases/<ID>/auth/api-key.sha256
 ```
 
 DataScope 自有 YAML 字段统一使用小驼峰，如 `revision`、`userId`、`description`、`mcpEnabled`、`maxRows`。SQLite 内部字段仍使用原来的大写下划线格式，API JSON 字段契约保持不变。业务表名、字段名、Action 参数名、业务标识保留原值及大小写；SQL、JavaScript、DDL 和知识正文采用 YAML 多行文本。
@@ -56,7 +59,7 @@ go run ./cmd/migrate-state -data-dir data
 
 连接密码使用原密文和原逐库密钥，发布前验证能够解密；不会在日志、迁移报告或接口打印密码。每份新 YAML 发布前逐项回读比对，失败不覆盖旧配置。重复运行只校验当前 YAML，必要时备份并清理退役的派生字段，不再导入旧业务 SQLite；已迁移标记会阻止配置丢失后重新导入旧库；全局旧 DATABASE 认证绑定在迁移完成后移除，绑定只由 authentication.yml 提供。
 
-备份完整环境包括业务数据、全局 management.db、全体 management/、逐库 credentials.key、OAuth signing.pem，以及需要保留的全局和逐库 audit.db。先停服后整体复制；在线逐库 YAML 备份使用持锁的 `Source.Backup`，演示 Action 安装器已使用它。SQLite 在线备份必须使用快照，不能只复制 WAL 模式的主文件。
+备份完整环境包括业务数据、全局 management.db、全体 management/、逐库 auth/ 和 credentials.key、平台 OAuth signing.pem，以及需要保留的全局和逐库 audit.db。先停服后整体复制；在线逐库 YAML 备份使用持锁的 `Source.Backup`，演示 Action 安装器已使用它。SQLite 在线备份必须使用快照，不能只复制 WAL 模式的主文件。
 
 回退必须停止新服务，恢复同一次备份的全局管理快照、逐库 SQLite 与密钥，并运行上一版二进制。升级后的 YAML 修改不会自动写回历史 SQLite，回退前应单独保存新增设置；不要让新旧二进制同时访问此目录。
 
@@ -73,7 +76,11 @@ go run ./cmd/migrate-state -data-dir data
 | ACCOUNT | ENTERPRISE_ACCOUNT_API | 企业账号密码验证接口 |
 | OAUTH | DEMO_OAUTH | 当前库本地业务账号 |
 | OAUTH | ENTERPRISE_OAUTH | 企业授权、令牌、UserInfo 地址 |
+| ONEID | ONEID | Desktop ID Token，经配置的 JWKS 验签并映射业务身份 |
+| TOKEN | STATIC_TOKEN | 逐库哈希校验的 Bearer/API Key，绑定固定业务身份及能力 |
 | NONE | 无 | 配置的固定业务身份及能力 |
+
+业务页面对应 Platform 的 none、mcp、oneid、token 四项，旧 ACCOUNT 保留为 Token 下的账号密码方式。OneID、公钥缓存、凭据请求头及部署配置示例见 [业务 MCP 认证](business-authentication.md)。
 
 企业提供方字段、HTTPS 与 loopback HTTP 限制保持现有接口约定。企业账号接口接收 POST JSON username/password，返回可信 sub、username、employee_id、name、active；身份与能力不由客户端自行指定。`subject_claim` 默认 sub，`business_id_claim` 默认 employee_id。企业 OAuth 使用 code + S256 PKCE、一次性 state，再请求 UserInfo。企业密钥仍只引用 `DATASCOPE_AUTH_*` 环境变量。
 

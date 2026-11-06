@@ -80,7 +80,7 @@ API 与 MCP 每次读取当前 YAML，使用同机文件锁协调。多文件更
 
 ## 发布与回退
 
-发布时携带全局 management.db、完整逐库 management/、独立 credentials.key、OAuth signing.pem、部署配置及需保留的 audit.db。运行中 SQLite 备份必须使用一致性快照；逐库 YAML 在线备份可使用持锁的 Source.Backup，安装器已适配。
+发布时携带全局 management.db、完整逐库 management/ 和 auth/、独立 credentials.key、平台 OAuth signing.pem、部署配置及需保留的 audit.db。运行中 SQLite 备份必须使用一致性快照；逐库 YAML 在线备份可使用持锁的 Source.Backup，安装器已适配。
 
 回退需停止新服务，恢复同一批次的全局和逐库 SQLite 快照与密钥，运行上一版二进制。升级后产生的 YAML 修改不会写回历史 SQLite，回退前单独保存。禁止新旧二进制同时运行。
 

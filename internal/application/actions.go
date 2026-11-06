@@ -61,7 +61,13 @@ func (s *Service) DescribeAction(ctx context.Context, database, name string) (an
 	if !d.MCPEnabled || !d.WriteEnabled {
 		return nil, management.ErrDenied
 	}
-	out, err := describeActions(d.Actions, name)
+	definitions := make([]action.Definition, 0, len(d.Actions))
+	for _, a := range d.Actions {
+		if a.IsPublished() {
+			definitions = append(definitions, a)
+		}
+	}
+	out, err := describeActions(definitions, name)
 	if err == nil && name != "" {
 		for _, a := range d.Actions {
 			if a.Name == name && a.ViewID != "" {
@@ -124,6 +130,9 @@ func (s *Service) actionDefinition(ctx context.Context, database, name string, l
 	}
 	for _, a := range d.Actions {
 		if a.Name == name {
+			if liveMCP && !a.IsPublished() {
+				return nil, action.Definition{}, management.ErrDenied
+			}
 			return d, a, nil
 		}
 	}
@@ -326,7 +335,17 @@ func (s *Service) ConfirmAction(ctx context.Context, token, password string) (*A
 		return nil, e
 	}
 	a, trusted := guard.Business(ctx)
-	if !trusted || policy.Provider.Type != "ENTERPRISE_OAUTH" {
+	if policy.Policy.Mode == "TOKEN" {
+		return nil, fmt.Errorf("共享 Token/API Key 不能用于本人确认，请使用 OAuth、OneID 或业务账号")
+	}
+	if policy.Policy.Mode == "ONEID" {
+		a, e = policy.VerifyBearer(ctx, rec.DatabaseID, password)
+		if e != nil {
+			return nil, e
+		}
+		trusted = true
+	}
+	if !trusted || policy.Provider.Type != "ENTERPRISE_OAUTH" && policy.Policy.Mode != "ONEID" {
 		if policy.Provider.Type == "DEMO_OAUTH" {
 			a, e = s.Management.AuthenticateBusiness(ctx, rec.DatabaseID, p.Username, password)
 		} else {

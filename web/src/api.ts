@@ -18,7 +18,9 @@ export interface TableInfo {
   scheme: Scheme;
 }
 
+export interface Masking {type:'none'|'full'|'partial'|'omit'|'hmac';keep_prefix?:number;keep_suffix?:number}
 export interface Column {
+  masking?: Masking;
   display_name?: string;
   name: string;
   type: string;
@@ -213,13 +215,13 @@ export interface Discovery { pending?:PendingDiscovery;version:number; checked_a
 export interface ActionParameter { type: "string"|"integer"|"number"|"boolean"; description: string; optional?: boolean; enum?: unknown[]; min?: number; max?: number; max_length?: number; pattern?: string }
 export interface ViewDefinition { id:string; name:string; description:string; type:"view"; html:string; published:boolean }
 export interface ViewResource { uri:string; name:string; title?:string; description?:string; mimeType?:string; _meta?:{type?:string} }
-export interface ActionDefinition { view_id?:string; name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
+export interface ActionDefinition { published?:boolean; view_id?:string; name: string; title: string; description: string; confirm: boolean; parameters: Record<string, ActionParameter>; script: string }
 export interface ActionLibrary { name: string; title: string; description: string; script: string }
 export interface ActionSchema { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, {type:string;description?:string;enum?:unknown[];minimum?:number;maximum?:number;maxLength?:number;pattern?:string}> }
 export interface ActionDescription { view_id?:string; view_uri?:string; name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }
 export interface ActionPreview { status:string;message?:string;result?:unknown;preview?:{result:unknown;writes:{sql:string;rows:number;binds:unknown[]}[]};sql?:unknown[] }
-export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string}
-export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE';provider_id?:string;permissions?:string[];business_user_id?:number}
+export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string;jwks_url?:string;audience?:string;header_name?:string}
+export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'|'ONEID'|'TOKEN';provider_id?:string;permissions?:string[];business_user_id?:number}
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {
@@ -245,7 +247,7 @@ export const databases = {
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
  test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database,password});},
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
- save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify({...body,discovery:undefined})}),
+ save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;

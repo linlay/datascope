@@ -1,6 +1,7 @@
+import { SaveButton } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
 import { appURL, databases, managementCall, type Database } from '../api';
 
 const { Text } = Typography;
@@ -90,7 +91,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
       <Card title={<Space>{t("MCP 配置")}<Switch size="small" aria-label={t("开启 MCP")} disabled={!db.permissions?.includes('mcp.write') || saving} checked={enabled} onChange={setEnabled} /></Space>} extra={
         <Space>
           {dirty && <Tag color="orange">{t("有未保存修改")}</Tag>}
-          <Button type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || !writeAccountValid} onClick={save}>{t("保存并生效")}</Button>
+          <SaveButton type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || !writeAccountValid} onClick={save} />
         </Space>
       }>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
@@ -136,7 +137,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
         </Space>
       </Card>
       {error && <Alert type="error" showIcon title={t("MCP 配置保存失败")} description={error} closable onClose={() => setError(undefined)} />}
-      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={db.access?.policy.mode === 'NONE' ? t('无需认证') : `${db.access?.policy.mode === 'ACCOUNT' ? t('账号密码（Token）') : 'OAuth'} · ${db.access?.provider.name || t('本库业务账号')}`}  /> : (
+      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={db.access?.policy.mode === 'NONE' ? t('无需认证') : `${db.access?.policy.mode === 'ACCOUNT' ? t('Token · 账号密码') : db.access?.policy.mode === 'TOKEN' ? 'Token / API Key' : db.access?.policy.mode === 'ONEID' ? t('企业 SSO（oneid）') : 'MCP OAuth'} · ${db.access?.provider.name || t('本库业务账号')}`}  /> : (
         <Alert type="info" showIcon title={t("MCP 已关闭，开启并保存后可测试。")} />
       )}
     </Space>

@@ -34,6 +34,71 @@ func setupAction(t *testing.T, confirm bool) (*fixture, context.Context) {
 	ctx := guard.WithBusiness(audit.With(context.Background(), audit.Metadata{Source: "test"}), a)
 	return f, ctx
 }
+
+func TestActionPublicationControlsLiveAccess(t *testing.T) {
+	f, ctx := setupAction(t, true)
+	// Legacy definitions have no publication field and must remain callable.
+	listed, err := f.app.ListActions(ctx, "default")
+	must(t, err)
+	if len(listed.(map[string]any)["actions"].([]map[string]any)) != 1 {
+		t.Fatal("legacy action disappeared")
+	}
+	args := map[string]any{"id": 1, "name": "publication-test"}
+	pending, err := f.app.InvokeAction(ctx, "default", "rename_item", "pending-before-unpublish", args)
+	must(t, err)
+	if pending.Status != "confirm_required" {
+		t.Fatal(pending)
+	}
+	d, err := f.c.Get("default")
+	must(t, err)
+	published := false
+	d.Actions[0].Published = &published
+	_, err = f.app.Call(f.ctx, "configure_actions", application.Input{DatabaseID: "default", Database: d})
+	must(t, err)
+	d, err = f.c.Get("default")
+	must(t, err)
+	if d.Actions[0].IsPublished() {
+		t.Fatal("publication state was not persisted")
+	}
+	listed, err = f.app.ListActions(ctx, "default")
+	must(t, err)
+	if len(listed.(map[string]any)["actions"].([]map[string]any)) != 0 {
+		t.Fatal("unpublished action still listed")
+	}
+	if _, err = f.app.DescribeAction(ctx, "default", "rename_item"); err == nil {
+		t.Fatal("unpublished action still described")
+	}
+	for _, request := range []string{"pending-before-unpublish", "new-after-unpublish"} {
+		if _, err = f.app.InvokeAction(ctx, "default", "rename_item", request, args); err == nil {
+			t.Fatal("unpublished action invoked", request)
+		}
+	}
+	if _, err = f.app.ConfirmAction(f.ctx, pending.ConfirmationToken, "business-password"); err == nil {
+		t.Fatal("unpublished action confirmed")
+	}
+	// Editors can still inspect and dry-run a draft before publishing it.
+	_, err = f.app.InspectAction(f.ctx, "default", "rename_item")
+	must(t, err)
+	_, err = f.app.Call(f.ctx, "try_action", application.Input{DatabaseID: "default", Name: "rename_item", RequestID: "draft-preview", BusinessUserID: 10, Arguments: args})
+	must(t, err)
+	rows, err := f.st.Query(ctx, "SELECT name FROM items WHERE id=1", 1)
+	must(t, err)
+	if rows.Rows[0]["name"] != "one" {
+		t.Fatal("draft or expired confirmation committed a write")
+	}
+	published = true
+	d.Actions[0].Published = &published
+	_, err = f.app.Call(f.ctx, "configure_actions", application.Input{DatabaseID: "default", Database: d})
+	must(t, err)
+	_, err = f.app.DescribeAction(ctx, "default", "rename_item")
+	must(t, err)
+	res, err := f.app.InvokeAction(ctx, "default", "rename_item", "republished", args)
+	must(t, err)
+	if res.Status != "confirm_required" {
+		t.Fatal(res)
+	}
+}
+
 func TestActionMemoryIdempotencyAndPermission(t *testing.T) {
 	f, ctx := setupAction(t, false)
 	args := map[string]any{"id": 1, "name": "after"}

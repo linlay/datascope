@@ -41,8 +41,8 @@
 | gender | TEXT | 是 |  | 性别 |
 | birth_date | TEXT | 是 |  | 出生日期 |
 | id_type | TEXT | 是 |  | 证件类型 |
-| id_no | TEXT | 是 |  | 证件号码（预先脱敏） |
-| mobile | TEXT | 是 |  | 手机号码（预先脱敏） |
+| id_no | TEXT | 是 |  | 证件号码 |
+| mobile | TEXT | 是 |  | 手机号码 |
 | risk_level | TEXT | 是 |  | 客户风险等级 C1–C5 |
 | investor_type | TEXT | 是 |  | 投资者类型（普通/专业） |
 | open_date | TEXT | 是 |  | 开户日期 |
@@ -122,7 +122,7 @@
 | branch_code | TEXT | 否 |  | 分公司代码，关联 branches.code |
 | department_code | TEXT | 否 |  | 营业部代码，关联 departments.code |
 | title | TEXT | 是 |  | 职务 |
-| mobile | TEXT | 是 |  | 手机号码（预先脱敏） |
+| mobile | TEXT | 是 |  | 手机号码 |
 | hire_date | TEXT | 是 |  | 入职日期 |
 | status | TEXT | 是 |  | 状态（员工 active/resigned；账户 active） |
 

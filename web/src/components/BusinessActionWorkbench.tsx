@@ -14,6 +14,8 @@ type ToolResult<T> = { isError?: boolean; structuredContent?: T; content?: { typ
 export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db: Database; viewsOnly?: boolean }) {
  const t = useI18n();
  const route=useRoute();
+ const viewWorkbench = viewsOnly && route.page === 'view-workbench';
+ const viewSequence = useRef(0);
  const selectedRequest=useRef('');
  const path = `/api/databases/${encodeURIComponent(db.id)}/business-mcp`;
  const [info, setInfo] = useState<Info>();
@@ -46,7 +48,7 @@ export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db:
  useEffect(() => {
   active.current = true;
   void work(async () => { const value = await platformRequest<Info>(path); if (active.current) setInfo(value); });
-  return () => { active.current = false; oauth.current = undefined; popup.current?.close(); };
+  return () => { active.current = false; viewSequence.current++; oauth.current = undefined; popup.current?.close(); };
  }, [path]);
  useEffect(() => {
   const receive = (event: MessageEvent) => {
@@ -108,14 +110,24 @@ export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db:
   return call(name,args);
  };
  const ready = info?.mode === 'NONE' || !!token.trim();
- useEffect(() => { setResources([]);setViewURI('');setViewHTML('');setViewData(undefined); }, [token]);
- const loadViews = () => work(async () => { const all:ViewResource[]=[];let cursor:string|undefined;do{const out: {resources:ViewResource[];nextCursor?:string}=await post({operation:'resources/list',cursor});all.push(...out.resources);cursor=out.nextCursor;}while(cursor);setResources(all.filter(v=>v._meta?.type==='view')); });
+ useEffect(() => { viewSequence.current++;setViewLoading(false);setResources([]);setViewURI('');setViewHTML('');setViewData(undefined); }, [token]);
+ const loadViews = () => work(async () => { const all:ViewResource[]=[];let cursor:string|undefined;do{const out: {resources:ViewResource[];nextCursor?:string}=await post({operation:'resources/list',cursor});all.push(...out.resources);cursor=out.nextCursor;}while(cursor);if(active.current){setResources(all.filter(v=>v._meta?.type==='view'));setViewHTML('');setViewData(undefined);} });
+ useEffect(() => {
+  if (!viewWorkbench) return;
+  const uri = resources.find(v => v.name === route.selection)?.uri || '';
+  viewSequence.current++;setViewLoading(false);setViewURI(uri);setViewHTML('');setViewData(undefined);
+ }, [viewWorkbench, route.selection, resources]);
+ const selectView = (uri: string) => {
+  if (!viewWorkbench) { void openView(uri); return; }
+  const item = resources.find(v => v.uri === uri);
+  if (item) selectResource(item.name);
+ };
  const openView = async (uri:string) => {
-  if (viewLoading) return; setViewLoading(true);setError('');setViewURI(uri);setViewHTML('');
+  if (viewLoading) return; const request = ++viewSequence.current;setViewLoading(true);setError('');setViewURI(uri);setViewHTML('');
   try { const input = JSON.parse(viewInput); if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(t('调用参数必须是 JSON 对象'));
    const out = await post<{contents:{text?:string;mimeType?:string}[]}>({operation:'resources/read',uri});
-   const html = out.contents.find(c=>c.mimeType==='text/html')?.text; if (!html) throw new Error(t('资源未返回 HTML')); setViewData({input});setViewHTML(html);
-  }catch(e){setError((e as Error).message)}finally{setViewLoading(false)}
+   const html = out.contents.find(c=>c.mimeType==='text/html')?.text; if (!html) throw new Error(t('资源未返回 HTML')); if(active.current && request === viewSequence.current){setViewData({input});setViewHTML(html);}
+  }catch(e){if(active.current && request === viewSequence.current)setError((e as Error).message)}finally{if(active.current && request === viewSequence.current)setViewLoading(false)}
  };
  useEffect(()=>{
   if(viewsOnly||!ready||busy||attempted)return;
@@ -140,18 +152,18 @@ export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db:
   {error && <Alert type="error" showIcon title={error} />}
   {viewsOnly && <Card size="small" title={t('Resources · 视图')} extra={<Button disabled={busy || !ready || viewLoading} loading={busy} onClick={()=>void loadViews()}>{t('获取视图列表')}</Button>}>
    <Space orientation="vertical" style={{width:'100%'}}>
-    <Select aria-label={t('选择视图')} style={{width:'100%'}} value={viewURI||undefined} disabled={!ready||busy||viewLoading} placeholder={t('选择视图')} options={resources.map(v=>({value:v.uri,label:v.title||v.name}))} onChange={uri=>void openView(uri)} />
+    <Select aria-label={t('选择视图')} style={{width:'100%'}} value={viewURI||undefined} disabled={!ready||busy||viewLoading} placeholder={t('选择视图')} options={resources.map(v=>({value:v.uri,label:v.title||v.name}))} onChange={selectView} />
     <Typography.Text>{t('视图输入 JSON')}</Typography.Text><CodeEditor language="json" height="100px" value={viewInput} onChange={setViewInput} readOnly={viewLoading} />
     <Button disabled={!ready||!viewURI||busy} loading={viewLoading} onClick={()=>void openView(viewURI)}>{t('载入视图')}</Button>
-    {viewHTML&&ready&&<ViewFrame html={viewHTML} data={viewData} onCall={viewCall} />}
+    {viewHTML&&ready&&<ViewFrame key={viewURI} html={viewHTML} data={viewData} onCall={viewCall} />}
    </Space>
   </Card>}
   {!viewsOnly && <Card size="small" title={t('动作列表与参数')} extra={<Button disabled={busy || !ready || attempted} loading={busy} onClick={() => void load()}>{t('获取列表')}</Button>}>
    <Space orientation="vertical" style={{ width: '100%' }}>
     <Select aria-label={t('选择业务动作')} style={{ width: '100%' }} disabled={busy || attempted} value={detail?.name||route.selection} placeholder={t('选择业务动作')} options={actions.map(a => ({ value: a.name, label: `${a.title} (${a.name})` }))} onChange={name => void describe(name)} />
     {detail && <><Typography.Paragraph>{detail.description}</Typography.Paragraph><JsonData value={detail.parameters} /><CodeEditor language="json" height="160px" value={args} readOnly={busy || attempted} onChange={setArgs} /><Typography.Text code>request_id: {requestID}</Typography.Text>
-     {info?.mode === 'NONE' && detail.confirm && <Alert type="warning" showIcon title={t('此动作需要本人确认，请先配置账号或 OAuth 认证。匿名身份不能由其他账号代签。')} />}
-     <Space wrap><Button danger type="primary" disabled={busy || !ready || attempted || info?.mode === 'NONE' && detail.confirm} onClick={execute}>{t('正式调用')}</Button><Button disabled={busy || !ready || !attempted} onClick={() => void lookup()}>{t('查询同一请求结果')}</Button><Button disabled={busy} onClick={reset}>{t('新请求')}</Button></Space>
+     {(info?.mode === 'NONE' || info?.mode === 'TOKEN') && detail.confirm && <Alert type="warning" showIcon title={t('此动作需要本人确认，请使用业务账号、OAuth 或 OneID。匿名身份和共享 API Key 不能代签。')} />}
+     <Space wrap><Button danger type="primary" disabled={busy || !ready || attempted || (info?.mode === 'NONE' || info?.mode === 'TOKEN') && detail.confirm} onClick={execute}>{t('正式调用')}</Button><Button disabled={busy || !ready || !attempted} onClick={() => void lookup()}>{t('查询同一请求结果')}</Button><Button disabled={busy} onClick={reset}>{t('新请求')}</Button></Space>
     </>}
    </Space>
   </Card>

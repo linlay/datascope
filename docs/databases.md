@@ -62,17 +62,21 @@ MySQL、PostgreSQL 默认启用证书与主机名校验；可信开发网络可�
 
 ## SQL 与权限改写范围
 
-查询工作台的 SQL 示例由每个数据库的 `management/database.yml` 独立配置，不使用全局示例。示例只填入编辑区，不自动执行；省略 `sqlExamples` 或设为 `[]` 时，隐藏示例选择框，编辑区初始为空。
+查询工作台的 SQL 示例保存在各数据库自己的 `data/databases/<数据库 ID>/management/sql-examples.yml`，不使用全局示例。文件内容：
 
 ```yaml
-database:
-  # 其余数据库配置保持原样
-  sqlExamples:
-    - label: 最近订单
-      sql: SELECT id, status FROM orders ORDER BY id DESC LIMIT 20
+sqlExamples:
+  - label: 客户数量
+    sql: SELECT COUNT(*) FROM customers
 ```
 
-YAML 使用 `sqlExamples`，管理 API 使用 `sql_examples`，修改示例需要 `config.write` 权限。证券演示库的示例模板见 `config/securities-sql-examples.yml`，仅配置到相应证券库。
+选择示例只填入编辑区，不自动执行；`sqlExamples: []` 表示不提供示例。YAML 使用 `sqlExamples`，管理 API 仍使用 `sql_examples`，修改需要 `config.write` 权限。`database.yml` 不再保存 SQL 示例。旧版内嵌示例可继续读取，下一次配置保存会原子拆分；升级已有配置可在停止 API/MCP 后运行 `make migrate-state`，迁移会备份原文件并保留 revision。
+
+证券库的恢复模板同样位于该库的管理目录结构中：`fixtures/databases/securities_demo/management/sql-examples.yml`，仅供显式安装，不作为运行时回退。执行 `make install-demo-sql-examples` 可补齐已登记证券库的缺失示例，保留已有自定义语句；加 `-check` 只检查。
+
+数据库目录使用内部 ID。证券演示库 ID 为 `securities_demo` 时，示例路径为 `data/databases/securities_demo/management/sql-examples.yml`；安装命令默认读取 `MCP_DATABASE`，也可用 `-database securities_demo` 显式指定。
+
+查询工作台的规范路由为 `/#/sql-workbench?database=<数据库 ID>`，旧 `/#/sql` 链接会保留参数并替换为新路由。
 
 网络数据源第一版接收受限 SELECT 方言。解析器仍以 SQLite 的语法树为内部表示，再由 `internal/dialect` 校验并生成目标 SQL；这不是各数据库全部原生语法的支持声明。数据库报错时不会回退到原 SQL。
 
