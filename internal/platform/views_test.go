@@ -19,7 +19,7 @@ func TestViewConfigurationPersistenceReferencesAndAuthorization(t *testing.T) {
 	f := setup(t)
 	d, err := f.c.Get("default")
 	must(t, err)
-	d.Views = view.Templates()
+	d.Views = view.DemoViews()
 	d.QueryViewID = "query"
 	_, err = f.app.Call(f.readerContext(), "configure_views", application.Input{DatabaseID: d.ID, Database: d})
 	if err == nil {

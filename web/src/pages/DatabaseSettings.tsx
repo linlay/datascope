@@ -7,6 +7,7 @@ import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
 import { DatabaseAuthentication } from '../components/DatabaseAuthentication';
 import { DatabaseClone } from '../components/DatabaseClone';
+import { QueryDisplaySettings } from '../components/QueryDisplaySettings';
 
 export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () => void }) {
  const t = useI18n();
@@ -48,6 +49,7 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
      ]} />
     </Space>
    </Card>
+   <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
    <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>
     <Descriptions column={1} items={[

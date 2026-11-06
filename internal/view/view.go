@@ -40,12 +40,22 @@ func URI(database, id string) string { return "ui://datascope/" + database + "/v
 //go:embed templates/*
 var templates embed.FS
 
+// Templates returns reusable views without domain-specific schemas or actions.
 func Templates() []Definition {
-	items := []Definition{
+	return loadTemplates([]Definition{
 		{ID: "query", Name: "通用查询视图", Description: "使用绑定参数执行只读 SQL，展示结果表格并重新查询。"},
 		{ID: "action", Name: "动作预览与结果", Description: "根据动作参数生成表单，展示真实预览、本人确认链接和请求回执。"},
+	})
+}
+
+// DemoViews includes the securities example for explicit demo installation only.
+func DemoViews() []Definition {
+	return append(Templates(), loadTemplates([]Definition{
 		{ID: "securities_account", Name: "证券账户详情", Description: "按资金账号查看客户、资金、持仓、委托和流水，发起客户资料、账户及委托动作。"},
-	}
+	})...)
+}
+
+func loadTemplates(items []Definition) []Definition {
 	for i := range items {
 		body, err := templates.ReadFile("templates/" + items[i].ID + ".html")
 		if err != nil {
