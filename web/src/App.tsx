@@ -122,7 +122,7 @@ export function App() {
        {error && <Alert type="error" title={error}/>}
        {testResult&&<Alert type="success" title={testResult}/>}
        <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label={t("显示名称")} rules={[{required:true}]}><Input placeholder={t("例如：业务数据库")}/></Form.Item><ConnectionFields form={form}/></Form>
-       <p>{t("添加后自动侦查全部表、字段与注释，生成映射和结构快照。选择开放范围后，再开启 MCP。")}</p>
+       <p>{t("网络数据源先登记 Schema 范围，再到查询配置选择表并配置开放权限；SQLite 自动发现表结构。")}</p>
       </Modal>
       <SystemSettings open={settingsOpen} onClose={()=>setSettingsOpen(false)}/>
     </NavigationContext.Provider>

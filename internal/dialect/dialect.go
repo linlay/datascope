@@ -15,8 +15,9 @@ import (
 )
 
 type Engine struct {
-	Driver string
-	Schema string
+	Driver         string
+	Schema         string
+	AllowedSchemas []string
 	// Logical names are case-insensitive and must be unique within one schema.
 	Tables map[string]string
 }
@@ -29,7 +30,65 @@ func (e Engine) Quote(name string) string {
 	return q + strings.ReplaceAll(name, q, q+q) + q
 }
 
-func (e Engine) Table(name string) string { return e.Quote(e.Schema) + "." + e.Quote(name) }
+// SplitTable preserves namespace independently of the display/permission key.
+func SplitTable(name, fallback string) (string, string) {
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		return name[:i], name[i+1:]
+	}
+	return fallback, name
+}
+func (e Engine) Table(name string) string {
+	owner, table := SplitTable(name, e.Schema)
+	return e.Quote(owner) + "." + e.Quote(table)
+}
+func (e Engine) AllowsSchema(name string) bool {
+	if e.AllowedSchemas == nil {
+		return e.Schema == "" || name == e.Schema
+	}
+	for _, allowed := range e.AllowedSchemas {
+		if name == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolve returns the canonical full table name. Legacy in-memory adapters may
+// still register bare names, but only within their single configured schema.
+func (e Engine) Resolve(schema, name string) (string, error) {
+	if strings.EqualFold(schema, "main") { // server-generated logical reference
+		if physical, ok := e.Tables[strings.ToLower(name)]; ok {
+			owner, _ := SplitTable(physical, e.Schema)
+			if e.AllowsSchema(owner) {
+				return physical, nil
+			}
+		}
+	}
+	if schema == "" {
+		schema = e.Schema
+	}
+	if schema == "" {
+		return "", errors.New("没有默认 Schema，请使用 schema.table")
+	}
+	key := schema + "." + name
+	if physical, ok := e.Tables[strings.ToLower(key)]; ok {
+		owner, _ := SplitTable(physical, e.Schema)
+		if !e.AllowsSchema(owner) {
+			return "", fmt.Errorf("Schema %s 不在允许范围内", owner)
+		}
+		return physical, nil
+	}
+	if schema == e.Schema {
+		if physical, ok := e.Tables[strings.ToLower(name)]; ok {
+			owner, _ := SplitTable(physical, e.Schema)
+			if !e.AllowsSchema(owner) {
+				return "", fmt.Errorf("Schema %s is outside the allowed scope", owner)
+			}
+			return physical, nil
+		}
+	}
+	return "", fmt.Errorf("未登记的数据表 %s", key)
+}
 
 func (e Engine) fold(name string) string {
 	switch e.Driver {
@@ -77,12 +136,13 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 			if x.Schema != nil && x.Schema.Name != e.Schema {
 				return "", nil, errors.New("不允许跨 schema 写入")
 			}
-			physical, ok := e.Tables[strings.ToLower(x.Table.Name)]
-			if !ok {
-				return "", nil, errors.New("未登记的写入表")
+			physical, err := e.Resolve(parser.IdentName(x.Schema), x.Table.Name)
+			if err != nil {
+				return "", nil, err
 			}
-			x.Schema = &parser.Ident{Name: e.Schema, Quoted: true}
-			x.Table = &parser.Ident{Name: physical, Quoted: true}
+			owner, table := SplitTable(physical, e.Schema)
+			x.Schema = &parser.Ident{Name: owner, Quoted: true}
+			x.Table = &parser.Ident{Name: table, Quoted: true}
 		case *parser.UpdateStatement:
 			if x.WhereExpr == nil || x.WithClause != nil || x.UpdateOr.IsValid() || x.Source != nil || x.ReturningClause != nil {
 				return "", nil, errors.New("UPDATE 需要 WHERE，不支持 FROM、WITH、RETURNING 或冲突处理")
@@ -99,20 +159,8 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 	}
 	ctes := map[string]bool{}
 	generatedDual := map[*parser.QualifiedTableName]bool{}
-	_, err = parser.Walk(parser.VisitFunc(func(n parser.Node) (parser.Node, error) {
-		if c, ok := n.(*parser.CTE); ok {
-			key := strings.ToLower(c.TableName.Name)
-			if _, real := e.Tables[key]; real {
-				return nil, errors.New("CTE 不能与数据表同名")
-			}
-			ctes[key] = true
-		}
-		return n, nil
-	}), n)
-	if err != nil {
-		return "", nil, err
-	}
-	_, err = parser.Walk(parser.VisitFunc(func(n parser.Node) (parser.Node, error) {
+	_, err = parser.Walk(&scopedVisitor{visit: func(n parser.Node, scope map[string]bool) (parser.Node, error) {
+		ctes = scope
 		switch x := n.(type) {
 		case *parser.InsertStatement, *parser.UpdateStatement, *parser.DeleteStatement, *parser.Assignment:
 			if !write {
@@ -152,15 +200,20 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 			if generatedDual[x] {
 				break
 			}
-			if x.Schema != nil && !strings.EqualFold(x.Schema.Name, "main") && x.Schema.Name != e.Schema {
-				return nil, errors.New("不允许访问其他 schema")
+			owner := parser.IdentName(x.Schema)
+			if x.Schema != nil && !x.Schema.Quoted {
+				owner = e.fold(owner)
 			}
-			physical, ok := e.Tables[strings.ToLower(name)]
-			if !ok {
-				return nil, fmt.Errorf("未登记的数据表 %s", name)
+			physical, err := e.Resolve(owner, name)
+			if err != nil {
+				return nil, err
 			}
-			x.Schema = &parser.Ident{Name: e.Schema, Quoted: true}
-			x.Name = &parser.Ident{Name: physical, Quoted: true}
+			owner, table := SplitTable(physical, e.Schema)
+			if write && owner != e.Schema {
+				return nil, errors.New("不允许跨 schema 写入")
+			}
+			x.Schema = &parser.Ident{Name: owner, Quoted: true}
+			x.Name = &parser.Ident{Name: table, Quoted: true}
 		case *parser.QualifiedRef:
 			if x.Schema != nil {
 				return nil, errors.New("请使用表别名引用字段，不能使用 schema.table.column")
@@ -221,7 +274,7 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 			return nil, fmt.Errorf("未经支持的 SQL 节点 %T", n)
 		}
 		return n, nil
-	}), n)
+	}}, n)
 	if err != nil {
 		return "", nil, err
 	}

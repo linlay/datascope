@@ -22,9 +22,9 @@
 
 在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
 
-每个数据源只登记一个 schema 的基础表；第一版不隐式开放视图、同义词、其他 schema 或跨数据库访问。逻辑表名不区分大小写；同一个 schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
+每个网络数据源通过 `connection.allowed_schemas` 登记允许范围，`connection.schema` 是可选默认 Schema。MySQL、Oracle、PostgreSQL、达梦均支持同一连接、允许范围内的跨 Schema JOIN；不扩展到其他实例、连接、Oracle Service/PDB 或 DB Link，也不隐式登记视图和同义词。逻辑表名不区分大小写；同一个 Schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
 
-MySQL 的 database 和 schema 填写相同值；PostgreSQL 分别指定 database 和 schema；Oracle 使用 service_name（不使用 SID），schema 为目标 owner；达梦指定 schema，不借用 Oracle 驱动，也不假设兼容模式等于原生 Oracle。
+MySQL 的 database 和 schema 表示同一个可选默认数据库，留空时两者均为空；PostgreSQL 的 database 仍必填，schema 可选；Oracle 的 service_name 仍必填（不使用 SID），schema 为可选默认 owner；达梦 schema 同样可选。默认 Schema 必须属于允许范围。
 
 例：通过管理 API `POST /api/databases` 登记达梦（需要已登录的系统管理员）：
 
@@ -87,17 +87,17 @@ sqlExamples:
 - MySQL 每个连接使用 ANSI_QUOTES 和 NO_BACKSLASH_ESCAPES，使字符串规则与内部解析一致。
 - PostgreSQL 固定 search_path 为 pg_catalog，业务表始终显式限定 schema。
 
-权限 SQL 使用逻辑命名空间 `main.表名`，例如：
+网络权限 SQL 使用完整物理表名，例如：
 
 ```sql
-SELECT * FROM main.orders WHERE owner_id = ${userId}
+SELECT * FROM sales.orders WHERE owner_id = ${userId}
 ```
 
-`main` 在执行前映射为当前数据源配置的 schema。客户端查询使用未限定的表名与显式表别名。`${userId}` 和 `${asOf}` 只能由服务端提供；业务工具参数仍使用 `:arg_参数名`。生成 SQL 按出现顺序绑定参数，包括同一参数多次出现的情况。网络库的 `${asOf}` 使用带类型的时间绑定，SQLite 保持原来的字符串格式。
+内部生成的 `main."sales.orders"` 在执行前映射到完整物理表名。旧配置升级把原 `main.orders` 固定为原默认 Schema 下的 orders，避免更改默认 Schema 后策略转向另一张表。客户端可以使用完整表名与显式表别名；未限定表名仅解析到显式默认 Schema，没有默认 Schema 时拒绝未限定表名。`${userId}` 和 `${asOf}` 只能由服务端提供；业务工具参数仍使用 `:arg_参数名`。生成 SQL 按出现顺序绑定参数，包括同一参数多次出现的情况。网络库的 `${asOf}` 使用带类型的时间绑定，SQLite 保持原来的字符串格式。
 
 查询预览、策略保存、前置检查和业务工具验证都经过方言校验。`raw_query` 不进行业务权限改写，但同样只接受这一只读 SELECT 子集。演示库的 customer_scope 和员工目录校验仅适用于 SQLite 证券演示库；网络数据源使用平台托管的逐库业务账号。
 
-网络表列表的行数来自数据库统计信息，界面显示“约”；浏览页的匹配总数通过 COUNT 查询。结构中的 DDL 是元数据摘要，不是完整的建表脚本。达梦 LOB 转换时每字段限制为 1,048,576 字符（CLOB）或字节（BLOB），超限明确报错。
+候选发现只读取 Schema 与表名，不读取全量字段、注释或业务数据；浏览页的匹配总数通过 COUNT 查询。结构中的 DDL 是元数据摘要，不是完整的建表脚本。达梦 LOB 转换时每字段限制为 1,048,576 字符（CLOB）或字节（BLOB），超限明确报错。
 
 ## 只读运行与 Linux 构建
 
@@ -141,3 +141,17 @@ make test-network
 ```
 
 其他变量为 DATASCOPE_INTEGRATION_MYSQL、DATASCOPE_INTEGRATION_POSTGRESQL、DATASCOPE_INTEGRATION_ORACLE，内容为对应 connection 对象。未配置的数据库显示 SKIP，不能计为验收通过。测试覆盖元数据、默认拒绝、行与字段权限、JOIN/CTE、前置拒绝、分页与写入拒绝。上线前额外验证目标版本的 TLS、字符集、日期/DECIMAL/LOB、连接中断以及服务端超时取消。
+
+## Schema 范围与选表
+
+数据库管理登记允许的 Schema，查询管理通过“选择登记表”搜索并分页选表。登记时校验实际 SELECT 能力，读取所选表的字段、注释并建立结构快照；新登记表默认关闭，随后通过现有表开放开关和 MCP 发布流程授权。未选表不建立字段快照。移除 Schema 会移除其已登记结构和策略，再添加时须重新登记、开放，不继承其他 Schema 同名表权限。
+
+网络表的 name 是 `Schema.TABLE_NAME`，另有 schema 和 table_name 元数据字段。策略、注释、脱敏域和查询物理表名均保留 Schema。表逻辑标识仍不区分大小写，冲突时拒绝登记；名称含点的 Schema/表暂不纳入候选，避免歧义。SQLite 使用固定 main 上下文，维持原有裸表名和单库行为，不开放 ATTACH。
+
+省略 allowed_schemas：存在默认 Schema 时只登记默认 Schema；没有默认 Schema 时在创建时发现可见 Schema 并冻结为显式列表。显式空列表表示不允许任何 Schema。以后出现的新 Schema 不自动加入。元数据候选仍须在选表时验证读取权限；数据库撤销授权后，源数据库会拒绝后续读取。
+
+自动结构检查对网络源只检查已登记表；候选表增多不会自动扩展快照。SQLite 保留原有完整结构发现流程。连接测试返回 connected、empty、table_count 和 schemas，零表仍属于连接成功。
+
+普通查询在执行前检查每张表和所有表达式中的字段，包括 JOIN/WHERE、排序、子查询、CTE 和 UNION 分支；每张表保留原行权限改写。raw_query 是单独授权的高权限测试入口，绕过表开放、行权限和字段白名单，仍受只读方言、Schema 范围、脱敏、超时与结果上限限制。
+
+已有网络配置启动时通过管理存储原子迁移至 schema_identity_version=1，保留表/字段权限、注释和脱敏；旧单库/单 Schema 的允许范围固定为原默认值。跨 Schema 测试数据与真实数据库验收方法见 [跨 Schema 验收](schema-join-acceptance.md)。

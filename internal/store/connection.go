@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,15 +24,16 @@ import (
 // Connection contains references only. Passwords are resolved by the catalog
 // from the encrypted credential store, or from legacy environment variables.
 type Connection struct {
-	Host         string `json:"host" yaml:"host"`
-	Port         int    `json:"port" yaml:"port"`
-	Database     string `json:"database,omitempty" yaml:"database,omitempty"`
-	ServiceName  string `json:"service_name,omitempty" yaml:"serviceName,omitempty"`
-	Schema       string `json:"schema" yaml:"schema"`
-	Username     string `json:"username" yaml:"username"`
-	PasswordEnv  string `json:"password_env,omitempty" yaml:"passwordEnv,omitempty"`
-	CredentialID string `json:"credential_id,omitempty" yaml:"credentialId,omitempty"`
-	TLSMode      string `json:"tls_mode,omitempty" yaml:"tlsMode,omitempty"`
+	Host           string   `json:"host" yaml:"host"`
+	Port           int      `json:"port" yaml:"port"`
+	Database       string   `json:"database,omitempty" yaml:"database,omitempty"`
+	ServiceName    string   `json:"service_name,omitempty" yaml:"serviceName,omitempty"`
+	Schema         string   `json:"schema" yaml:"schema"`
+	AllowedSchemas []string `json:"allowed_schemas" yaml:"allowedSchemas"`
+	Username       string   `json:"username" yaml:"username"`
+	PasswordEnv    string   `json:"password_env,omitempty" yaml:"passwordEnv,omitempty"`
+	CredentialID   string   `json:"credential_id,omitempty" yaml:"credentialId,omitempty"`
+	TLSMode        string   `json:"tls_mode,omitempty" yaml:"tlsMode,omitempty"`
 }
 
 var credentialID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
@@ -52,8 +54,8 @@ func ConnectionDefaults(driver string, c *Connection) *Connection {
 	if driver == "mysql" && out.Schema == "" {
 		out.Schema = out.Database
 	}
-	if driver == "postgresql" && out.Schema == "" {
-		out.Schema = "public"
+	if c.AllowedSchemas != nil {
+		out.AllowedSchemas = append([]string{}, c.AllowedSchemas...)
 	}
 	return &out
 }
@@ -73,8 +75,8 @@ func ValidateConnection(driver string, c *Connection) error {
 	if c == nil {
 		return errors.New("需要 connection 网络连接配置")
 	}
-	if strings.TrimSpace(c.Host) == "" || strings.ContainsAny(c.Host, "/\\?#@\x00\r\n") || c.Port < 1 || c.Port > 65535 || c.Username == "" || c.Schema == "" {
-		return errors.New("需要合法 host、port、username 和 schema")
+	if strings.TrimSpace(c.Host) == "" || strings.ContainsAny(c.Host, "/\\?#@\x00\r\n") || c.Port < 1 || c.Port > 65535 || c.Username == "" {
+		return errors.New("需要合法 host、port 和 username")
 	}
 	if c.CredentialID != "" {
 		if c.PasswordEnv != "" || !credentialID.MatchString(c.CredentialID) {
@@ -83,14 +85,27 @@ func ValidateConnection(driver string, c *Connection) error {
 	} else if !passwordEnvName.MatchString(c.PasswordEnv) {
 		return errors.New("password_env 必须为 DATASCOPE_DB_ 开头的大写环境变量名称")
 	}
-	if driver == "mysql" && (c.Database == "" || c.Database != c.Schema) {
+	if driver == "mysql" && c.Database != c.Schema {
 		return errors.New("MySQL database 必须与 schema 相同")
 	}
 	if driver == "postgresql" && c.Database == "" {
 		return errors.New("PostgreSQL 需要 database")
 	}
-	if driver == "oracle" && c.ServiceName == "" {
+	if driver == "oracle" && strings.TrimSpace(c.ServiceName) == "" {
 		return errors.New("Oracle 需要 service_name")
+	}
+	seen := map[string]bool{}
+	for _, name := range c.AllowedSchemas {
+		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, ".\x00\r\n") || seen[name] {
+			return errors.New("Schema 范围包含空名称、重复名称或不支持的字符")
+		}
+		seen[name] = true
+	}
+	if strings.ContainsAny(c.Schema, ".\x00\r\n") {
+		return errors.New("默认 Schema 名称无效")
+	}
+	if c.AllowedSchemas != nil && c.Schema != "" && !seen[c.Schema] {
+		return errors.New("默认 Schema 必须在允许范围内")
 	}
 	switch driver {
 	case "mysql":
@@ -170,7 +185,7 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 		db.Close()
 		return nil, fmt.Errorf("%s 连接失败（请检查地址、凭据和网络）", driver)
 	}
-	s := &Store{db: db, queryTimeout: timeout, engine: &dialect.Engine{Driver: driver, Schema: c.Schema, Tables: map[string]string{}}}
+	s := &Store{db: db, queryTimeout: timeout, engine: &dialect.Engine{Driver: driver, Schema: c.Schema, AllowedSchemas: c.AllowedSchemas, Tables: map[string]string{}}}
 	// Verify that a read-only session can actually be established. In particular,
 	// go-ora does not implement driver.TxOptions.ReadOnly; DM ignores errors
 	// from its session-readonly toggle. Both use a checked SQL transaction setup.
@@ -280,4 +295,21 @@ func (s *Store) ValidatePortable(query string, names []string) error {
 	}
 	_, _, err := s.Prepare(query, args...)
 	return err
+}
+
+// Schema scope is editable; server, service, account and credentials stay pinned.
+func SameConnectionTarget(driver string, a, b *Connection) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	x, y := *a, *b
+	x.Schema = ""
+	y.Schema = ""
+	x.AllowedSchemas = nil
+	y.AllowedSchemas = nil
+	if driver == "mysql" {
+		x.Database = ""
+		y.Database = ""
+	}
+	return reflect.DeepEqual(x, y)
 }

@@ -93,10 +93,26 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 func captureSchema(ctx context.Context, st *store.Store) ([]store.TableSchema, error) {
 	// Capture source comments, never the presentation overlay.
 	st.Annotations = nil
+	registered := st.RegisteredSchema
 	st.RegisteredSchema = nil
+	defer func() { st.RegisteredSchema = registered }()
 	names, err := st.TableNames(ctx)
 	if err != nil {
 		return nil, err
+	}
+	allNames := append([]string{}, names...)
+	if st.Driver() != "sqlite" && registered != nil {
+		selected := map[string]bool{}
+		for _, t := range registered {
+			selected[t.Name] = true
+		}
+		filtered := []string{}
+		for _, name := range names {
+			if selected[name] {
+				filtered = append(filtered, name)
+			}
+		}
+		names = filtered
 	}
 	out := make([]store.TableSchema, 0, len(names))
 	for _, name := range names {
@@ -110,7 +126,7 @@ func captureSchema(ctx context.Context, st *store.Store) ([]store.TableSchema, e
 	if err != nil {
 		return nil, err
 	}
-	if !slices.Equal(names, after) {
+	if !slices.Equal(allNames, after) {
 		return nil, errors.New("扫描期间表结构发生变化，请重试")
 	}
 	return out, nil

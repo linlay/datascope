@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -35,6 +36,12 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 	names, err := st.TableNames(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if st.Driver() != "sqlite" && st.RegisteredSchema != nil {
+		names = []string{}
+		for _, t := range st.RegisteredSchema {
+			names = append(names, t.Name)
+		}
 	}
 	for _, pol := range cfg.Tables {
 		if st.Driver() != "sqlite" {
@@ -77,6 +84,24 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 	rw, err := rewrite.New(cfg, names)
 	if err != nil {
 		return nil, err
+	}
+	rw.DefaultSchema = st.DefaultSchema()
+	rw.AllowQualified = st.Driver() != "sqlite"
+	if st.Driver() != "sqlite" {
+		rw.Columns = map[string][]string{}
+		for _, t := range st.RegisteredSchema {
+			p, ok := cfg.Lookup(t.Name)
+			if !ok {
+				continue
+			}
+			cols := []string{}
+			for _, col := range t.Columns {
+				if p.Columns == nil || slices.Contains(p.Columns, col.Name) {
+					cols = append(cols, col.Name)
+				}
+			}
+			rw.Columns[strings.ToLower(t.Name)] = cols
+		}
 	}
 	return &QueryService{Store: st, Rewriter: rw, AsOf: asOf}, nil
 }

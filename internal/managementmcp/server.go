@@ -33,6 +33,8 @@ type operation struct {
 var operations = map[string][]operation{
 	"datascope_query": {
 		{"authentication", "get", "get_auth_config", "", ""},
+		{"discovery", "candidates", "list_table_candidates", "database_id", "query limit offset"},
+		{"database", "schemas", "list_schemas", "database_id", ""},
 		{"discovery", "get", "get_discovery", "database_id", ""},
 		{"database", "list", "list_databases", "", ""},
 		{"database", "get", "get_database", "database_id", ""},
@@ -53,6 +55,7 @@ var operations = map[string][]operation{
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"discovery", "enroll", "enroll_tables", "database_id revision table_names", ""},
 		{"database", "clone_configuration", "clone_configuration", "database_id clone", ""},
 		{"authentication", "save", "save_auth_config", "auth_config", ""},
 		{"view", "save", "configure_views", "database_id database", ""},

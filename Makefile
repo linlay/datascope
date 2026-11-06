@@ -45,7 +45,7 @@ build-linux:
 
 # Skips any vendor without DATASCOPE_INTEGRATION_<DRIVER> configuration.
 test-network:
-	$(LOAD_ENV) $(GO_ENV) go test ./internal/store -run TestNetworkDatabaseIntegration -v -count=1
+	$(LOAD_ENV) $(GO_ENV) go test ./internal/store -run 'Test(NetworkDatabaseIntegration|SchemaJoinNetworkIntegration)' -v -count=1
 
 clean:
 	rm -rf bin web/dist

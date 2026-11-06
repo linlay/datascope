@@ -99,7 +99,7 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 	maxRows = min(maxRows, HardMaxRows)
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
-	stmt, plan, err := s.prepareMasking(stmt)
+	stmt, plan, err := s.prepareMaskingContext(ctx, stmt, false)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRo
 	if err != nil {
 		return nil, err
 	}
-	body, plan, err := s.prepareMasking(body)
+	body, plan, err := s.prepareMaskingContext(ctx, body, true)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +385,8 @@ func jsonValue(v any) (any, error) {
 
 // Table describes one user table.
 type Table struct {
+	Schema            string `json:"schema,omitempty" yaml:"schema,omitempty"`
+	TableName         string `json:"table_name,omitempty" yaml:"tableName,omitempty"`
 	DisplayName       string `json:"display_name,omitempty" yaml:"displayName,omitempty"`
 	Name              string `json:"name" yaml:"name"`
 	Comment           string `json:"comment" yaml:"comment"`
@@ -395,6 +397,12 @@ type Table struct {
 // Tables lists user tables with their Chinese comments and row counts.
 func (s *Store) Tables(ctx context.Context) ([]Table, error) {
 	tables, err := s.sourceTables(ctx)
+	if err == nil && s.engine != nil && s.RegisteredSchema != nil {
+		tables = []Table{}
+		for _, t := range s.RegisteredSchema {
+			tables = append(tables, Table{Name: t.Name, Schema: t.Schema, TableName: t.TableName, Comment: t.Comment, RowCountEstimated: true})
+		}
+	}
 	for i := range tables {
 		if a, ok := s.Annotations[tables[i].Name]; ok {
 			tables[i].DisplayName = a.DisplayName
@@ -465,6 +473,8 @@ type Column struct {
 
 // TableSchema is the full description of a table.
 type TableSchema struct {
+	Schema      string   `json:"schema,omitempty" yaml:"schema,omitempty"`
+	TableName   string   `json:"table_name,omitempty" yaml:"tableName,omitempty"`
 	DisplayName string   `json:"display_name,omitempty" yaml:"displayName,omitempty"`
 	Name        string   `json:"name" yaml:"name"`
 	Comment     string   `json:"comment" yaml:"comment"`

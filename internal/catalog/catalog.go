@@ -40,6 +40,7 @@ type SQLExample struct {
 }
 
 type Database struct {
+	SchemaIdentityVersion  int                 `json:"schema_identity_version,omitempty" yaml:"schemaIdentityVersion,omitempty"`
 	Views                  []view.Definition   `json:"views,omitempty" yaml:"views,omitempty"`
 	QueryViewID            string              `json:"query_view_id,omitempty" yaml:"queryViewId,omitempty"`
 	SQLExamples            []SQLExample        `json:"sql_examples,omitempty" yaml:"sqlExamples,omitempty"`
@@ -181,6 +182,7 @@ func (c *Catalog) List() ([]Database, error) {
 		if err := dec.Decode(&extra); err != io.EOF {
 			return nil, fmt.Errorf("配置 %s 只能包含一个 YAML 文档", path)
 		}
+		migrateSchemaIdentity(&item)
 		item.ETag = fmt.Sprintf("%x", sha256.Sum256(data))
 		if !validID.MatchString(item.ID) || seen[item.ID] {
 			return nil, fmt.Errorf("配置 %s 的数据库 ID 无效或重复", path)
@@ -328,6 +330,9 @@ func (c *Catalog) Create(ctx context.Context, d Database, password string) (*Dat
 		d.ID = fmt.Sprintf("db_%x", raw)
 	}
 	d.Connection = store.ConnectionDefaults(d.Driver, d.Connection)
+	if d.Driver != "sqlite" {
+		d.SchemaIdentityVersion = 1
+	}
 	if err := c.addDatabase(ctx, d, password); err != nil {
 		return nil, err
 	}
@@ -406,7 +411,19 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 		return err
 	}
 	defer st.Close()
-	tables, err := captureSchema(ctx, st)
+	var tables []store.TableSchema
+	if d.Driver == "sqlite" {
+		tables, err = captureSchema(ctx, st)
+	} else {
+		tables = []store.TableSchema{}
+		if d.Connection.AllowedSchemas == nil {
+			if d.Connection.Schema != "" {
+				d.Connection.AllowedSchemas = []string{d.Connection.Schema}
+			} else {
+				d.Connection.AllowedSchemas, err = st.AvailableSchemas(ctx)
+			}
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -508,17 +525,21 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				if old.Revision != d.Revision || old.ETag != d.ETag {
 					return fmt.Errorf("配置已被其他窗口修改，请刷新后重试")
 				}
+				if err := store.ValidateConnection(d.Driver, d.Connection); err != nil {
+					return err
+				}
 				var maskErr error
 				d.Discovery, _, maskErr = MergeColumnMasking(old.Discovery, d.Discovery)
 				if maskErr != nil {
 					return maskErr
 				}
+				pruneSchemaScope(&d)
 				d.AuthenticationRevision = old.AuthenticationRevision
 				if !reflect.DeepEqual(d.Authentication, old.Authentication) {
 					d.AuthenticationRevision++
 				}
-				if d.Driver != old.Driver || d.Path != old.Path || !reflect.DeepEqual(d.Connection, old.Connection) {
-					return fmt.Errorf("连接信息登记后固定，请新建数据源")
+				if d.Driver != old.Driver || d.Path != old.Path || !store.SameConnectionTarget(d.Driver, d.Connection, old.Connection) {
+					return fmt.Errorf("连接目标登记后固定，请新建数据源")
 				}
 				svc, err := c.Open(ctx, &d)
 				if err != nil {

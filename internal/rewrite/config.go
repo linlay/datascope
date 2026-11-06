@@ -154,7 +154,9 @@ func (c *Config) compile() error {
 			errs = append(errs, fmt.Errorf("表 %s 重复登记", name))
 			continue
 		}
-		pol.Table = name
+		if !strings.Contains(pol.Table, ".") {
+			pol.Table = name
+		}
 		c.byTable[name] = pol
 		if err := c.compilePolicy(pol, schemes); err != nil {
 			errs = append(errs, fmt.Errorf("表 %s: %w", name, err))
@@ -277,8 +279,8 @@ func parseTemplate(text string) (*sql.SelectStatement, error) {
 	_, err = sql.Walk(sql.VisitFunc(func(n sql.Node) (sql.Node, error) {
 		switch x := n.(type) {
 		case *sql.QualifiedTableName:
-			if !strings.EqualFold(sql.IdentName(x.Schema), "main") {
-				return nil, fmt.Errorf("表 %s 必须写成 main.%s", sql.IdentName(x.Name), sql.IdentName(x.Name))
+			if x.Schema == nil {
+				return nil, fmt.Errorf("表 %s 必须使用 Schema 限定名，例如 main.%s", sql.IdentName(x.Name), sql.IdentName(x.Name))
 			}
 		case *sql.QualifiedTableFunctionName:
 			return nil, fmt.Errorf("不支持表值函数 %s", sql.IdentName(x.Name))

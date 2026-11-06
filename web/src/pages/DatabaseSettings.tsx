@@ -1,3 +1,4 @@
+import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
 import { SaveButton } from '../components/IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Input, Modal, Space, Typography, message } from 'antd';
@@ -49,6 +50,7 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
      ]} />
     </Space>
    </Card>
+   {connection&&<SchemaScopeSettings db={db} onSaved={onSaved} disabled={!can('config.write')}/> }
    <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
    <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>

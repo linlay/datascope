@@ -25,6 +25,7 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	TableNames     []string                       `json:"table_names,omitempty"`
 	Parameters     map[string]any                 `json:"parameters,omitempty"`
 	Clone          *catalog.CloneRequest          `json:"clone,omitempty"`
 	AuthConfig     *management.AuthConfig         `json:"auth_config,omitempty"`
@@ -350,6 +351,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		switch action {
 		case "update_database":
 			d.Name = in.Database.Name
+			if in.Database.Connection != nil {
+				d.Connection = in.Database.Connection
+			}
 		case "save_policy", "validate_policy":
 			d.Config = in.Database.Config
 		case "configure_mcp":
@@ -374,6 +378,29 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *saved), nil
+	case "list_table_candidates", "enroll_tables", "list_schemas":
+		if e := require("config.read"); e != nil {
+			return nil, e
+		}
+		if action == "list_table_candidates" {
+			return s.Catalog.Candidates(ctx, in.DatabaseID, in.Query, in.Limit, in.Offset)
+		}
+		if action == "enroll_tables" {
+			if e := require("policy.write"); e != nil {
+				return nil, e
+			}
+			return s.Catalog.EnrollTables(ctx, in.DatabaseID, in.Revision, in.TableNames)
+		}
+		d, e := s.Catalog.Get(in.DatabaseID)
+		if e != nil {
+			return nil, e
+		}
+		st, e := s.Catalog.OpenStore(ctx, d)
+		if e != nil {
+			return nil, e
+		}
+		defer st.Close()
+		return st.AvailableSchemas(ctx)
 	case "get_discovery", "discover_database", "apply_discovery", "save_annotation":
 		if e := require("config.read"); e != nil {
 			return nil, e
@@ -443,7 +470,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
-		return map[string]any{"connected": true, "driver": d.Driver, "table_count": len(names)}, nil
+		schemas, e := st.AvailableSchemas(ctx)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"connected": true, "driver": d.Driver, "table_count": len(names), "schemas": schemas, "empty": len(names) == 0}, nil
 	case "test_connection":
 		if e := require("config.read"); e != nil {
 			return nil, e
@@ -476,7 +507,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !reflect.DeepEqual(old.Connection, in.Database.Connection) {
+		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !store.SameConnectionTarget(old.Driver, old.Connection, in.Database.Connection) {
 			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
 		if !reflect.DeepEqual(old.Views, in.Database.Views) || old.QueryViewID != in.Database.QueryViewID {
@@ -492,7 +523,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
-		if old.Name != in.Database.Name || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
+		if old.Name != in.Database.Name || !reflect.DeepEqual(old.Connection, in.Database.Connection) || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
 			if e := require("config.write"); e != nil {
 				return nil, e
 			}
@@ -510,7 +541,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if !maskingChanged && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
+		if !maskingChanged && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {

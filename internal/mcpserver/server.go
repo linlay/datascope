@@ -75,7 +75,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		title = "SQL 数据库代理"
 		guidance = "使用" + dialectLabel + "。先通过 list_tables 查看可访问表，再通过 describe_table 查看可访问字段，最后通过 query 执行只读 SQL。查询按当前身份应用表访问、字段白名单、行权限改写和每表返回行数上限。接口是否提供由当前数据库配置决定。"
 		if driver != "" && driver != "sqlite" {
-			guidance += " 支持常用聚合、子查询、非递归 CTE、整数 LIMIT/OFFSET；不支持窗口函数、CAST、自定义函数、原生专有语法或跨 schema 查询。使用结构返回的字段名与显式表别名。"
+			guidance += " 支持常用聚合、子查询、非递归 CTE、整数 LIMIT/OFFSET；不支持窗口函数、CAST、自定义函数、原生专有语法。支持同一连接允许范围内的跨 Schema JOIN，使用结构返回的完整表名与显式表别名；没有默认 Schema 时必须写完整表名。"
 		}
 	}
 	if opts.Management != nil {
@@ -126,7 +126,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		Name:  "query",
 		Title: "执行 SQL（按权限改写）",
 		Description: fmt.Sprintf("执行单条 SELECT（%s）。服务端会按当前用户权限把 FROM / JOIN 中的每张表改写为带权限的子查询，"+
-			"结果只包含该用户可见的数据。不支持写操作、多语句、表值函数、schema 限定表名和 “IN 表名” 写法。默认最多返回 %d 行，上限 %d 行。",
+			"结果只包含该用户可见的数据。不支持写操作、多语句、表值函数和 “IN 表名” 写法。默认最多返回 %d 行，上限 %d 行。",
 			dialectLabel, store.DefaultMaxRows, store.HardMaxRows),
 		Annotations: readOnly("执行 SQL（按权限改写）"),
 	}, h.query)
@@ -233,7 +233,7 @@ func (h handlers) listTables(ctx context.Context, _ *mcp.CallToolRequest, _ list
 	}
 	out := listTablesOutput{Tables: []tableEntry{}}
 	for _, t := range tables {
-		if pol, ok := h.svc.Config().Lookup(t.Name); ok && pol.Enabled != nil && !*pol.Enabled {
+		if pol, ok := h.svc.Config().Lookup(t.Name); !ok || (pol.Enabled != nil && !*pol.Enabled) {
 			continue
 		}
 		// Row counts are global, not per user, so they are not exposed here.
@@ -243,7 +243,7 @@ func (h handlers) listTables(ctx context.Context, _ *mcp.CallToolRequest, _ list
 }
 
 type describeTableInput struct {
-	Table string `json:"table" jsonschema:"表名，例如 customers；可先调用 list_tables 获取"`
+	Table string `json:"table" jsonschema:"完整表名，例如 sales.customers（SQLite 使用 customers）；可先调用 list_tables 获取"`
 }
 
 type describeTableOutput struct {

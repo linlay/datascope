@@ -47,6 +47,8 @@ func validateActions(d Database) error {
 		return fmt.Errorf("缺少查询连接")
 	}
 	a, b := *d.Connection, *d.WriteConnection
+	a.AllowedSchemas = nil
+	b.AllowedSchemas = nil
 	a.Username = b.Username
 	a.PasswordEnv = b.PasswordEnv
 	a.CredentialID = b.CredentialID

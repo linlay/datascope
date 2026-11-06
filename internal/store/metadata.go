@@ -3,51 +3,101 @@ package store
 import (
 	"context"
 	"database/sql"
+	"datascope-server/internal/dialect"
 	"fmt"
 	"strings"
 )
 
-// Metadata is always restricted to the configured schema. Views, synonyms and
-// external tables are not enrolled implicitly in the first release.
+// Candidate discovery reads names only; comments and columns are fetched only
+// after explicit enrollment. Metadata visibility alone is not a SELECT grant.
 func (s *Store) remoteTables(ctx context.Context) ([]Table, error) {
+	return s.remoteTableCandidates(ctx, false)
+}
+func (s *Store) remoteTableCandidates(ctx context.Context, all bool) ([]Table, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
 	query := ""
 	switch s.Driver() {
 	case "mysql":
-		query = `SELECT TABLE_NAME, COALESCE(TABLE_COMMENT,''), COALESCE(TABLE_ROWS,0) FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_TYPE='BASE TABLE' ORDER BY TABLE_NAME`
+		query = `SELECT TABLE_SCHEMA,TABLE_NAME FROM information_schema.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_SCHEMA,TABLE_NAME`
 	case "postgresql":
-		query = `SELECT c.relname, COALESCE(pg_catalog.obj_description(c.oid,'pg_class'),''), GREATEST(c.reltuples,0)::bigint FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relkind IN ('r','p') ORDER BY c.relname`
+		query = `SELECT n.nspname,c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema' AND has_table_privilege(c.oid,'SELECT') ORDER BY n.nspname,c.relname`
 	default:
-		query = `SELECT t.TABLE_NAME, c.COMMENTS, COALESCE(t.NUM_ROWS,0) FROM ALL_TABLES t LEFT JOIN ALL_TAB_COMMENTS c ON c.OWNER=t.OWNER AND c.TABLE_NAME=t.TABLE_NAME WHERE t.OWNER=:1 ORDER BY t.TABLE_NAME`
+		query = `SELECT OWNER,TABLE_NAME FROM ALL_TABLES ORDER BY OWNER,TABLE_NAME`
 	}
-	rows, err := s.db.QueryContext(ctx, query, s.engine.Schema)
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	tables := []Table{}
 	for rows.Next() {
-		var t Table
-		var comment sql.NullString
-		if err := rows.Scan(&t.Name, &comment, &t.RowCount); err != nil {
+		var owner, table string
+		if err := rows.Scan(&owner, &table); err != nil {
 			return nil, err
 		}
-		t.Comment = comment.String
-		t.RowCountEstimated = true
-		tables = append(tables, t)
+		// Dot-containing identifiers cannot be represented unambiguously by the
+		// public schema.table contract, so fail closed instead of merging identities.
+		if strings.Contains(owner, ".") || strings.Contains(table, ".") {
+			continue
+		}
+		if !all && !s.engine.AllowsSchema(owner) {
+			continue
+		}
+		tables = append(tables, Table{Name: owner + "." + table, Schema: owner, TableName: table, RowCountEstimated: true})
 	}
 	return tables, rows.Err()
 }
+func (s *Store) AvailableSchemas(ctx context.Context) ([]string, error) {
+	if s.engine == nil {
+		return []string{"main"}, nil
+	}
+	tables, err := s.remoteTableCandidates(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	names := []string{}
+	seen := map[string]bool{}
+	for _, t := range tables {
+		if !seen[t.Schema] {
+			seen[t.Schema] = true
+			names = append(names, t.Schema)
+		}
+	}
+	return names, nil
+}
+func (s *Store) DefaultSchema() string {
+	if s.engine == nil {
+		return "main"
+	}
+	return s.engine.Schema
+}
 
 func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema, error) {
-	physical, ok := s.engine.Tables[strings.ToLower(table)]
-	if !ok {
+	physical, err := s.engine.Resolve("", table)
+	if strings.Contains(table, ".") {
+		owner, name := dialect.SplitTable(table, "")
+		physical, err = s.engine.Resolve(owner, name)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrTableNotFound, table)
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
-	out := &TableSchema{Name: physical, Columns: []Column{}, Indexes: []string{}}
+	owner, name := dialect.SplitTable(physical, s.engine.Schema)
+	// Check actual SELECT permission without fetching business rows.
+	tx, err := s.beginReadOnly(ctx)
+	if err != nil {
+		return nil, err
+	}
+	readable, e := tx.QueryContext(ctx, "SELECT * FROM "+s.engine.Table(physical)+" WHERE 1=0")
+	if e != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("表 %s 无读取权限: %w", physical, e)
+	}
+	readable.Close()
+	tx.Rollback()
+	out := &TableSchema{Name: physical, Schema: owner, TableName: name, Columns: []Column{}, Indexes: []string{}}
 	query := ""
 	switch s.Driver() {
 	case "mysql":
@@ -57,7 +107,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	default:
 		query = `SELECT c.COLUMN_NAME,c.DATA_TYPE,CASE WHEN c.NULLABLE='N' THEN 'NO' ELSE 'YES' END,c.DATA_DEFAULT,m.COMMENTS,CASE WHEN EXISTS(SELECT 1 FROM ALL_CONSTRAINTS p JOIN ALL_CONS_COLUMNS k ON k.OWNER=p.OWNER AND k.CONSTRAINT_NAME=p.CONSTRAINT_NAME WHERE p.OWNER=c.OWNER AND p.TABLE_NAME=c.TABLE_NAME AND p.CONSTRAINT_TYPE='P' AND k.COLUMN_NAME=c.COLUMN_NAME) THEN 1 ELSE 0 END FROM ALL_TAB_COLUMNS c LEFT JOIN ALL_COL_COMMENTS m ON m.OWNER=c.OWNER AND m.TABLE_NAME=c.TABLE_NAME AND m.COLUMN_NAME=c.COLUMN_NAME WHERE c.OWNER=:1 AND c.TABLE_NAME=:2 ORDER BY c.COLUMN_ID`
 	}
-	rows, err := s.db.QueryContext(ctx, query, s.engine.Schema, physical)
+	rows, err := s.db.QueryContext(ctx, query, owner, name)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +145,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	default:
 		query = `SELECT INDEX_NAME FROM ALL_INDEXES WHERE TABLE_OWNER=:1 AND TABLE_NAME=:2 ORDER BY INDEX_NAME`
 	}
-	rows, err = s.db.QueryContext(ctx, query, s.engine.Schema, physical)
+	rows, err = s.db.QueryContext(ctx, query, owner, name)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +166,13 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	// scope or grants access to a referenced table.
 	switch s.Driver() {
 	case "mysql":
-		query = `SELECT COLUMN_NAME,REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND REFERENCED_TABLE_SCHEMA=TABLE_SCHEMA AND REFERENCED_TABLE_NAME IS NOT NULL`
+		query = `SELECT COLUMN_NAME,CONCAT(REFERENCED_TABLE_SCHEMA,'.',REFERENCED_TABLE_NAME),REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND REFERENCED_TABLE_NAME IS NOT NULL`
 	case "postgresql":
-		query = `SELECT a.attname,rc.relname,ra.attname FROM pg_catalog.pg_constraint f JOIN pg_catalog.pg_class c ON c.oid=f.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_class rc ON rc.oid=f.confrelid JOIN pg_catalog.pg_namespace rn ON rn.oid=rc.relnamespace JOIN LATERAL unnest(f.conkey,f.confkey) AS k(src,dst) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.src JOIN pg_catalog.pg_attribute ra ON ra.attrelid=rc.oid AND ra.attnum=k.dst WHERE f.contype='f' AND n.nspname=$1 AND c.relname=$2 AND rn.nspname=n.nspname`
+		query = `SELECT a.attname,rn.nspname || '.' || rc.relname,ra.attname FROM pg_catalog.pg_constraint f JOIN pg_catalog.pg_class c ON c.oid=f.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_class rc ON rc.oid=f.confrelid JOIN pg_catalog.pg_namespace rn ON rn.oid=rc.relnamespace JOIN LATERAL unnest(f.conkey,f.confkey) AS k(src,dst) ON true JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum=k.src JOIN pg_catalog.pg_attribute ra ON ra.attrelid=rc.oid AND ra.attnum=k.dst WHERE f.contype='f' AND n.nspname=$1 AND c.relname=$2`
 	default:
-		query = `SELECT k.COLUMN_NAME,r.TABLE_NAME,r.COLUMN_NAME FROM ALL_CONSTRAINTS f JOIN ALL_CONS_COLUMNS k ON k.OWNER=f.OWNER AND k.CONSTRAINT_NAME=f.CONSTRAINT_NAME JOIN ALL_CONS_COLUMNS r ON r.OWNER=f.R_OWNER AND r.CONSTRAINT_NAME=f.R_CONSTRAINT_NAME AND r.POSITION=k.POSITION WHERE f.CONSTRAINT_TYPE='R' AND f.OWNER=:1 AND f.TABLE_NAME=:2 AND f.R_OWNER=f.OWNER`
+		query = `SELECT k.COLUMN_NAME,r.OWNER || '.' || r.TABLE_NAME,r.COLUMN_NAME FROM ALL_CONSTRAINTS f JOIN ALL_CONS_COLUMNS k ON k.OWNER=f.OWNER AND k.CONSTRAINT_NAME=f.CONSTRAINT_NAME JOIN ALL_CONS_COLUMNS r ON r.OWNER=f.R_OWNER AND r.CONSTRAINT_NAME=f.R_CONSTRAINT_NAME AND r.POSITION=k.POSITION WHERE f.CONSTRAINT_TYPE='R' AND f.OWNER=:1 AND f.TABLE_NAME=:2`
 	}
-	rows, err = s.db.QueryContext(ctx, query, s.engine.Schema, physical)
+	rows, err = s.db.QueryContext(ctx, query, owner, name)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +202,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 		query = `SELECT COMMENTS FROM ALL_TAB_COMMENTS WHERE OWNER=:1 AND TABLE_NAME=:2`
 	}
 	var tableComment sql.NullString
-	if err := s.db.QueryRowContext(ctx, query, s.engine.Schema, physical).Scan(&tableComment); err != nil && err != sql.ErrNoRows {
+	if err := s.db.QueryRowContext(ctx, query, owner, name).Scan(&tableComment); err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 	out.Comment = tableComment.String
@@ -169,3 +219,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	out.DDL = "-- 元数据摘要（不含完整约束、默认值或存储选项）\nCREATE TABLE " + s.engine.Table(physical) + " (\n  " + strings.Join(cols, ",\n  ") + "\n);"
 	return out, nil
 }
+
+// CandidateTables never reads columns or annotations, including when the store
+// already has an enrolled snapshot attached.
+func (s *Store) CandidateTables(ctx context.Context) ([]Table, error) { return s.sourceTables(ctx) }
