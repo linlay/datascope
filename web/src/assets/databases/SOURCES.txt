@@ -1,0 +1,19 @@
+Database brand assets
+
+mysql.svg, postgresql.svg, sqlite.svg
+Source: Devicon (MIT), commit 32fe1d3b3f36ad11f90ab94f7db59738139c2bf6
+https://github.com/devicons/devicon/tree/32fe1d3b3f36ad11f90ab94f7db59738139c2bf6/icons
+Original SVG files, unchanged. See DEVICON-LICENSE.txt.
+
+oracle.svg
+Source: Dashboard Icons (Apache-2.0)
+https://github.com/homarr-labs/dashboard-icons/blob/main/svg/oracle.svg
+Original vector paths; width/height replaced by an equivalent viewBox for responsive sizing.
+See DASHBOARD-ICONS-LICENSE.txt.
+
+dameng.svg
+Source: DataEase (GPL-3.0)
+https://github.com/dataease/dataease/blob/dev-v2/core/core-frontend/src/assets/svg/DM.svg
+Original vector paths, unchanged. See DATAEASE-LICENSE.txt.
+
+Downloaded 2026-11-06. Logos and trademarks belong to their respective owners.

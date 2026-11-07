@@ -26,6 +26,7 @@ type Service struct {
 }
 type Input struct {
 	TableNames     []string                       `json:"table_names,omitempty"`
+	CreateSQLite   bool                           `json:"create_sqlite,omitempty"`
 	Parameters     map[string]any                 `json:"parameters,omitempty"`
 	Clone          *catalog.CloneRequest          `json:"clone,omitempty"`
 	AuthConfig     *management.AuthConfig         `json:"auth_config,omitempty"`
@@ -310,11 +311,28 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if in.Database == nil {
 			return nil, errors.New("需要 database 参数")
 		}
-		d, e := s.Catalog.Create(ctx, *in.Database, in.Password)
+		var d *catalog.Database
+		var e error
+		if in.CreateSQLite {
+			if in.Password != "" {
+				return nil, errors.New("SQLite 不接受密码")
+			}
+			d, e = s.Catalog.CreateLocalSQLite(ctx, *in.Database)
+		} else {
+			d, e = s.Catalog.Create(ctx, *in.Database, in.Password)
+		}
 		if e != nil {
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *d), nil
+	case "edit_sqlite_schema":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if e := s.Catalog.EditSchema(ctx, in.DatabaseID, in.SQL); e != nil {
+			return nil, e
+		}
+		return map[string]any{"applied": true}, nil
 	case "get_database", "get_policy":
 		if e := require("config.read"); e != nil {
 			return nil, e
@@ -723,6 +741,7 @@ func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool
 }
 
 type DatabaseView struct {
+	SchemaEditable bool                     `json:"schema_editable"`
 	ManagementPath string                   `json:"management_path,omitempty"`
 	AuditPath      string                   `json:"audit_path,omitempty"`
 	Access         *management.ResolvedAuth `json:"access,omitempty"`
@@ -755,7 +774,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	view := DatabaseView{MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{SchemaEditable: u.SystemAdmin && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
 	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		if source, e := s.Management.Source(ctx, d.ID); e == nil {
 			view.ManagementPath = source.Path

@@ -198,7 +198,7 @@ export function selectDatabase(id: string) {
 export interface DatabaseConnection {
  host:string; port:number; database?:string; service_name?:string; schema:string; allowed_schemas?:string[]; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
 }
-export interface NewDatabase {id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
+export interface NewDatabase {create_sqlite?:boolean;id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
 export interface Annotation { display_name: string; comment: string | null }
 export interface TableAnnotation extends Annotation { columns: Record<string, Annotation> }
 export interface SchemaChange { table:string; column?:string; kind:'added'|'removed'|'modified'; property:string; before:string; after:string; manual?:string; conflict:boolean }
@@ -220,6 +220,7 @@ export interface AuthConfig {revision:number;default_policy_id:string;providers:
 export interface SQLExample { label: string; sql: string }
 export interface Database {
  schema_identity_version?:number;
+ schema_editable?:boolean;
  views?:ViewDefinition[]; query_view_id?:string;
  sql_examples?: SQLExample[];
  management_path?:string; audit_path?:string; access?:{policy:AuthPolicy;provider:AuthProvider;revision:number;source?:'DATABASE'};

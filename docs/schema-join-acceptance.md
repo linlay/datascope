@@ -6,6 +6,7 @@
 go test ./...
 go test ./internal/store ./internal/dialect ./internal/catalog -run 'Schema|CrossSchema|SameName' -v
 cd web
+node --test tests/*.test.mjs
 npm run build
 ```
 
@@ -41,7 +42,7 @@ go test ./internal/store -run TestSchemaJoinNetworkIntegration -v -count=1
 
 ## 本次验证记录（2026-11-06）
 
-- 完整 Go 回归、跨 Schema 自动化、前端构建及 16 项连接器测试通过。
+- 完整 Go 回归、跨 Schema 自动化、前端构建、5 项连接 URL 测试及 16 项连接器测试通过。
 - 本机 Chrome 的模拟 API 浏览器验收通过，包含上述表单和选表流程。
 - 已尝试项目 `.env` 中 MYSQL_TEST 配置的只读连接探测：网络连接失败，未执行真实跨库 JOIN。
 - Oracle、PostgreSQL、达梦未提供真实验收连接；对应集成测试显示 SKIP。不能计为真实数据库验收通过。

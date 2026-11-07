@@ -22,6 +22,23 @@
 
 在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
 
+也可先选择数据库类型，再点击“从连接 URL 填写”展开输入框并粘贴 URL，浏览器会自动拆分连接字段，之后仍可逐项修改。URL 原文不提交到服务端；密码沿用原有加密凭据流程。支持 `mysql://`、`postgres://` / `postgresql://`、`oracle://`、`dm://` / `dameng://`、`sqlite:`，以及对应的常见 JDBC 格式，例如：
+
+```text
+postgresql://reader:p%40ssword@db.example:5432/business?sslmode=verify-full&schema=public
+jdbc:mysql://localhost:3306/business?user=reader&password=secret&useSSL=false
+jdbc:oracle:thin:@//localhost:1521/FREEPDB1?user=BUSINESS&password=secret
+jdbc:sqlite:data/existing.sqlite3
+```
+
+账号或密码中的 URL 特殊字符需要百分号编码。JDBC URL 未包含的账号、密码、schema 可在表单补充。Oracle 仅支持 service name；未支持的 URL 参数和 TLS 模式会明确报错。
+
+SQLite 可选择“连接已有文件”或“新建项目数据库”。新建时只填写文件名（如 `business.sqlite3`），文件位于全局管理库所在数据目录的 `database/` 子目录，默认是 `data/database/`；该目录仍须在 `DATABASE_ALLOWED_ROOTS` 内。创建不会覆盖同名文件，登记失败会清理新文件。
+
+系统管理员可在“数据库配置 → SQLite 表结构”中修改此受管目录内 SQLite 的表和索引。每次只接受一条 `CREATE TABLE`、`ALTER TABLE`、`DROP TABLE`、`CREATE INDEX` 或 `DROP INDEX`，拒绝多语句、临时表、`CREATE TABLE AS SELECT`、数据写入及 `ATTACH` / `PRAGMA`。管理文件、符号链接和目录外 SQLite 不开放这个入口。结构操作会记录管理审计；界面执行后触发结构侦查，需在查询配置中审核应用变更。普通查询与业务动作继续使用现有权限规则。
+
+API 新建示例：`POST /api/databases`，参数 `{"name":"业务库","driver":"sqlite","path":"business.sqlite3","create_sqlite":true}`。结构修改使用 `/api/management/call` 的 `edit_sqlite_schema` 动作，参数为 `database_id` 和 `sql`。
+
 每个网络数据源通过 `connection.allowed_schemas` 登记允许范围，`connection.schema` 是可选默认 Schema。MySQL、Oracle、PostgreSQL、达梦均支持同一连接、允许范围内的跨 Schema JOIN；不扩展到其他实例、连接、Oracle Service/PDB 或 DB Link，也不隐式登记视图和同义词。逻辑表名不区分大小写；同一个 Schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
 
 MySQL 的 database 和 schema 表示同一个可选默认数据库，留空时两者均为空；PostgreSQL 的 database 仍必填，schema 可选；Oracle 的 service_name 仍必填（不使用 SID），schema 为可选默认 owner；达梦 schema 同样可选。默认 Schema 必须属于允许范围。

@@ -1,5 +1,23 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "收起 URL 填写": "Hide URL input",
+ "连接 URL": "Connection URL",
+ "URL 与所选数据库类型不一致，请切换数据库类型或检查 URL。": "The URL does not match the selected database type. Change the type or check the URL.",
+ "从连接 URL 填写": "Fill from connection URL",
+ "粘贴 URL 自动填入下方字段，仍可继续修改。支持常见 JDBC URL。": "Paste a URL to fill the fields below. You can edit them afterwards. Common JDBC URLs are supported.",
+ "已解析连接 URL，请核对下方字段。": "Connection URL parsed. Please review the fields below.",
+ "SQLite 来源": "SQLite source",
+ "连接已有文件": "Connect an existing file",
+ "新建项目数据库": "Create a project database",
+ "数据库文件名": "Database filename",
+ "请填写合法文件名，例如 business.sqlite3": "Enter a valid filename, such as business.sqlite3",
+ "在服务端数据目录的 database 文件夹中新建，可在数据库配置中管理表结构。": "Create in the database folder under the server data directory. Manage its schema in database settings.",
+ "SQLite 表结构": "SQLite schema",
+ "每次执行一条 CREATE / ALTER / DROP TABLE 或 CREATE / DROP INDEX。删除表或字段会删除对应数据，请执行前核对。": "Run one CREATE / ALTER / DROP TABLE or CREATE / DROP INDEX statement. Dropping tables or columns removes their data; review before running.",
+ "结构已修改，但扫描失败：": "Schema changed, but discovery failed: ",
+ "结构已修改。请在查询配置的结构侦查中审核并应用变更。": "Schema changed. Review and apply the changes in query configuration discovery.",
+ "执行结构 SQL": "Run schema SQL",
+
  "字段 {field} 的脱敏规则": "Masking rule for {field}",
  "预览字段 {field} 的脱敏效果": "Preview masking for {field}",
  "字段 {field} 保留前几位": "Visible prefix length for {field}",

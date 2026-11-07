@@ -1,15 +1,21 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
+import { LinkOutlined } from '@ant-design/icons';
 import { databases } from '../api';
-import { Alert, Button, Col, Form, Input, InputNumber, Row, Select, type FormInstance } from 'antd';
+import { DatabaseIcon } from './DatabaseIcon';
+import { defaultPorts, parseConnectionURL } from './connectionURL';
+import { Alert, Button, Col, Form, Input, InputNumber, Row, Select, Space, type FormInstance } from 'antd';
 
 export const driverLabels: Record<string, string> = { sqlite: 'SQLite', mysql: 'MySQL', postgresql: 'PostgreSQL', oracle: 'Oracle', dameng: '达梦 DM8' };
-const defaultPorts: Record<string,number> = {mysql:3306,postgresql:5432,oracle:1521,dameng:5236};
+
 
 export function ConnectionFields({ form }: { form: FormInstance }) {
  const t=useI18n();
  const driver = Form.useWatch('driver', form) || 'sqlite';
- const [urlError,setUrlError]=useState<string>();
+ const [urlOpen, setUrlOpen] = useState(false);
+ const [urlValue, setUrlValue] = useState('');
+ const [urlError, setUrlError] = useState<string>();
+ const [parsed, setParsed] = useState(false);
  const [schemas,setSchemas]=useState<string[]>([]);
  const [probing,setProbing]=useState(false);
  const [probeResult,setProbeResult]=useState<string>();
@@ -24,14 +30,37 @@ export function ConnectionFields({ form }: { form: FormInstance }) {
   if(form.getFieldValue(['connection','port'])==null)form.setFieldValue(['connection','port'],defaultPorts[driver]);
   if((driver==='mysql'||driver==='postgresql')&&!form.getFieldValue(['connection','tls_mode']))form.setFieldValue(['connection','tls_mode'],'verify-full');
  },[driver,form]);
+ const createSQLite = Form.useWatch('create_sqlite', form);
+ const resetURL = () => { setUrlOpen(false); setUrlValue(''); setParsed(false); setUrlError(undefined); };
+ const parseURL = (value: string) => {
+  setUrlValue(value);
+  setParsed(false); setUrlError(undefined);
+  if (!value.trim()) return;
+  try { const next = parseConnectionURL(value); if (next.driver !== driver) throw new Error(t('URL 与所选数据库类型不一致，请切换数据库类型或检查 URL。')); form.setFieldsValue({connection:undefined,password:undefined,path:undefined,create_sqlite:false,...next}); setParsed(true); }
+  catch (e) { setUrlError((e as Error).message); }
+ };
  return <>
   <Form.Item name="driver" label={t("数据库类型")} rules={[{ required: true }]}>
-   <Select options={Object.entries(driverLabels).map(([value, label]) => ({ value, label:t(label) }))} onChange={value => {
-    form.setFieldsValue({path:undefined,password:undefined,connection:{host:undefined,port:defaultPorts[value],database:undefined,service_name:undefined,schema:value==='postgresql'?'public':undefined,allowed_schemas:undefined,username:undefined,tls_mode:value==='mysql'||value==='postgresql'?'verify-full':undefined}});
+   <Select options={Object.entries(driverLabels).map(([value, label]) => ({ value, label:<Space size={6}><DatabaseIcon driver={value}/>{t(label)}</Space> }))} onChange={value => {
+    resetURL(); setSchemas([]); setProbeResult(undefined);
+    form.setFieldsValue({create_sqlite:false,path:undefined,password:undefined,connection:{host:undefined,port:defaultPorts[value],database:undefined,service_name:undefined,schema:value==='postgresql'?'public':undefined,allowed_schemas:undefined,username:undefined,tls_mode:value==='mysql'||value==='postgresql'?'verify-full':undefined}});
    }}/>
   </Form.Item>
-  {urlError&&<Alert type="error" showIcon title={urlError}/>}
-  {driver === 'sqlite' ? <Form.Item name="path" preserve={false} label={t("SQLite 文件路径（服务端）")} rules={[{required:true}]}><Input placeholder="/absolute/path/database.sqlite3"/></Form.Item> : <>
+  {!createSQLite && <div style={{ marginTop: -12, marginBottom: 16 }}>
+   <Button type="link" size="small" icon={<LinkOutlined/>} style={{ paddingInline: 0 }} aria-expanded={urlOpen} aria-controls="database-connection-url" onClick={() => setUrlOpen(!urlOpen)}>{t(urlOpen ? '收起 URL 填写' : '从连接 URL 填写')}</Button>
+  </div>}
+  {urlOpen && !createSQLite && <div id="database-connection-url">
+   <Form.Item label={t('连接 URL')} help={t('粘贴 URL 自动填入下方字段，仍可继续修改。支持常见 JDBC URL。')} validateStatus={urlError ? 'error' : undefined}>
+    <Input.Password aria-label={t('连接 URL')} value={urlValue} placeholder={driver === 'sqlite' ? 'jdbc:sqlite:data/business.sqlite3' : driver === 'oracle' ? 'jdbc:oracle:thin:@//localhost:1521/FREEPDB1' : `${driver === 'dameng' ? 'dm' : driver}://user:password@localhost:${defaultPorts[driver]}/business`} autoComplete="off" onChange={event => parseURL(event.target.value)} />
+   </Form.Item>
+   {parsed && <Alert type="success" showIcon title={t('已解析连接 URL，请核对下方字段。')} style={{marginBottom:16}} />}
+  </div>}
+  {urlError && <Alert type="error" showIcon title={urlError} style={{marginBottom:16}} />}
+  {driver === 'sqlite' ? <>
+   <Form.Item name="create_sqlite" label={t('SQLite 来源')}><Select options={[{value:false,label:t('连接已有文件')},{value:true,label:t('新建项目数据库')}]} onChange={()=>{resetURL();form.setFieldsValue({path:undefined});}}/></Form.Item>
+   <Form.Item name="path" preserve={false} label={t(createSQLite ? '数据库文件名' : 'SQLite 文件路径（服务端）')} rules={[{required:true}, ...(createSQLite ? [{pattern:/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\.(db|sqlite|sqlite3)$/,message:t('请填写合法文件名，例如 business.sqlite3')}] : [])]}><Input placeholder={createSQLite ? 'business.sqlite3' : '/absolute/path/database.sqlite3'}/></Form.Item>
+   {createSQLite && <Alert type="info" showIcon title={t('在服务端数据目录的 database 文件夹中新建，可在数据库配置中管理表结构。')} style={{marginBottom:16}}/>}
+  </> : <>
    <Row gutter={12} wrap={false}>
     <Col flex="auto" style={{minWidth:0}}><Form.Item name={['connection','host']} preserve={false} label={t("数据库地址")} rules={[{required:true}]}><Input placeholder={t("IP 地址或域名")} autoComplete="off"/></Form.Item></Col>
     <Col flex="112px"><Form.Item name={['connection','port']} initialValue={defaultPorts[driver]} preserve={false} label={t("端口")} rules={[{required:true}]}><InputNumber min={1} max={65535} style={{width:'100%'}}/></Form.Item></Col>

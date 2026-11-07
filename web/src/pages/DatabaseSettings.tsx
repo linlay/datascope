@@ -1,4 +1,6 @@
 import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
+import { DatabaseIcon } from '../components/DatabaseIcon';
+import { SQLiteSchemaEditor } from '../components/SQLiteSchemaEditor';
 import { SaveButton } from '../components/IconButton';
 import { useEffect, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Input, Modal, Space, Typography, message } from 'antd';
@@ -39,7 +41,7 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      <div><Typography.Text>{t('显示名称')}</Typography.Text><Input aria-label={t('数据库显示名称')} style={{ marginTop: 8, maxWidth: 480, display: 'block' }} value={name} disabled={!can('config.write')} onChange={e => setName(e.target.value)} /></div>
      <Descriptions column={{ xs: 1, md: 2 }} items={[
-      { key: 'type', label: t('数据库类型'), children: t(driverLabels[db.driver] || db.driver) },
+      { key: 'type', label: t('数据库类型'), children: <Space size={6}><DatabaseIcon driver={db.driver}/>{t(driverLabels[db.driver] || db.driver)}</Space> },
       ...(connection ? [
        { key: 'address', label: t('数据库地址'), children: `${connection.host}:${connection.port}` },
        ...(connection.database ? [{ key: 'database', label: t('数据库名称'), children: connection.database }] : []),
@@ -51,6 +53,7 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
     </Space>
    </Card>
    {connection&&<SchemaScopeSettings db={db} onSaved={onSaved} disabled={!can('config.write')}/> }
+   {db.schema_editable && user.system_admin && <SQLiteSchemaEditor key={db.id} db={db} onSaved={onSaved}/> }
    <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
    <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>
