@@ -1,5 +1,13 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "身份预览": "Identity preview",
+ "使用管理台权限预览所选身份的数据，动作始终回滚，无需业务账号登录。": "Preview data for the selected identity using console permissions. Actions always roll back; no business login is required.",
+ "使用已保存的 HTML 和模拟数据预览，支持草稿。业务工具调用请切换到身份预览或真实业务预览。": "Preview saved HTML, including drafts, with mock data. To call tools, switch to identity preview or live business preview.",
+ "需要动作名称和 request_id": "An action name and request_id are required",
+ "当前预览没有此请求的回执，请核对操作日志。": "No receipt for this request exists in this preview. Check the audit log.",
+ "身份预览仅支持查询和动作回滚试运行。": "Identity preview supports queries and action trials with rollback only.",
+ "input 为视图输入；查询使用所选身份，动作仅回滚试运行。": "input supplies view inputs. Queries use the selected identity; actions run as rollback trials.",
+
  "收起 URL 填写": "Hide URL input",
  "连接 URL": "Connection URL",
  "URL 与所选数据库类型不一致，请切换数据库类型或检查 URL。": "The URL does not match the selected database type. Change the type or check the URL.",

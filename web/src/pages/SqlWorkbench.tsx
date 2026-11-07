@@ -1,8 +1,8 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
-import { FormatPainterOutlined, PlayCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ExclamationCircleOutlined, FormatPainterOutlined, PlayCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { ApiError, api, type QueryResult, type RewritePreview, type SQLExample } from '../api';
 import { ResultTable, SchemeTag, SqlBlock, UserPicker } from '../components/shared';
 import { SqlDiff } from '../components/SqlDiff';
@@ -74,7 +74,9 @@ export function SqlWorkbench({permissions,businessUserID,examples = []}:{permiss
    const index=Number(exampleParam);
    if(Number.isSafeInteger(index)&&index>=0&&examples[index])changeSql(examples[index].sql,false);
   },[exampleParam,examples]);
-  useEffect(()=>{setRaw(undefined);setRewritten(undefined);setResult(undefined);},[userId,maxRows]);
+  // The simulated business identity only affects the rewritten query.
+  useEffect(()=>{setRewritten(undefined);setResult(undefined);},[userId]);
+  useEffect(()=>{setRaw(undefined);setRewritten(undefined);setResult(undefined);},[maxRows]);
   const run = async (next: 'raw' | 'preview' | 'execute') => {
     const currentSql = readSql();
     if (busy.current || !currentSql.trim()) return;
@@ -121,8 +123,7 @@ export function SqlWorkbench({permissions,businessUserID,examples = []}:{permiss
             <Input.TextArea ref={editor} aria-label={t("原始 SQL")} className="mono sql-editor" value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ height: 320, resize: 'vertical' }} onKeyDown={(e) => {
               if (canRaw && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void run('raw'); }
             }} />
-            <label><Text>{t('绑定参数 JSON（可选）')}</Text><Input.TextArea aria-label={t('绑定参数 JSON（可选）')} className="mono" rows={3} disabled={disabled} value={parameters} onChange={event => { setParameters(event.target.value); setRaw(undefined); setRewritten(undefined); setResult(undefined); }} /></label>
-            <Text type="secondary">{t('SQL 使用 :arg_name，参数填写 {"arg_name":"值"}。仅接受文本、数字、布尔值或 null；身份和授权时间由服务端提供。')}</Text>
+            <div><Space size={4}><Text>{t('绑定参数 JSON（可选）')}</Text><Tooltip trigger={['hover', 'focus']} title={t('SQL 使用 :arg_name，参数填写 {"arg_name":"值"}。仅接受文本、数字、布尔值或 null；身份和授权时间由服务端提供。')}><button type="button" className="help-tip" aria-label={t('{0}说明', { '0': t('绑定参数 JSON（可选）') })}><ExclamationCircleOutlined aria-hidden /></button></Tooltip></Space><Input.TextArea aria-label={t('绑定参数 JSON（可选）')} className="mono" rows={3} disabled={disabled} value={parameters} onChange={event => { setParameters(event.target.value); setRaw(undefined); setRewritten(undefined); setResult(undefined); }} /></div>
           </Card>
           <Card size="small" title={t("原始结果")} extra={<ResultSummary outcome={raw} />}><QueryOutput outcome={raw} loading={action === 'raw'} /></Card>
         </section>

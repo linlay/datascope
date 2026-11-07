@@ -137,7 +137,6 @@ export default function BusinessActionWorkbench({ db, viewsOnly = false }: { db:
   selectedRequest.current=name;void load();
  },[route.selection,ready,busy,attempted,viewsOnly]);
  return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-  <Alert type="warning" showIcon title={t(viewsOnly ? '业务预览' : '真实业务调用')} description={t('使用本人业务认证，通过真实 MCP 调用。Token 仅保留在当前页面内存。MCP 重启清空回执；结果未知时只查询回执并核对审计，不自动重试写入。')} />
   <Card size="small" title={t('业务身份认证')}>
    <Space orientation="vertical" style={{ width: '100%' }}>
     <Typography.Text>{info?.mode} · {info?.provider_type}</Typography.Text>

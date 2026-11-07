@@ -5,6 +5,7 @@ import { useAuth } from '../Auth';
 import { CodeEditor } from '../components/CodeEditor';
 import BusinessActionWorkbench from '../components/BusinessActionWorkbench';
 import { HelpTip } from '../components/HelpTip';
+import { BusinessPreviewHelp } from '../components/BusinessPreviewHelp';
 import { CallDetails, JsonData, invoke, type Invocation } from '../components/ToolCallTrace';
 import { useI18n } from '../ui/preferences';
 import { selectResource, setRouteParams, useRoute, useRouteChoice } from '../navigation';
@@ -21,7 +22,7 @@ function argumentTemplate(schema?: ActionSchema) {
 export default function ActionWorkbench({ db }: { db: Database }) {
  const t = useI18n();
  const [mode,setMode]=useRouteChoice('mode','trial',['trial','business']);
- return <Tabs key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden items={[{key:'trial',label:t('试运行（回滚）'),children:<ActionWorkflow db={db} />},{key:'business',label:t('真实业务调用'),children:<BusinessActionWorkbench key={db.id} db={db} />}]} />;
+ return <Tabs key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden items={[{key:'trial',label:t('试运行（回滚）'),children:<ActionWorkflow db={db} />},{key:'business',label:<Space size={4} aria-label={t('真实业务调用')}>{t('真实业务调用')}<BusinessPreviewHelp label={t('真实业务调用')} /></Space>,children:<BusinessActionWorkbench key={db.id} db={db} />}]} />;
 }
 
 function ActionWorkflow({ db }: { db: Database }) {

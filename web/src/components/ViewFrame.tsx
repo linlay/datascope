@@ -4,7 +4,7 @@ export interface ViewData { input?: Record<string, unknown>; result?: unknown }
 export type ViewCall = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
 // Opaque-origin frames cannot access platform cookies, storage or network.
-// Every tool request is forwarded by the host with its existing business bearer.
+// The host forwards calls using business credentials or authorized platform preview APIs.
 export function ViewFrame({ html, data, onCall }: { html: string; data?: ViewData; onCall?: ViewCall }) {
  const frame = useRef<HTMLIFrameElement>(null);
  const latest = useRef({ data, onCall }); latest.current = { data, onCall };
@@ -34,7 +34,7 @@ export function ViewFrame({ html, data, onCall }: { html: string; data?: ViewDat
      const name = m.params?.name, args = m.params?.arguments || {};
      if (!['query', 'list_tables', 'describe_table', 'list_actions', 'describe_action', 'invoke_action'].includes(name)) throw new Error('此视图不能调用该工具');
      if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('调用参数必须是对象');
-     if (!latest.current.onCall) throw new Error('预览未连接业务身份，请在“业务预览”中认证后使用。');
+     if (!latest.current.onCall) throw new Error('预览未连接业务身份，请在“身份预览”中选择身份，或在“真实业务预览”中认证后使用。');
      result = await latest.current.onCall(name, args); remember(result);
     } else if (m.method === 'openLink') {
      if (!links.current.has(m.params?.url)) throw new Error('只能打开当前业务响应中的本人确认链接');
