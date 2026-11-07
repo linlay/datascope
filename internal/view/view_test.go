@@ -20,8 +20,16 @@ func TestGenericTemplatesExcludeBusinessExamples(t *testing.T) {
 			}
 		}
 	}
+	for _, v := range SecuritiesViews() {
+		if err := v.Validate(); err != nil {
+			t.Fatal(v.ID, err)
+		}
+		if strings.Contains(v.HTML, "<!--shared-->") || strings.Contains(v.HTML, "<!--securities-->") {
+			t.Fatal("unresolved view assets", v.ID)
+		}
+	}
 	demo := DemoViews()
-	if len(demo) != 3 || demo[2].ID != "securities_account" {
+	if len(demo) != 6 || demo[2].ID != "securities_account" {
 		t.Fatal("demo installation lost securities view")
 	}
 }

@@ -81,7 +81,7 @@ const result = await datascope.callTool('query', {
 make install-demo-actions
 ```
 
-安装器现同时安装三个已发布视图：`query`（通用查询）、`action`（动作预览与结果）、`securities_account`（证券账户详情）。未配置默认查询视图时设置为 `query`，18 个演示 Action 关联 `action`。重装幂等；已修改同名视图默认拒绝覆盖，`-replace` 才替换。现有密码、查询权限和自定义动作保留。若只需补充案例且不追加业务账号能力：
+安装器现同时安装六个已发布视图：`query`（通用查询）、`action`（动作预览与结果）、`securities_account`（证券账户详情）、`securities_customers`（客户列表）、`securities_rankings`（客户多项排名）、`securities_customer`（客户详情）。未配置默认查询视图时设置为 `query`，18 个演示 Action 关联 `action`。重装幂等；已修改同名视图默认拒绝覆盖，`-replace` 才替换。现有密码、查询权限和自定义动作保留。若只需补充案例且不追加业务账号能力：
 
 ```sh
 go run ./cmd/install-demo-actions -accounts ''
@@ -103,3 +103,20 @@ go run ./cmd/install-demo-actions -accounts ''
 E0121 的查询范围更广，但不能直接修改其他经理账户。无 action 能力时可以读取账户，动作列表不可用；拥有 action 能力但缺少记录修改权时，服务端仍拒绝。
 
 预览页面不自动重试写入。超时后保留 request_id，仅查询回执；MCP 重启后回执未知时核对审计，不能换 ID 盲目重试。演示仅修改合成业务数据，不调用银行接口。
+
+
+## 客户视图
+
+证券专用视图独立于通用模板，数据均通过权限查询工具获取。客户列表支持姓名／编号搜索、个人／机构与风险等级筛选、每页 20 条的后端分页，可直接展开客户详情。客户详情支持通过 `input.customer_no` 初始化，包含资料、多资金账户和指定日期的资产、持仓、成交、资金流水；记录分别分页。
+
+客户多项排名支持总资产、资金余额、持仓市值、成交额、成交笔数、净入金、手续费七种指标及 Top 10／20／50／100。范围始终是当前身份可见客户，具有全量权限的身份可查看总体排名；金额以元展示。总资产按同一日期的资金余额与持仓市值分别聚合后相加，避免历史快照累计和多表连接重复计数。成交、手续费、净入金按起止日期统计；净入金为入金减出金绝对值，不包含买卖流水。列表和排名均可展开对应客户详情。
+
+已有证券演示库可单独追加业务视图，不调整默认查询视图、Actions、账号或授权；保存前自动备份配置，已有同名视图默认保留：
+
+```sh
+set -a; . ./.env; set +a
+go run ./cmd/install-demo-views -database securities_demo -check
+go run ./cmd/install-demo-views -database securities_demo
+```
+
+仅显式指定 `-replace` 才更新已有同名证券视图。安装后刷新控制台即可加载新配置，无需重新登录。

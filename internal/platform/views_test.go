@@ -36,7 +36,7 @@ func TestViewConfigurationPersistenceReferencesAndAuthorization(t *testing.T) {
 	}
 	saved, err := f.c.Get(d.ID)
 	must(t, err)
-	if len(saved.Views) != 3 || saved.Views[2].HTML != d.Views[2].HTML || saved.QueryViewID != "query" {
+	if len(saved.Views) != 6 || saved.Views[2].HTML != d.Views[2].HTML || saved.QueryViewID != "query" {
 		t.Fatal("HTML changed in persistence")
 	}
 	source, err := f.m.Source(f.ctx, d.ID)
@@ -73,7 +73,7 @@ func TestViewConfigurationPersistenceReferencesAndAuthorization(t *testing.T) {
 	must(t, err)
 	cloned, err := f.c.Get(target.ID)
 	must(t, err)
-	if len(cloned.Views) != 3 || cloned.Views[2].HTML != saved.Views[2].HTML || view.URI(cloned.ID, "query") == view.URI(saved.ID, "query") {
+	if len(cloned.Views) != 6 || cloned.Views[2].HTML != saved.Views[2].HTML || view.URI(cloned.ID, "query") == view.URI(saved.ID, "query") {
 		t.Fatal("invalid view clone")
 	}
 }
