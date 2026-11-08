@@ -74,7 +74,7 @@ document.getElementById('call').onclick=()=>parent.postMessage({type:'datascope:
   assert.match(await frame().locator('#data').innerText(), /Mock result/);
   console.log('PASS navigation, drafts, mock input/result, source tab, history and no business calls in mock preview');
   await page.getByRole('button', { name: '视图配置', exact: true }).click();
-  await page.waitForURL(`${base}/#/views/first?database=default`);
+  await page.waitForURL(`${base}/#/view-configuration/first?database=default`);
   await page.getByRole('button', { name: '视图工作台', exact: true }).click();
   await page.waitForURL(url());
   await page.getByRole('tab', { name: '真实业务预览', exact: true }).click();

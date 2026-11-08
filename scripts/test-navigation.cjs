@@ -23,7 +23,7 @@ const sandbox = {
  } },
 };
 vm.runInNewContext(source, sandbox);
-const { readRoute, setRouteParams, navigate } = sandbox.exports;
+const { readRoute, setRouteParams, navigate, selectResource } = sandbox.exports;
 assert.equal(readRoute().page, 'sql-workbench');
 // App initialization writes the database parameter and canonicalizes old links.
 setRouteParams({ database: 'default' }, true);
@@ -33,4 +33,40 @@ navigate('sql-workbench', undefined, { database: 'other' });
 assert.equal(location.hash, '#/sql-workbench?database=other');
 assert.equal(readRoute('#/sql-workbench?database=default').page, 'sql-workbench');
 assert.equal(readRoute('#/knowledge-workbench?database=default').page, 'knowledge-workbench');
-console.log('PASS SQL workbench canonical route, old bookmarks, parameters, and database switching');
+const configurationPaths = {
+ database: 'database-configuration', tables: 'query-configuration',
+ actions: 'action-configuration', views: 'view-configuration',
+ knowledge: 'knowledge-configuration', mcp: 'mcp-configuration',
+};
+const selection = '客户/详情';
+const encoded = encodeURIComponent(selection);
+for (const [page, path] of Object.entries(configurationPaths)) {
+ const query = 'database=default&tab=details&mode=identity&identity=175';
+ for (const bookmark of [page, path]) {
+  location.hash = `#/${bookmark}/${encoded}?${query}`;
+  assert.equal(readRoute().page, page);
+  assert.equal(readRoute().selection, selection);
+  setRouteParams({ database: 'default' }, true);
+  assert.equal(location.hash, `#/${path}/${encoded}?${query}`);
+ }
+ navigate(page, selection, { database: 'other' });
+ assert.equal(location.hash, `#/${path}/${encoded}?database=other`);
+ selectResource('next');
+ assert.equal(location.hash, `#/${path}/next?database=other`);
+}
+for (const page of ['sql-workbench', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'table', 'audit']) {
+ navigate(page, undefined, { database: 'default' });
+ assert.equal(location.hash, `#/${page}?database=default`);
+ assert.equal(readRoute().page, page);
+}
+for (const [alias, page] of Object.entries({ discovery: 'tables', policies: 'tables', access: 'database', data: 'table' })) {
+ assert.equal(readRoute(`#/${alias}`).page, page);
+}
+for (const path of ['database', 'database-configuration']) {
+ location.hash = `#/${path}?database=default&tab=audit&outcome=success`;
+ setRouteParams({ database: 'default' }, true);
+ assert.equal(location.hash, '#/audit?database=default&outcome=success');
+}
+assert.equal(readRoute('#/view-configuration/%invalid').selection, undefined);
+assert.equal(readRoute('#/unknown').page, 'database');
+console.log('PASS configuration and workbench routes, old bookmarks, resource selection, parameters, and database switching');
