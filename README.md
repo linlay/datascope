@@ -58,7 +58,7 @@ DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；�
 
 常规查询使用业务数据库只读连接；业务 Action 使用显式启用的独立写入连接，见 [业务操作说明](docs/actions.md)。`DATABASE_ALLOWED_ROOTS` 指定允许登记的目录，macOS/Linux 多个目录用 `:` 分隔；默认 `data`。管理库、审计库及其符号链接、硬链接不能注册为业务数据源。原始查询也禁止 ATTACH 和修改连接状态的 PRAGMA，避免从已授权业务库访问内部状态。
 
-配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数；工作台路径继续使用 `*-workbench`。
+配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数。工作台路径为 `query-workbench`（查询工作台）、`knowledge-workbench`（知识工作台）、`action-workbench`（动作工作台）和 `view-workbench`（视图工作台）；旧 `sql`、`sql-workbench` 链接兼容转为 `query-workbench`。
 
 控制台地址会随数据库、数据表、动作、知识及公共函数的选择更新。例如 `#/query-configuration/employees?database=default`、`#/action-configuration/update_customer_mobile?database=default` 和 `#/knowledge-configuration/securities-actions-guide?database=default`。工作台模式、详情视图、表数据分页与排序、已应用的日志筛选也保存在地址中；刷新、复制链接及浏览器前进后退会恢复对应选择。打开动作工作台链接只读取元数据，不自动试运行或正式调用；密码、Token、动作参数和自定义 SQL 不写入地址。未保存的配置在离开前仍会提示确认。
 

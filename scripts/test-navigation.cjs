@@ -27,11 +27,17 @@ const { readRoute, setRouteParams, navigate, selectResource } = sandbox.exports;
 assert.equal(readRoute().page, 'sql-workbench');
 // App initialization writes the database parameter and canonicalizes old links.
 setRouteParams({ database: 'default' }, true);
-assert.equal(location.hash, '#/sql-workbench?database=default&example=3&identity=175&limit=50');
+assert.equal(location.hash, '#/query-workbench?database=default&example=3&identity=175&limit=50');
 assert.equal(readRoute().params.get('example'), '3');
 navigate('sql-workbench', undefined, { database: 'other' });
-assert.equal(location.hash, '#/sql-workbench?database=other');
+assert.equal(location.hash, '#/query-workbench?database=other');
 assert.equal(readRoute('#/sql-workbench?database=default').page, 'sql-workbench');
+for (const bookmark of ['sql', 'sql-workbench', 'query-workbench']) {
+ location.hash = `#/${bookmark}/example?database=default&example=3&identity=175&limit=50`;
+ assert.equal(readRoute().page, 'sql-workbench');
+ setRouteParams({ database: 'default' }, true);
+ assert.equal(location.hash, '#/query-workbench/example?database=default&example=3&identity=175&limit=50');
+}
 assert.equal(readRoute('#/knowledge-workbench?database=default').page, 'knowledge-workbench');
 const configurationPaths = {
  database: 'database-configuration', tables: 'query-configuration',
@@ -54,7 +60,7 @@ for (const [page, path] of Object.entries(configurationPaths)) {
  selectResource('next');
  assert.equal(location.hash, `#/${path}/next?database=other`);
 }
-for (const page of ['sql-workbench', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'table', 'audit']) {
+for (const page of ['knowledge-workbench', 'action-workbench', 'view-workbench', 'table', 'audit']) {
  navigate(page, undefined, { database: 'default' });
  assert.equal(location.hash, `#/${page}?database=default`);
  assert.equal(readRoute().page, page);

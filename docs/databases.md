@@ -93,7 +93,7 @@ sqlExamples:
 
 数据库目录使用内部 ID。证券演示库 ID 为 `securities_demo` 时，示例路径为 `data/databases/securities_demo/management/sql-examples.yml`；安装命令默认读取 `MCP_DATABASE`，也可用 `-database securities_demo` 显式指定。
 
-查询工作台的规范路由为 `/#/sql-workbench?database=<数据库 ID>`，旧 `/#/sql` 链接会保留参数并替换为新路由。
+查询工作台的规范路由为 `/#/query-workbench?database=<数据库 ID>`，旧 `/#/sql` 和 `/#/sql-workbench` 链接会保留资源选择和参数并替换为新路由。
 
 网络数据源第一版接收受限 SELECT 方言。解析器仍以 SQLite 的语法树为内部表示，再由 `internal/dialect` 校验并生成目标 SQL；这不是各数据库全部原生语法的支持声明。数据库报错时不会回退到原 SQL。
 

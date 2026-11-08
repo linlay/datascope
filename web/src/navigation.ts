@@ -14,7 +14,7 @@ const pagePaths: Record<Page, string> = {
  'knowledge-workbench': 'knowledge-workbench',
  'action-workbench': 'action-workbench',
  'view-workbench': 'view-workbench',
- 'sql-workbench': 'sql-workbench',
+ 'sql-workbench': 'query-workbench',
  table: 'table',
  audit: 'audit',
 };
