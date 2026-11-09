@@ -1,5 +1,11 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "保存 MCP 配置后即可导出": "Save the MCP configuration to export",
+ "请先开启并保存 MCP 服务": "Enable and save the MCP service first",
+ "无法读取已生效的业务认证配置": "The active business authentication configuration is unavailable",
+ "连接器需要 HTTPS 地址，本机测试可使用回环 HTTP 地址": "Use an HTTPS endpoint, or loopback HTTP for local testing",
+ "MCP 地址不能包含凭据、查询参数或片段": "The MCP endpoint cannot contain credentials, a query string, or a fragment",
+ "企业 SSO 需要使用默认端口的 HTTPS 地址": "Enterprise SSO requires HTTPS on the default port",
  "身份预览": "Identity preview",
  "使用管理台权限预览所选身份的数据，动作始终回滚，无需业务账号登录。": "Preview data for the selected identity using console permissions. Actions always roll back; no business login is required.",
  "使用已保存的 HTML 和模拟数据预览，支持草稿。业务工具调用请切换到身份预览或真实业务预览。": "Preview saved HTML, including drafts, with mock data. To call tools, switch to identity preview or live business preview.",
