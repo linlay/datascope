@@ -1,19 +1,17 @@
-FROM harbor.gtjaqh.io/library/node:22.9.0 AS web-build
+FROM docker.io/library/node:22.9.0 AS web-build
 WORKDIR /src/web
-ARG NPM_REGISTRY=http://nexus.gtjaqh.net/repository/npm-group/
 ARG VITE_BASE_PATH=/datascope/
-ENV NPM_CONFIG_REGISTRY=${NPM_REGISTRY} \
+ENV NPM_CONFIG_REGISTRY=https://registry.npmjs.org/ \
     VITE_BASE_PATH=${VITE_BASE_PATH}
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM harbor.gtjaqh.io/library/golang:1.26-alpine AS go-build
+FROM docker.io/library/golang:1.26-alpine AS go-build
 WORKDIR /src
-ARG GOPROXY=https://mirrors.gtjaqh.cloud/goproxy
 ENV CGO_ENABLED=0 \
-    GOPROXY=${GOPROXY} \
+    GOPROXY=https://proxy.golang.org,direct \
     GOSUMDB=off \
     GOTOOLCHAIN=local
 COPY go.mod go.sum ./
@@ -23,7 +21,7 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/mcp-server ./cmd/mcp-server \
     && go build -trimpath -ldflags="-s -w" -o /out/admin-api ./cmd/admin-api \
     && go build -trimpath -ldflags="-s -w" -o /out/gen-data ./cmd/gen-data
 
-FROM harbor.gtjaqh.io/library/nginx:1.28.0-alpine AS runtime
+FROM docker.io/library/nginx:1.28.0-alpine AS runtime
 RUN rm -f /etc/nginx/conf.d/default.conf
 
 WORKDIR /app

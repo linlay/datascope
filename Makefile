@@ -1,4 +1,4 @@
-GOPROXY ?= https://mirrors.gtjaqh.cloud/goproxy
+GOPROXY ?= https://proxy.golang.org,direct
 GO_ENV := GOPROXY=$(GOPROXY)
 LOAD_ENV := set -a; [ ! -f .env ] || . ./.env; set +a;
 
