@@ -1,9 +1,9 @@
 import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
 import { DatabaseIcon } from '../components/DatabaseIcon';
-import { SQLiteSchemaEditor } from '../components/SQLiteSchemaEditor';
 import { SaveButton } from '../components/IconButton';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Input, Modal, Space, Typography, message } from 'antd';
+import { Alert, Button, Card, Descriptions, Input, Modal, Space, Switch, Typography, message } from 'antd';
+import { navigate } from '../navigation';
 import { managementCall, type Database } from '../api';
 import { driverLabels } from '../components/ConnectionFields';
 import { useAuth } from '../Auth';
@@ -40,6 +40,11 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      <div><Typography.Text>{t('显示名称')}</Typography.Text><Input aria-label={t('数据库显示名称')} style={{ marginTop: 8, maxWidth: 480, display: 'block' }} value={name} disabled={!can('config.write')} onChange={e => setName(e.target.value)} /></div>
+     {db.driver==='sqlite'&&<Space wrap>
+      <Typography.Text>{t('打开 DDL 管理')}</Typography.Text>
+      <Switch aria-label={t('打开 DDL 管理')} checked={!!db.ddl_enabled} loading={busy} disabled={!user.system_admin} onChange={enabled=>void run(()=>managementCall('update_database',{database_id:db.id,database:{id:db.id,revision:db.revision,ddl_enabled:enabled}}),t('DDL 管理设置已保存'))}/>
+      {db.ddl_enabled&&<Button onClick={()=>navigate('ddl')}>{t('进入 DDL 管理')}</Button>}
+     </Space>}
      <Descriptions column={{ xs: 1, md: 2 }} items={[
       { key: 'type', label: t('数据库类型'), children: <Space size={6}><DatabaseIcon driver={db.driver}/>{t(driverLabels[db.driver] || db.driver)}</Space> },
       ...(connection ? [
@@ -53,7 +58,6 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
     </Space>
    </Card>
    {connection&&<SchemaScopeSettings db={db} onSaved={onSaved} disabled={!can('config.write')}/> }
-   {db.schema_editable && user.system_admin && <SQLiteSchemaEditor key={db.id} db={db} onSaved={onSaved}/> }
    <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
    <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>

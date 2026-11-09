@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"datascope-server/internal/audit"
+	"datascope-server/internal/sqlitelock"
 	parser "github.com/rqlite/sql"
 )
 
@@ -38,21 +39,39 @@ func OpenWriter(ctx context.Context, path string, timeout time.Duration) (*Store
 	return &Store{db: db, path: abs, queryTimeout: timeout}, nil
 }
 func (s *Store) BeginAction(ctx context.Context) (*ActionTx, error) {
+	var release func()
+	if s.engine == nil {
+		var err error
+		release, err = sqlitelock.Acquire(ctx, s.path)
+		if err != nil {
+			return nil, err
+		}
+	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
+		if release != nil {
+			release()
+		}
 		return nil, e
 	}
-	return &ActionTx{s: s, tx: tx}, nil
+	return &ActionTx{s: s, tx: tx, release: release}, nil
 }
 
 type ActionTx struct {
-	s     *Store
-	tx    *sql.Tx
-	Count int
+	s       *Store
+	tx      *sql.Tx
+	Count   int
+	release func()
 }
 
-func (t *ActionTx) Commit() error   { return t.tx.Commit() }
-func (t *ActionTx) Rollback() error { return t.tx.Rollback() }
+func (t *ActionTx) unlock() {
+	if t.release != nil {
+		t.release()
+		t.release = nil
+	}
+}
+func (t *ActionTx) Commit() error   { defer t.unlock(); return t.tx.Commit() }
+func (t *ActionTx) Rollback() error { defer t.unlock(); return t.tx.Rollback() }
 func actionStatement(query string, write bool) (string, error) {
 	p := parser.NewParser(strings.NewReader(query))
 	n, e := p.ParseStatement()

@@ -60,6 +60,8 @@ DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；�
 
 配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数。工作台路径为 `query-workbench`（查询工作台）、`knowledge-workbench`（知识工作台）、`action-workbench`（动作工作台）和 `view-workbench`（视图工作台）；旧 `sql`、`sql-workbench` 链接兼容转为 `query-workbench`。
 
+SQLite 数据库配置提供“打开 DDL 管理”开关，默认关闭，仅系统管理员可修改。开启后出现 `ddl-management` 独立菜单，管理表、字段、约束、索引、数据库视图和触发器，支持批量 SQL、变更预览、自动备份及执行记录。查看需 `config.read`，修改另需 `ddl.write`；admin MCP 的 ddl 资源提供相同能力。执行成功后服务端侦查，仍在查询配置审核结构，新表、新字段不会自动开放。详见 [数据库说明](docs/databases.md)。
+
 控制台地址会随数据库、数据表、动作、知识及公共函数的选择更新。例如 `#/query-configuration/employees?database=default`、`#/action-configuration/update_customer_mobile?database=default` 和 `#/knowledge-configuration/securities-actions-guide?database=default`。工作台模式、详情视图、表数据分页与排序、已应用的日志筛选也保存在地址中；刷新、复制链接及浏览器前进后退会恢复对应选择。打开动作工作台链接只读取元数据，不自动试运行或正式调用；密码、Token、动作参数和自定义 SQL 不写入地址。未保存的配置在离开前仍会提示确认。
 
 ## 全站显示设置
@@ -74,6 +76,7 @@ DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；�
 | --- | --- |
 | `config.read` | 查看连接和配置，使用配置管理页面 |
 | `config.write` | 修改数据库名称 |
+| `ddl.write` | 管理已打开 DDL 管理的 SQLite 业务库结构，需同时拥有 config.read |
 | `policy.write` | 修改表、字段、行权限策略 |
 | `mcp.write` | 配置 MCP 地址、基础工具与知识发布开关 |
 | `action.write` | 编写业务 Action、启停独立写入及维护写入账号 |

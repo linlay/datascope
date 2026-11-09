@@ -32,6 +32,10 @@ type operation struct {
 // the application's per-action authorization, revision checks or audit.
 var operations = map[string][]operation{
 	"datascope_query": {
+		{"ddl", "list", "list_ddl_objects", "database_id", "object_type query limit offset"},
+		{"ddl", "get", "get_ddl_object", "database_id object_type name", ""},
+		{"ddl", "execution", "get_ddl_execution", "database_id execution_id", ""},
+		{"ddl", "history", "list_ddl_executions", "database_id", "limit offset"},
 		{"authentication", "get", "get_auth_config", "", ""},
 		{"discovery", "candidates", "list_table_candidates", "database_id", "query limit offset"},
 		{"database", "schemas", "list_schemas", "database_id", ""},
@@ -53,6 +57,7 @@ var operations = map[string][]operation{
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"ddl", "apply", "apply_ddl", "database_id plan_id request_id", ""},
 		{"discovery", "enroll", "enroll_tables", "database_id revision table_names", ""},
 		{"database", "clone_configuration", "clone_configuration", "database_id clone", ""},
 		{"authentication", "save", "save_auth_config", "auth_config", ""},
@@ -76,6 +81,7 @@ var operations = map[string][]operation{
 		{"knowledge", "save", "save_knowledge", "database_id id name description content published revision", "summary"},
 	},
 	"datascope_inspect": {
+		{"ddl", "preview", "preview_ddl", "database_id", "sql changes"},
 		{"database", "preview_clone_configuration", "preview_clone_configuration", "database_id clone", ""},
 		{"action", "try", "try_action", "database_id name arguments request_id business_user_id", ""},
 		{"connection", "test", "test_database_connection", "database", "password"},
@@ -164,7 +170,9 @@ func decode(tool string, in input) (string, application.Input, error) {
 			case "save_database":
 				required += " name driver path config mcp_enabled mcp_path tools"
 			case "update_database":
-				required += " name"
+				if _, exists := fields["ddl_enabled"]; !exists {
+					required += " name"
+				}
 			case "save_policy", "validate_policy":
 				required += " config"
 			case "configure_views":
@@ -188,14 +196,14 @@ func decode(tool string, in input) (string, application.Input, error) {
 
 func New(app *application.Service) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "datascope-management", Version: "2.0.0", Title: "DataScope 管理平台"}, &mcp.ServerOptions{
-		Instructions: "使用 datascope-admin 连接器及配套 skill 管理用户、数据库、权限、策略和知识。工具使用 {action,args}，args.resourceType 指定资源。先读取当前配置与 revision，校验后保存并回读。业务查询使用独立数据库 MCP。",
+		Instructions: "使用 datascope-admin 连接器及配套 skill 管理用户、数据库、SQLite DDL、权限、策略和知识。工具使用 {action,args}，args.resourceType 指定资源。DDL 使用 ddl.preview 生成计划，再用 ddl.apply 执行。先读取当前配置与 revision，校验后保存并回读。业务查询使用独立数据库 MCP。",
 		Capabilities: &mcp.ServerCapabilities{},
 	})
 	for _, name := range []string{"datascope_query", "datascope_manage", "datascope_inspect"} {
 		description := map[string]string{
-			"datascope_query":   "查询数据库、策略、用户、授权、知识和审计。使用前阅读 datascope-admin skill。",
-			"datascope_manage":  "创建或修改数据库、策略、MCP 配置、授权、用户和知识。使用前阅读 datascope-admin skill。",
-			"datascope_inspect": "测试数据库连接、校验策略或预览 SQL 改写，不保存配置或执行业务查询。使用前阅读 datascope-admin skill。",
+			"datascope_query":   "查询数据库、SQLite DDL 对象与执行记录、策略、用户、授权、知识和审计。使用前阅读 datascope-admin skill。",
+			"datascope_manage":  "创建或修改数据库、执行 SQLite DDL 计划、策略、MCP 配置、授权、用户和知识。使用前阅读 datascope-admin skill。",
+			"datascope_inspect": "测试数据库连接、校验策略、预览 SQL 改写或 SQLite DDL 计划；DDL 在副本上验证，不修改业务源库。使用前阅读 datascope-admin skill。",
 		}[name]
 		actions, resources := []string{}, []string{}
 		for _, op := range operations[name] {

@@ -35,9 +35,15 @@ jdbc:sqlite:data/existing.sqlite3
 
 SQLite 可选择“连接已有文件”或“新建项目数据库”。新建时只填写文件名（如 `business.sqlite3`），文件位于全局管理库所在数据目录的 `database/` 子目录，默认是 `data/database/`；该目录仍须在 `DATABASE_ALLOWED_ROOTS` 内。创建不会覆盖同名文件，登记失败会清理新文件。
 
-系统管理员可在“数据库配置 → SQLite 表结构”中修改此受管目录内 SQLite 的表和索引。每次只接受一条 `CREATE TABLE`、`ALTER TABLE`、`DROP TABLE`、`CREATE INDEX` 或 `DROP INDEX`，拒绝多语句、临时表、`CREATE TABLE AS SELECT`、数据写入及 `ATTACH` / `PRAGMA`。管理文件、符号链接和目录外 SQLite 不开放这个入口。结构操作会记录管理审计；界面执行后触发结构侦查，需在查询配置中审核应用变更。普通查询与业务动作继续使用现有权限规则。
+系统管理员可在“数据库配置”中打开 **DDL 管理**（`ddl_enabled`，YAML 为 `ddlEnabled`），默认关闭，仅支持 SQLite。开启后当前数据库增加独立“DDL 管理”菜单；允许目录内已登记的本地业务文件也可开启，无需搬入受管目录。查看需要 `config.read`，修改另需 `ddl.write`；开关仅系统管理员可改。开关关闭时，Web 和 admin MCP 均拒绝 DDL 管理调用。管理库、审计库及其文件别名继续排除。
 
-API 新建示例：`POST /api/databases`，参数 `{"name":"业务库","driver":"sqlite","path":"business.sqlite3","create_sqlite":true}`。结构修改使用 `/api/management/call` 的 `edit_sqlite_schema` 动作，参数为 `database_id` 和 `sql`。
+页面提供表、字段、约束、索引、数据库视图、触发器的查看、创建、修改、改名和删除，以及批量 DDL SQL、导出、变更预览、执行记录。原生不能直接完成的表定义修改通过重建表、同名字段数据迁移、关联对象恢复实现；字段改名使用独立 rename 操作。虚拟表创建、临时对象、CREATE TABLE AS SELECT、直接 DML、ATTACH、PRAGMA 和事务控制不开放。触发器定义可包含业务 DML。
+
+DDL 预览在一致性副本上执行，校验数据约束、视图与触发器引用。计划绑定用户、数据库、配置版本及结构指纹，有效期 30 分钟。正式执行前再次校验，以单个事务执行整组 SQL，自动保存业务库一致性备份与管理配置/密钥快照，并记录执行 SQL 和前后差异；API 与 MCP 的 Action 写入按实际 SQLite 文件身份跨进程协调。重建表保留索引、触发器、视图、生成列及自增序列；结构定义与现有业务数据不兼容时拒绝，不自动清理或修正数据。执行最长 5 分钟。
+
+服务端执行后触发结构侦查，在查询配置中审核应用；新表默认关闭，新字段不自动加入白名单。执行状态和备份持久保存在 `data/databases/<ID>/ddl/`（相对全局管理库目录），重启后可查；同一计划不会重复执行。结构成功但侦查失败时单独重试侦查，不能重放 DDL。备份恢复为独立运维操作，应停写、协调连接并核对备份之后的业务数据。普通查询连接仍保持只读，Action 仍仅运行 DML。
+
+API 新建示例：`POST /api/databases`，参数 `{"name":"业务库","driver":"sqlite","path":"business.sqlite3","create_sqlite":true}`。DDL 使用 `/api/management/call` 的 `list_ddl_objects`、`get_ddl_object`、`preview_ddl`、`apply_ddl`、`get_ddl_execution`、`list_ddl_executions`；旧 `edit_sqlite_schema` 入口停止执行。admin MCP 的 `ddl.list/get/preview/apply/execution/history` 完整对齐，参数见 [DDL 管理参考](../deploy/connectors/datascope-admin/skills/datascope-admin/references/ddl.md)。
 
 每个网络数据源通过 `connection.allowed_schemas` 登记允许范围，`connection.schema` 是可选默认 Schema。MySQL、Oracle、PostgreSQL、达梦均支持同一连接、允许范围内的跨 Schema JOIN；不扩展到其他实例、连接、Oracle Service/PDB 或 DB Link，也不隐式登记视图和同义词。逻辑表名不区分大小写；同一个 Schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
 

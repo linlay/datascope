@@ -32,6 +32,8 @@
 
 已有数据库修改时，database.id 必须等于 database_id，database.revision 必须是最近回读的正整数版本。update 只采用 database.name；mcp.save 只采用 database 中的 mcp_enabled、mcp_path、tools；policy.save 见策略文档。其他字段不随局部动作修改。使用完整 database.save 时保留当前配置，服务端按名称、策略、MCP 部分的实际差异逐项检查 config.write/policy.write/mcp.write；文件路径与驱动保持原值。
 
+SQLite DDL 管理：database.update 另接受 `database.ddl_enabled`（布尔值，开关仅系统管理员可改），此时 name 可省略。默认关闭，开启后可通过三组管理工具的 ddl 资源查看、预览、执行和查询历史，完整参数见 [SQLite DDL](ddl.md)。Web 与 admin MCP 使用同一后端；Action 写入开关与本开关独立。
+
 配置 MCP 前先完成策略并验证。基础 tools 允许 list_tables、describe_table、query、raw_query、customer_scope、list_actions、describe_action、invoke_action；raw_query 绕过行字段策略且需要单独权限，customer_scope 仅适用于证券样例库，按用户需要选择。mcp_path 是地址路径段，admin 为保留名称。不要在没有用户需求时开放全量查询。
 
 
