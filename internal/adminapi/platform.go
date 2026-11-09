@@ -156,6 +156,21 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 			writeJSON(w, 200, out)
 			return
 		}
+		if r.URL.Path == "/api/databases/import" && r.Method == http.MethodPost {
+			in := application.Input{Database: &catalog.Database{Name: strings.TrimSpace(r.URL.Query().Get("name"))}, Kind: r.URL.Query().Get("format"), Upload: http.MaxBytesReader(w, r.Body, 20<<20)}
+			out, err := app.Call(ctx, "create_database", in)
+			if err != nil {
+				var limit *http.MaxBytesError
+				if errors.As(err, &limit) {
+					writeJSON(w, 413, map[string]string{"error": "文件不能超过 20 MiB"})
+					return
+				}
+				platformError(w, err)
+				return
+			}
+			writeJSON(w, 200, out)
+			return
+		}
 		if r.URL.Path == "/api/databases" {
 			action := "list_databases"
 			in := application.Input{}

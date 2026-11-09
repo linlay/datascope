@@ -12,11 +12,11 @@ import (
 // BootstrapManaged imports file configuration exactly once; subsequent reads use split YAML exclusively.
 func BootstrapManaged(ctx context.Context, m *management.Store, path string, st *store.Store, config string, asOf time.Time, timeout time.Duration, legacy string) (*Catalog, error) {
 	c := &Catalog{Path: path, Management: m, Audit: m.Audit, AsOf: asOf, Timeout: timeout}
-	records, e := m.Records(ctx, "databases")
+	registered, e := m.HasRegisteredSources(ctx)
 	if e != nil {
 		return nil, e
 	}
-	if len(records) > 0 {
+	if registered {
 		return c, c.MigrateSchemaIdentities(ctx)
 	}
 	old, e := Bootstrap(path, st, config, asOf, timeout, legacy)

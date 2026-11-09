@@ -41,14 +41,13 @@ func (s *Store) source(ctx context.Context, id string, create bool) (*Source, er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !create {
-		var n int
-		if err := s.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM SOURCE_REGISTRY WHERE DATABASE_ID_=?", id).Scan(&n); err != nil {
-			return nil, err
-		}
-		if n == 0 {
-			return nil, sql.ErrNoRows
-		}
+	var state string
+	err := s.DB.QueryRowContext(ctx, "SELECT STATE_ FROM SOURCE_REGISTRY WHERE DATABASE_ID_=?", id).Scan(&state)
+	if err != nil && !(create && errors.Is(err, sql.ErrNoRows)) {
+		return nil, err
+	}
+	if err == nil && state != "ACTIVE" {
+		return nil, sql.ErrNoRows
 	}
 	if x := s.sources[id]; x != nil {
 		return x, nil
@@ -92,11 +91,44 @@ func (s *Store) AuditFor(id string) *audit.Store {
 	}
 	return x.Audit
 }
+
+// HasRegisteredSources includes removed registrations so startup never reimports them.
+func (s *Store) HasRegisteredSources(ctx context.Context) (bool, error) {
+	if err := s.recoverPending(ctx); err != nil {
+		return false, err
+	}
+	var exists bool
+	err := s.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM SOURCE_REGISTRY)").Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) RemoveSource(ctx context.Context, id string) error {
+	return fileLock(ctx, s.Path+".config.lock", func() error {
+		if err := s.recoverPendingLocked(ctx); err != nil {
+			return err
+		}
+		// Reserve the old ID to keep its private configuration isolated. Release its MCP route.
+		result, err := s.DB.ExecContext(ctx, "UPDATE SOURCE_REGISTRY SET STATE_='REMOVED', MCP_PATH_='removed/' || DATABASE_ID_ WHERE DATABASE_ID_=? AND STATE_='ACTIVE'", id)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return sql.ErrNoRows
+		}
+		s.auditChange(ctx, s.Audit, id, "database.remove", nil)
+		return nil
+	})
+}
+
 func (s *Store) sourceIDs() ([]string, error) {
 	if err := s.recoverPending(context.Background()); err != nil {
 		return nil, err
 	}
-	rows, e := s.DB.Query("SELECT DATABASE_ID_ FROM SOURCE_REGISTRY ORDER BY DATABASE_ID_")
+	rows, e := s.DB.Query("SELECT DATABASE_ID_ FROM SOURCE_REGISTRY WHERE STATE_='ACTIVE' ORDER BY DATABASE_ID_")
 	if e != nil {
 		return nil, e
 	}

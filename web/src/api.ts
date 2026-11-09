@@ -253,6 +253,11 @@ export const databases = {
  annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
  test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number;schemas:string[];empty:boolean}>('test_database_connection', {database,password});},
+ importFile: (name: string, file: File) => {
+   const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'sqlite';
+   const params = new URLSearchParams({name, format});
+   return request<Database>(`/api/databases/import?${params}`, {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:file});
+ },
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
  save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };

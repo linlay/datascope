@@ -1,5 +1,17 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "创建方式": "Creation method",
+ "配置数据库连接": "Configure database connection",
+ "上传文件": "Upload file",
+ "CSV 或 SQLite 文件": "CSV or SQLite file",
+ "最大 20 MiB。CSV 使用 UTF-8 编码，首行为列名，数据按文本导入 data 表。": "Up to 20 MiB. For CSV, use UTF-8 and a header row. Values are imported as text into the data table.",
+ "请选择文件": "Choose a file",
+ "请选择 CSV 或 SQLite 文件": "Choose a CSV or SQLite file",
+ "文件不能超过 20 MiB": "The file must be 20 MiB or smaller",
+ "移除数据源": "Remove data source",
+ "确认移除": "Remove",
+ "已移除数据源": "Data source removed",
+ "确认从 DataScope 移除“{0}”（{1}）？业务数据库及其中的数据会保留。": "Remove “{0}” ({1}) from DataScope? The database and its data will be preserved.",
  "保存 MCP 配置后即可导出": "Save the MCP configuration to export",
  "请先开启并保存 MCP 服务": "Enable and save the MCP service first",
  "无法读取已生效的业务认证配置": "The active business authentication configuration is unavailable",

@@ -46,23 +46,24 @@ export function App() {
  const [testResult,setTestResult]=useState<string>();
  const [error,setError]=useState<string>();
  const [form]=Form.useForm();
+ const uploadMode=Form.useWatch('sourceMode',form)==='upload';
  const creatingSQLite=Form.useWatch('create_sqlite',form);
  const refresh=()=>databases.list().then(setItems).catch(e=>setError(e.message));
  useEffect(()=>{void refresh();},[]);
  const switchDB=(id:string)=>navigate(route.page, undefined, {database:id});
  useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) navigate(route.page,undefined,{database:items[0].id},true);},[items,dbID]);
- const connectionValues=async()=>{
- const values=await form.validateFields();
+ const connectionValues=(values: Record<string,any>)=>{
  if(values.driver==='sqlite') return {name:values.name,driver:values.driver,path:values.path,create_sqlite:!!values.create_sqlite};
  const connection={...values.connection};if(values.driver==='mysql') connection.schema=connection.database;
  return {name:values.name,driver:values.driver,connection,password:values.password};
  };
  const testConnection=async()=>{
-  try { const values=await connectionValues();setTesting(true);setError(undefined);setTestResult(undefined);const result=await databases.test(values);setTestResult(t("连接成功，发现 {0} 张表。", {"0":(result.table_count)})); }
+  try { const values=connectionValues(await form.validateFields());setTesting(true);setError(undefined);setTestResult(undefined);const result=await databases.test(values);setTestResult(t("连接成功，发现 {0} 张表。", {"0":(result.table_count)})); }
   catch(e) {if(e instanceof Error)setError(e.message);}finally{setTesting(false);}
  };
  const add=async()=>{
-  try { const values=await connectionValues();setCreating(true);const d=await databases.add(values);await refresh();navigate('tables',undefined,{database:d.id});setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
+  try { const values=await form.validateFields();setCreating(true);setError(undefined);
+   const d=uploadMode ? await databases.importFile(values.name,values.file) : await databases.add(connectionValues(values));await refresh();navigate('tables',undefined,{database:d.id});setAdding(false);form.resetFields();setTestResult(undefined);setError(undefined); }
   catch(e) { if(e instanceof Error) setError(e.message); } finally {setCreating(false);}
  };
 
@@ -94,7 +95,7 @@ export function App() {
     <NavigationContext.Provider value={route}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
-          <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:<Space size={6}><DatabaseIcon driver={d.driver}/>{d.name}</Space>}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
+          <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={current?.id} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:<Space size={6}><DatabaseIcon driver={d.driver}/>{d.name}</Space>}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
           <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>{t('退出')}</Button><Button aria-label={t('系统设置')} title={t('系统设置')} icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}/></Space>
         </Layout.Header>
         <Layout className="workspace-layout" style={{background:'transparent'}}>
@@ -103,7 +104,14 @@ export function App() {
          <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} onClick={({key})=>navigate(key as Page)} items={navigationItems}/>
         </Layout.Sider>
         <Layout.Content className="app-content" key={activePage==='audit'?'audit':dbID}>
- {activePage==='database'&&<DatabaseSettings db={current} onSaved={()=>void refresh()}/>}
+ {activePage==='database'&&<DatabaseSettings key={current?.id} db={current} onSaved={()=>void refresh()} onRemoved={id=>{
+  setItems(previous=>previous.filter(item=>item.id!==id));
+  if(selectedDatabase===id){
+   const next=items.find(item=>item.id!==id)?.id ?? '';
+   selectDatabase(next);
+   navigate('database',undefined,{database:next},true);
+  }
+ }}/>}
  {activePage==='audit'&&<AuditPage databases={items}/>}
  {activePage==='views'&&current&&<Suspense fallback={<Spin/>}><ViewManagement db={current} onSaved={()=>void refresh()}/></Suspense>}
  {activePage==='view-workbench'&&current&&<Suspense fallback={<Spin/>}><ViewWorkbench db={current} onSaved={()=>void refresh()}/></Suspense>}
@@ -120,10 +128,19 @@ export function App() {
         </Layout.Content>
         </Layout>
       </Layout>
-      <Modal title={t("添加数据库")} centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText={t("添加数据库")} footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating||creatingSQLite}>{t("测试连接")}</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
+      <Modal title={t("添加数据库")} centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText={t("添加数据库")} footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating||uploadMode||creatingSQLite}>{t("测试连接")}</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
        {error && <Alert type="error" title={error}/>}
        {testResult&&<Alert type="success" title={testResult}/>}
-       <Form form={form} layout="vertical" initialValues={{driver:'sqlite',create_sqlite:false}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label={t("显示名称")} rules={[{required:true}]}><Input placeholder={t("例如：业务数据库")}/></Form.Item><ConnectionFields form={form}/></Form>
+       <Form form={form} layout="vertical" initialValues={{driver:'sqlite',create_sqlite:false,sourceMode:'connection'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label={t("显示名称")} rules={[{required:true}]}><Input placeholder={t("例如：业务数据库")}/></Form.Item><Form.Item name="sourceMode" label={t("创建方式")}><Select options={[{value:'connection',label:t("配置数据库连接")},{value:'upload',label:t("上传文件")}]} onChange={()=>setError(undefined)}/></Form.Item>
+        {uploadMode ? <Form.Item name="file" label={t("CSV 或 SQLite 文件")} preserve={false}
+          extra={t("最大 20 MiB。CSV 使用 UTF-8 编码，首行为列名，数据按文本导入 data 表。")}
+          getValueProps={()=>({})} getValueFromEvent={event=>event.target.files?.[0]}
+          rules={[{required:true,message:t("请选择文件")},{validator:async(_,file?:File)=>{
+           if(file && !/\.(csv|db|sqlite|sqlite3)$/i.test(file.name)) throw new Error(t("请选择 CSV 或 SQLite 文件"));
+           if(file && file.size>20*1024*1024) throw new Error(t("文件不能超过 20 MiB"));
+          }}]}>
+          <input type="file" accept=".csv,.db,.sqlite,.sqlite3"/>
+        </Form.Item> : <ConnectionFields form={form}/>}</Form>
        <p>{t("网络数据源先登记 Schema 范围，再到查询配置选择表并配置开放权限；SQLite 自动发现表结构。")}</p>
       </Modal>
       <SystemSettings open={settingsOpen} onClose={()=>setSettingsOpen(false)}/>

@@ -1,15 +1,20 @@
 package platform_test
 
 import (
+	"database/sql"
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/application"
+	"datascope-server/internal/catalog"
 	"datascope-server/internal/management"
+	"datascope-server/internal/store"
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDatabaseCreationGeneratesStableIDs(t *testing.T) {
@@ -63,4 +68,40 @@ func TestDatabaseCreationGeneratesStableIDs(t *testing.T) {
 		t.Fatal("connection test stored a password")
 	}
 	assertNoBusinessSQLite(t, f, "default")
+}
+func TestRemoveDatabaseRegistration(t *testing.T) {
+	f := setup(t)
+	d, err := f.c.Create(f.ctx, catalog.Database{Name: "Temporary", Driver: "sqlite", Path: f.st.Path()}, "")
+	must(t, err)
+	input := application.Input{DatabaseID: d.ID}
+	_, err = f.app.Call(f.readerContext(), "remove_database", input)
+	if !errors.Is(err, management.ErrDenied) {
+		t.Fatalf("reader removal: %v", err)
+	}
+	_, err = f.app.Call(f.ctx, "remove_database", input)
+	must(t, err)
+	if _, err = f.c.Get(d.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("lookup after removal: %v", err)
+	}
+	list, err := f.c.List()
+	must(t, err)
+	for _, item := range list {
+		if item.ID == d.ID {
+			t.Fatal("removed registration remains visible")
+		}
+	}
+	if _, err = os.Stat(d.Path); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.c.Get("default")
+	must(t, err)
+	_, err = f.app.Call(f.ctx, "remove_database", application.Input{DatabaseID: "default"})
+	must(t, err)
+	restarted, err := catalog.BootstrapManaged(f.ctx, f.m, f.c.Path, f.st, "missing-rewrite.yml", store.DefaultAsOf, time.Second, "missing-legacy.json")
+	must(t, err)
+	list, err = restarted.List()
+	must(t, err)
+	if len(list) != 0 {
+		t.Fatal("removed database reimported at startup")
+	}
 }

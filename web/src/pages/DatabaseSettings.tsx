@@ -12,12 +12,14 @@ import { DatabaseAuthentication } from '../components/DatabaseAuthentication';
 import { DatabaseClone } from '../components/DatabaseClone';
 import { QueryDisplaySettings } from '../components/QueryDisplaySettings';
 
-export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () => void }) {
+export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; onSaved: () => void; onRemoved: (id: string) => void }) {
  const t = useI18n();
  const { user } = useAuth();
  const can = (permission: string) => user.system_admin || !!db?.permissions?.includes(permission);
  const [name, setName] = useState(db?.name ?? '');
  const [detailsOpen, setDetailsOpen] = useState(false);
+ const [removeOpen, setRemoveOpen] = useState(false);
+ const [removeError, setRemoveError] = useState<string>();
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string>();
  useEffect(() => { setName(db?.name ?? ''); setDetailsOpen(false); setError(undefined); }, [db?.id, db?.name]);
@@ -27,12 +29,24 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
   catch (e) { setError((e as Error).message); }
   finally { setBusy(false); }
  };
+ const remove = async () => {
+  if (!db || busy) return;
+  setBusy(true); setRemoveError(undefined);
+  try {
+   await managementCall('remove_database', { database_id: db.id });
+   setRemoveOpen(false);
+   message.success(t('已移除数据源'));
+   onRemoved(db.id);
+  } catch (e) { setRemoveError((e as Error).message); }
+  finally { setBusy(false); }
+ };
  const connection = db?.connection;
  return <Space orientation="vertical" style={{ width: '100%' }} size="middle">
   {!db && <Alert type="info" title={t('先添加数据库，再配置表、字段与访问权限。')} />}
   {error && <Alert type="error" showIcon title={t('操作失败')} description={error} closable onClose={() => setError(undefined)} />}
   {db && can('config.read') && <>
    <Card title={t('基本信息')} extra={<Space wrap>
+    {user.system_admin && <Button danger disabled={busy} onClick={() => { setRemoveError(undefined); setRemoveOpen(true); }}>{t('移除数据源')}</Button>}
     <DatabaseClone db={db} onSaved={onSaved} />
     <Button onClick={() => setDetailsOpen(true)}>{t('存储详情')}</Button>
     <Button loading={busy} onClick={() => void run(() => managementCall('test_connection', { database_id: db.id }), t('数据库连接正常'))}>{t('测试连接')}</Button>
@@ -56,6 +70,10 @@ export function DatabaseSettings({ db, onSaved }: { db?: Database; onSaved: () =
    {db.schema_editable && user.system_admin && <SQLiteSchemaEditor key={db.id} db={db} onSaved={onSaved}/> }
    <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
+   <Modal title={t('移除数据源')} open={removeOpen} confirmLoading={busy} okButtonProps={{ danger: true }} okText={t('确认移除')} onOk={() => void remove()} onCancel={() => { if (!busy) setRemoveOpen(false); }}>
+    <p>{t('确认从 DataScope 移除“{0}”（{1}）？业务数据库及其中的数据会保留。', {'0': db.name, '1': db.id})}</p>
+    {removeError && <Alert type="error" showIcon title={removeError} />}
+   </Modal>
    <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>
     <Descriptions column={1} items={[
      { key: 'id', label: t('数据库 ID'), children: <Typography.Text copyable>{db.id}</Typography.Text> },

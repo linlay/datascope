@@ -54,17 +54,25 @@ func (c *Catalog) CanEditSchema(d *Database) bool {
 	return c.Management.ValidatePath(real) == nil
 }
 
+func (c *Catalog) managedSQLiteDirectory() (string, error) {
+	root := c.LocalSQLiteRoot()
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil || real != root {
+		return "", errors.New("数据库目录不能包含符号链接")
+	}
+	return root, nil
+}
+
 func (c *Catalog) CreateLocalSQLite(ctx context.Context, d Database) (*Database, error) {
 	if c.Management == nil || d.Driver != "sqlite" || d.Connection != nil || !sqliteFilename.MatchString(d.Path) {
 		return nil, errors.New("新建 SQLite 需要文件名（字母、数字、下划线或连字符，以 .db/.sqlite/.sqlite3 结尾）")
 	}
-	root := c.LocalSQLiteRoot()
-	if err := os.MkdirAll(root, 0700); err != nil {
+	root, err := c.managedSQLiteDirectory()
+	if err != nil {
 		return nil, err
-	}
-	real, err := filepath.EvalSymlinks(root)
-	if err != nil || real != root {
-		return nil, errors.New("数据库目录不能包含符号链接")
 	}
 	d.Path = filepath.Join(root, d.Path)
 	f, err := os.OpenFile(d.Path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
