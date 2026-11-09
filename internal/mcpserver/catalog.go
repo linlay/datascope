@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -22,6 +23,12 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 	if _, err := HTTPHandler(nil, identity, mode, issuer, resource, path, true); err != nil {
 		return nil, err
 	}
+	const metadataRoot = "/.well-known/oauth-protected-resource"
+	resourceURL, err := url.Parse(resource)
+	if err != nil {
+		return nil, err
+	}
+	publicMeta := metadataRoot + strings.TrimRight(resourceURL.Path, "/")
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			w.Header().Set("Content-Type", "application/json")
@@ -30,14 +37,17 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		}
 		segment := ""
 		prefix := strings.TrimRight(path, "/") + "/"
-		metaPrefix := "/.well-known/oauth-protected-resource" + prefix
+		metaPrefix := metadataRoot + prefix
 		switch {
 		case r.URL.Path == path:
 		case strings.HasPrefix(r.URL.Path, prefix):
 			segment = strings.TrimPrefix(r.URL.Path, prefix)
-		case strings.HasPrefix(r.URL.Path, metaPrefix):
+		case r.URL.Path == metadataRoot || r.URL.Path == metadataRoot+path:
+		case strings.HasPrefix(r.URL.Path, metaPrefix) && !strings.Contains(strings.TrimPrefix(r.URL.Path, metaPrefix), "/"):
 			segment = strings.TrimPrefix(r.URL.Path, metaPrefix)
-		case r.URL.Path == "/.well-known/oauth-protected-resource" || r.URL.Path == "/.well-known/oauth-protected-resource"+path:
+		case r.URL.Path == publicMeta:
+		case resourceURL.Path != "" && strings.HasPrefix(r.URL.Path, publicMeta+"/"):
+			segment = strings.TrimPrefix(r.URL.Path, publicMeta+"/")
 		default:
 			http.NotFound(w, r)
 			return

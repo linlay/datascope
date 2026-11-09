@@ -514,7 +514,7 @@ func TestCustomMCPPaths(t *testing.T) {
 		}
 	}
 	// Custom paths retain OAuth discovery and reject unauthenticated calls.
-	resource := "http://127.0.0.1:8083/mcp"
+	resource := "http://127.0.0.1:8083/mcp/mcp"
 	oauthHandler, err := mcpserver.ManagedHTTPHandler(c, st, mcpserver.Options{AuthMode: "oauth"}, "oauth", "http://127.0.0.1:8081", resource, "/mcp")
 	if err != nil {
 		t.Fatal(err)
@@ -529,6 +529,12 @@ func TestCustomMCPPaths(t *testing.T) {
 	}
 	if w.Code != 200 || metadata.Resource != resource+"/finance" {
 		t.Fatalf("OAuth metadata %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	oauthHandler.ServeHTTP(w, httptest.NewRequest("GET", "/.well-known/oauth-protected-resource/mcp/mcp/finance", nil))
+	metadata.Resource = ""
+	if err := json.Unmarshal(w.Body.Bytes(), &metadata); err != nil || w.Code != 200 || metadata.Resource != resource+"/finance" {
+		t.Fatalf("public OAuth metadata %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	oauthHandler.ServeHTTP(w, httptest.NewRequest("POST", "/mcp/finance", bytes.NewBufferString(`{}`)))
