@@ -34,10 +34,10 @@ docker run -d --name datascope \
   datascope:latest
 ```
 
-公网构建使用根目录的 `Dockerfile`，从 Docker Hub、npm 公共仓库和 Go 公共代理下载依赖。公司 Jenkins 使用同目录的 `Dockerfile.internal`，其中已配置 Harbor、Nexus 和内网 Go 代理。在检出仓库的根目录执行：
+内网 GitLab 仓库的根目录 `Dockerfile` 使用 Harbor、Nexus 和内网 Go 代理，供公司 Jenkins 默认构建。需要使用公网依赖时，在仓库根目录执行：
 
 ```sh
-docker build -f Dockerfile.internal -t datascope:latest .
+docker build -f Dockerfile.public -t datascope:latest .
 ```
 
 本地使用 Makefile 时，可运行 `GOPROXY=https://mirrors.gtjaqh.cloud/goproxy make build`。前端可在 `web/` 中运行 `npm ci --registry=http://nexus.gtjaqh.net/repository/npm-group/`。
