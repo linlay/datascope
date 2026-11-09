@@ -1,6 +1,6 @@
 # 业务管理配置 YAML 升级与本地验收
 
-本次将业务管理配置从逐库 management.db 切换为拆分 YAML。全局 management.db、全局及逐库 audit.db 继续使用独立 SQLite。业务数据库结构、业务数据、HTTP/API JSON 字段及现有 SELECT、Action、Prompts 的职责保持原有约定。
+本次将业务管理配置从逐库 management.db 切换为拆分 YAML。全局 management.db、全局及逐库 audit.db 继续使用独立 SQLite。业务数据库结构、业务数据、HTTP/API JSON 字段及现有 SELECT、Action、知识的存储职责保持原有约定；知识出口现已迁移为 search_knowledge/read_knowledge 只读工具。
 
 ## 升级命令
 
@@ -43,7 +43,7 @@ data/databases/<database_id>/
 
 YAML 自有字段使用 `id`、`userId`、`description`、`revision`、`mcpEnabled` 等小驼峰格式；SQLite 自有字段命名及 HTTP JSON 契约保持不变。业务字段、Action 参数名和业务标识保留原值和大小写。SQL、DDL、JavaScript 和知识正文使用多行 YAML。账号密码仍是哈希，数据库密码仍是独立密钥加密的密文。源码、接口或日志没有新增明文密码存储。
 
-表的正式结构快照与人工字段说明进入对应 tables/ 文件。知识正文只保存一份，prompts/list 与 prompts/get 使用它。无 template/、fragment.yml、version/、state/ 或额外 prompts/。不再生成配置历史快照；当前配置保留 revision 和 ETag 并发检查。派生搜索及扫描候选的内存收敛由并行清理任务完成，正式结构说明仍持久化。
+表的正式结构快照与人工字段说明进入对应 tables/ 文件。知识正文只保存一份，search_knowledge 与 read_knowledge 使用它。无 template/、fragment.yml、version/、state/ 或额外 prompts/。不再生成配置历史快照；当前配置保留 revision 和 ETag 并发检查。派生搜索及扫描候选的内存收敛由并行清理任务完成，正式结构说明仍持久化。
 
 API 与 MCP 每次读取当前 YAML，使用同机文件锁协调。多文件更新通过完整目录发布恢复；涉及全局目录或认证的操作另有持久提交日志协调 SQLite 和 YAML。审计失败不影响业务。Action 回执、幂等预约及确认令牌仍只存在 MCP 内存，API 通过私有 Unix socket 共享，重启清空。
 

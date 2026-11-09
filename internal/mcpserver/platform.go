@@ -55,7 +55,7 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			}
 			ctx = audit.With(ctx, audit.Metadata{RequestID: audit.From(ctx).RequestID, DatabaseID: d.ID, SubjectID: a.BusinessUserID, Source: "business-mcp", Tool: tool, PolicyVersion: d.Revision})
 			permission := "query"
-			if method == "prompts/list" || method == "prompts/get" {
+			if tool == "search_knowledge" || tool == "read_knowledge" {
 				permission = "knowledge.read"
 			}
 			if strings.HasPrefix(method, "resources/") && !slices.Contains(a.Permissions, "query") && slices.Contains(a.Permissions, "action") {
@@ -72,9 +72,6 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 					return nil, err
 				}
 			}
-			if (method == "prompts/list" || method == "prompts/get") && h.opts.Application != nil {
-				return h.knowledgePrompts(ctx, method, req)
-			}
 			if (method == "resources/list" || method == "resources/read" || method == "resources/templates/list") && h.opts.Application != nil {
 				return h.viewResources(ctx, method, req)
 			}
@@ -87,13 +84,14 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 						if !d.WriteEnabled || !slices.Contains(a.Permissions, "action") {
 							continue
 						}
+					} else if t.Name == "search_knowledge" || t.Name == "read_knowledge" {
+						if !slices.Contains(a.Permissions, "knowledge.read") {
+							continue
+						}
 					} else if !slices.Contains(a.Permissions, "query") {
 						continue
 					}
 					if (t.Name == "raw_query" || t.Name == "customer_scope") && !slices.Contains(a.Permissions, "raw_query") {
-						continue
-					}
-					if (t.Name == "search_knowledge" || t.Name == "read_knowledge") && !slices.Contains(a.Permissions, "knowledge.read") {
 						continue
 					}
 					allowed = append(allowed, t)

@@ -1,6 +1,6 @@
 # 业务管理配置下一阶段方案
 
-状态：业务管理配置分目录 YAML、显式一次性迁移、配置克隆、SELECT/DML/Prompts 边界、内存 Action 回执与移除公共片段已落地。全局 management.db 和独立 audit.db 保持 SQLite。升级命令与验收见 [YAML 发布说明](management-yaml-release.md)，克隆操作见 [配置克隆](configuration-clone.md)。
+状态：业务管理配置分目录 YAML、显式一次性迁移、配置克隆、SELECT/DML/知识工具边界、内存 Action 回执与移除公共片段已落地。全局 management.db 和独立 audit.db 保持 SQLite。升级命令与验收见 [YAML 发布说明](management-yaml-release.md)，克隆操作见 [配置克隆](configuration-clone.md)。
 
 ## 存储与目录
 
@@ -30,15 +30,15 @@ YAML 字段统一采用小驼峰，如 `id`、`name`、`description`、`content`
 
 保留当前 `revision` 做并发保存检查，不生成历史版本目录。已登记结构放入对应表文件，派生索引和缓存在内存重建。扫描候选、最近检查状态与本进程最近 20 次变化报告仅存内存，重启重新扫描；生命周期和分进程约定见 [运行时状态](runtime-state.md)。账号密码保留哈希，连接密码保留加密方式，credentials.key 继续独立存放。迁移必须先备份、逐项校验并保留可恢复的原文件。
 
-## 知识复用 MCP Prompts
+## 知识通过只读 MCP 工具渐进披露
 
-统一从 knowledges/ 维护知识，列表展示完整、多行 description，正文按需读取：
+统一从 knowledges/ 维护知识，先返回完整、多行 description，再按需读取正文：
 
-- prompts/list：name 使用知识 ID，title 使用显示名称，description 使用完整知识描述，不返回正文；按协议分页。
-- prompts/get(name)：读取同一份正文，包装为 user 文本消息；一期无模板参数。
-- 仅公开已发布且当前业务身份有权读取的知识；列表和读取均执行当前库的身份与权限检查。
-- 知识工作台统一采用列出、选择和获取正文流程，展示请求、响应与耗时。
-- Resources 留给后续 view，不作为本轮知识出口；业务 MCP 已退出 search_knowledge / read_knowledge，旧开关兼容映射到独立知识开关。
+- search_knowledge({keyword?,cursor?})：可选关键词过滤名称、描述和正文；省略或空白时分页浏览全部。返回 items，每条仅 id、name、description；每页 50 条，用 next_cursor 继续，无 500 条总上限。
+- read_knowledge({id})：按精确 ID 返回元数据和完整正文参考资料，不包装为用户指令。
+- 仅公开本库已发布且当前身份有 knowledge.read 权限的知识；直接读取也重新检查权限、发布状态和知识开关，独立于 query 和表权限。
+- 知识工作台复用同一应用层 search/read，展示关键词、候选描述、请求、响应与耗时。
+- knowledge_enabled 统一控制两个工具。缺失时兼容读取旧 tools 项，显式 false 优先。旧知识 Prompts 及模拟接口已移除；视图继续使用 Resources。
 
 ## 配置克隆
 

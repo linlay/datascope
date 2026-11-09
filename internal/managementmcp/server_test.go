@@ -146,3 +146,25 @@ func TestKnowledgeDescriptionArgumentsAndLegacyAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestKnowledgeSearchOptionalKeywordAndRetiredPromptRoutes(t *testing.T) {
+	for _, extra := range []string{"", `,"keyword":"active"`, `,"query":"legacy"`, `,"keyword":"active","cursor":"next"`} {
+		var in input
+		if err := json.Unmarshal([]byte(`{"action":"search","args":{"resourceType":"knowledge","database_id":"default"`+extra+`}}`), &in); err != nil {
+			t.Fatal(err)
+		}
+		name, _, err := decode("datascope_query", in)
+		if err != nil || name != "search_knowledge" {
+			t.Fatal(name, err)
+		}
+	}
+	for _, action := range []string{"list", "get"} {
+		var in input
+		if err := json.Unmarshal([]byte(`{"action":"`+action+`","args":{"resourceType":"knowledge_prompt","database_id":"default","name":"guide"}}`), &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := decode("datascope_query", in); err == nil {
+			t.Fatal("retired prompt route accepted", action)
+		}
+	}
+}

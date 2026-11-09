@@ -103,7 +103,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 			}
 		}
 		selected.AuthMode = authMode
-		// Open a query service only for tool calls. Knowledge Prompts and protocol
+		// Open a query service only for tool calls. Knowledge tools and protocol
 		// discovery do not depend on query policies or a live data connection.
 		h, err := HTTPHandlerWithManagement(ManagedServer(c, d.ID, nil, selected), identity, authMode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
 		if err != nil {
@@ -137,7 +137,10 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				return nil, fmt.Errorf("该数据库未开启 MCP")
 			}
 			enabled := func(name string) bool {
-				return name != "search_knowledge" && name != "read_knowledge" && slices.Contains(d.Tools, name)
+				if name == "search_knowledge" || name == "read_knowledge" {
+					return d.KnowledgeAvailable()
+				}
+				return slices.Contains(d.Tools, name)
 			}
 			switch method {
 			case "tools/list":
@@ -158,6 +161,10 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				call := req.(*mcp.CallToolRequest)
 				if !enabled(call.Params.Name) {
 					return nil, fmt.Errorf("该数据库未开启接口 %s", call.Params.Name)
+				}
+				// Knowledge reads use configuration only, independently of SQL access.
+				if call.Params.Name == "search_knowledge" || call.Params.Name == "read_knowledge" {
+					return next(ctx, method, req)
 				}
 				current, err := c.Open(ctx, d)
 				if err != nil {

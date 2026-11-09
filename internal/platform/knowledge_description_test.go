@@ -26,7 +26,15 @@ func TestKnowledgeDescriptionDisclosureAndLegacyAlias(t *testing.T) {
 		raw, e := json.Marshal(value)
 		must(t, e)
 		var entries []map[string]any
-		must(t, json.Unmarshal(raw, &entries))
+		if action == "search_knowledge" {
+			var page struct {
+				Items []map[string]any `json:"items"`
+			}
+			must(t, json.Unmarshal(raw, &page))
+			entries = page.Items
+		} else {
+			must(t, json.Unmarshal(raw, &entries))
+		}
 		if len(entries) != 1 || entries[0]["description"] != text {
 			t.Fatalf("description not fully disclosed: %s", raw)
 		}
@@ -58,7 +66,7 @@ func TestKnowledgeDescriptionDisclosureAndLegacyAlias(t *testing.T) {
 	must(t, e)
 	value, err = f.app.Call(f.readerContext(), "search_knowledge", application.Input{DatabaseID: "default", Query: "LegacyDescriptionToken"})
 	must(t, err)
-	entries := value.([]application.Knowledge)
+	entries := value.(*application.KnowledgeSearch).Items
 	if len(entries) != 1 || entries[0].Description != "LegacyDescriptionToken\n第二行" {
 		t.Fatal(entries)
 	}

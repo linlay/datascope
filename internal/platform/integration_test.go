@@ -75,6 +75,10 @@ func setup(t *testing.T) *fixture {
 	must(t, e)
 	must(t, m.SaveGrant(ctx, admin.ID, management.Grant{UserID: reader.ID, DatabaseID: "default", BusinessUserID: 10, Permissions: []string{"query", "knowledge.read"}}))
 	must(t, m.SaveGrant(ctx, admin.ID, management.Grant{UserID: admin.ID, DatabaseID: "default", BusinessUserID: 20, Permissions: management.Permissions}))
+	d, e := c.Get("default")
+	must(t, e)
+	d.Tools = append(d.Tools, "search_knowledge", "read_knowledge")
+	must(t, c.Save(ctx, *d))
 	f := &fixture{dir: dir, m: m, a: a, c: c, st: st, admin: admin, reader: reader, ctx: ctx}
 	f.app = &application.Service{Management: m, Catalog: c, MCPBase: "http://127.0.0.1:8080/mcp"}
 	t.Cleanup(func() { st.Close(); m.Close(); a.Close() })
@@ -378,7 +382,7 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	for _, tool := range list.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Contains(names, "raw_query") || slices.Contains(names, "find_items") || slices.Contains(names, "read_knowledge") {
+	if slices.Contains(names, "raw_query") || slices.Contains(names, "find_items") || !slices.Contains(names, "read_knowledge") || !slices.Contains(names, "search_knowledge") {
 		t.Fatalf("tools %v", names)
 	}
 	out, e := callMCP(t, session, "query", map[string]any{"sql": "SELECT * FROM items"})
@@ -402,13 +406,13 @@ func TestOAuthMCPManagementKnowledgeAndLiveRevocation(t *testing.T) {
 	knowledgeDescription1 := "Ownership rules\nScope and applicable questions\nDetailed model guidance"
 	_, e = f.app.Call(f.ctx, "save_knowledge", application.Input{DatabaseID: "default", ID: "items", Name: "Items owner", Description: &knowledgeDescription1, Content: "Query items by owner_id; never sum duplicated joins.", Published: true})
 	must(t, e)
-	prompts, e := session.ListPrompts(ctx, nil)
+	prompts, e := knowledgeSearchMCP(t, session, map[string]any{})
 	must(t, e)
 	raw, _ = json.Marshal(prompts)
 	if bytes.Contains(raw, []byte("never sum")) || !bytes.Contains(raw, []byte(`"description"`)) || !bytes.Contains(raw, []byte(`Ownership rules\nScope and applicable questions\nDetailed model guidance`)) {
 		t.Fatalf("description disclosure %s", raw)
 	}
-	prompt, e := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "items"})
+	prompt, e := readKnowledgeMCP(t, session, "items")
 	must(t, e)
 	raw, _ = json.Marshal(prompt)
 	if !bytes.Contains(raw, []byte("never sum")) {

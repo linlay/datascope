@@ -258,9 +258,13 @@ SELECT 直接调用 query，使用当前数据库的表、字段与行权限。�
 
 工具区另提供「动作工作台」：获取动作列表 → 选择动作查看参数 Schema → 填写参数与业务身份 → 试运行。各步显示请求、响应和耗时，试运行展示结果及 SQL 写入计划并始终回滚；同一 request_id 重用结果。查看需要 `action.write`，试运行另需 `impersonate` 和已启用写入。工作台使用平台权限模拟，正式提交仍通过业务 MCP 的 `invoke_action` 和人工确认流程，详见 [业务操作 Action](docs/actions.md)。
 
-“知识管理”采用左侧列表、右侧编辑和保存，description 使用三行编辑，正文支持 Markdown 预览。业务知识统一通过标准 MCP Prompts 提供：prompts/list 分页返回名称、ID 和完整 description，prompts/get(name) 将同一正文包装为 user 文本消息；无提示词模板参数，不向业务 MCP 发布 search_knowledge/read_knowledge 工具。视图通过标准 MCP Resources 提供。
+“知识管理”采用左侧列表、右侧编辑和保存，description 使用三行编辑，正文支持 Markdown 预览。业务知识通过两个只读 MCP 工具渐进披露：`search_knowledge({keyword?,cursor?})` 返回匹配条目的 ID、名称与完整 description，不含正文或摘录；keyword 缺省、空字符串或空白时分页列出全部可读已发布知识。`read_knowledge({id})` 按精确 ID 返回元数据和完整正文作为参考资料。关键词按空白分词，在名称、描述和正文中做不区分大小写的 AND 子串匹配，不依赖向量服务。视图通过标准 MCP Resources 提供。
 
-知识工作台按 prompts/list → 选择 name → prompts/get 展示参数、JSON 与耗时，并支持加载下一页及正文预览。工作台以当前平台的 knowledge.read 权限模拟；业务 MCP 使用本库业务身份执行同样的发布状态和可见性检查。知识只按数据库归属、发布状态与 knowledge.read 授权，不关联表，也不依赖 query；本库知识读者均可读取已发布的名称、描述与正文。知识 Prompts 开关与工具开关分别配置。旧知识工具开关兼容映射到知识开关，保存时清理旧工具项。
+知识工作台按“输入可选关键词 → search_knowledge → 根据名称和描述选择 ID → read_knowledge”展示参数、JSON 与耗时，并支持加载下一页及正文预览；与业务 MCP 复用相同应用层检索、读取和知识开关检查。工作台以当前平台的 knowledge.read 权限模拟；业务 MCP 使用本库业务身份执行同样的发布状态和可见性检查。知识只按数据库归属、发布状态与 knowledge.read 授权，不关联表，也不依赖 query；本库知识读者均可读取已发布的名称、描述与正文。逐库 `knowledge_enabled` 统一控制两个知识工具的发现和调用，独立于其他工具选择；显式 false 优先。缺少该配置时，兼容读取 tools 中任一旧知识工具项作为开启信号，工作台保存 MCP 配置时清理旧工具项。知识 ID、正文、描述、发布状态及授权保持有效，旧 summary 字段继续兼容读取。业务知识不再提供 MCP Prompts，初始化不声明 prompts 能力，旧 prompts/list、prompts/get 及工作台模拟接口已移除；宿主升级后应刷新工具列表或重新连接。
+
+知识搜索每页最多 50 条，返回 `{ "items": [{ "id": "active-customers", "name": "活跃客户", "description": "月度活跃客户的适用范围和去重口径" }], "next_cursor": "..." }`；最后一页省略 next_cursor，无匹配为 items:[]。使用相同 keyword 和返回的 cursor 继续翻页，无 500 条总上限；条目、发布状态或搜索条件变化导致游标失效时，应重新搜索。read_knowledge 返回 id、database_id、name、description、content、published、revision；每次读取重新验证当前数据库、开关、knowledge.read 与发布状态，不能沿用搜索时的授权。
+
+例如用户直接问“上月有多少活跃客户？”，Agent 先调用 `search_knowledge({"keyword":"活跃客户"})`，根据描述选中统计口径，只调用该条 `read_knowledge({"id":"active-customers"})`，再结合表结构使用 query 编写并执行 SQL。正文是参考资料，不作为用户指令，也不会扩大查询权限。该调用顺序需在实际 Agent 宿主中另行验收。
 
 ## 审计与一致性
 

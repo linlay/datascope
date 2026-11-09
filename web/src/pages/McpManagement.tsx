@@ -151,15 +151,15 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
            <div className="mcp-tool-option"><Text><span className="mono">resources/list</span> · {t('视图列表')}</Text><Text type="secondary" className="mcp-capability-description">{t('列出当前数据库已发布的 HTML 视图，type 为 view。')}</Text></div>
            <div className="mcp-tool-option"><Text><span className="mono">resources/read</span> · {t('读取视图')}</Text><Text type="secondary" className="mcp-capability-description">{t('按 URI 返回 HTML 正文，在视图配置中管理和发布。')}</Text></div>
           </section>
-          <section className="mcp-capability-section" aria-label={t('Prompts · 提示词')}>
-            <Space><Text strong>{t('Prompts · 提示词')}</Text><Switch size="small" aria-label={t('知识 Prompts')} disabled={!db.permissions?.includes('mcp.write') || saving} checked={knowledgeEnabled} onChange={setKnowledgeEnabled} /></Space>
+          <section className="mcp-capability-section" aria-label={t('Tools · 业务知识')}>
+            <Space><Text strong>{t('Tools · 业务知识')}</Text><Switch size="small" aria-label={t('知识工具')} disabled={!db.permissions?.includes('mcp.write') || saving} checked={knowledgeEnabled} onChange={setKnowledgeEnabled} /></Space>
             <div className="mcp-tool-option">
-              <Text><span className="mono">prompts/list</span> · {t('知识列表')}</Text>
-              <Text type="secondary" className="mcp-capability-description">{t('列出当前用户可访问的已发布知识名称和描述，不返回正文。')}</Text>
+              <Text><span className="mono">search_knowledge</span> · {t('知识列表')}</Text>
+              <Text type="secondary" className="mcp-capability-description">{t('按可选关键词检索已发布知识；留空分页列出全部，只返回 ID、名称和完整描述。')}</Text>
             </div>
             <div className="mcp-tool-option">
-              <Text><span className="mono">prompts/get</span> · {t('读取知识')}</Text>
-              <Text type="secondary" className="mcp-capability-description">{t('按名称读取知识正文，作为 Prompt 消息返回；与知识列表一起启停。')}</Text>
+              <Text><span className="mono">read_knowledge</span> · {t('读取知识')}</Text>
+              <Text type="secondary" className="mcp-capability-description">{t('按精确 ID 读取知识元数据和完整正文作为参考资料；与知识检索一起启停。')}</Text>
             </div>
           </section>
         </Space>

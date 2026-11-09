@@ -18,7 +18,7 @@ description: 管理 DataScope 数据库登记、访问策略、MCP 配置、用�
 - 管理平台用户或逐库业务账号、启停账号、重置密码、分配或撤销权限：读 [用户与授权](references/permissions-users.md)。
 - 编写业务 Action、维护独立写入账号或试运行：读 [业务操作](references/actions.md)。
 - 编写、发布 HTML 视图、关联查询和动作：读 [视图](references/views.md)。
-- 编写、发布知识，区分草稿管理与已发布检索：读 [知识](references/knowledge.md)。
+- 编写、发布知识，使用 search_knowledge（可选 keyword，留空分页浏览）与 read_knowledge（精确 id）渐进读取，区分草稿管理与已发布检索：读 [知识](references/knowledge.md)。
 - 追踪调用、排查权限或查询失败：读 [审计](references/audit.md)。
 
 业务员工账号与平台管理用户分开：local 数据库的员工使用 business_account，不能通过创建 user 代替。不同数据库的同名业务账号各自认证。
