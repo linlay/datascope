@@ -140,6 +140,30 @@ func ValidateActionTemplate(query string, count int, write bool) error {
 	}
 	return nil
 }
+
+// ActionSQLParameters validates a literal SQL statement and returns its bind
+// expressions in occurrence order. Values are supplied separately by JS.
+func ActionSQLParameters(query string, write bool) ([]string, error) {
+	body, err := actionStatement(query, write)
+	if err != nil {
+		return nil, err
+	}
+	node, err := parser.NewParser(strings.NewReader(body)).ParseStatement()
+	if err != nil {
+		return nil, err
+	}
+	binds := []string{}
+	_, err = parser.Walk(parser.VisitFunc(func(n parser.Node) (parser.Node, error) {
+		if b, ok := n.(*parser.BindExpr); ok {
+			if b.Name != "?" && (!strings.HasPrefix(b.Name, ":") || len(b.Name) < 2) {
+				return nil, errors.New("Action SQL 使用 :name 或 ? 绑定参数")
+			}
+			binds = append(binds, b.Name)
+		}
+		return n, nil
+	}), node)
+	return binds, err
+}
 func (t *ActionTx) prepare(ctx context.Context, query string, write bool, args []any) (string, []any, *audit.Event, error) {
 	t.Count++
 	ev, e := t.s.Audit.Start(ctx, "action.sql", query)
@@ -176,21 +200,33 @@ func (t *ActionTx) prepare(ctx context.Context, query string, write bool, args [
 	return query, args, ev, nil
 }
 func (t *ActionTx) Exec(ctx context.Context, query string, args ...any) (count int64, err error) {
+	r, err := t.Update(ctx, query, args...)
+	return r.RowsAffected, err
+}
+
+type ActionUpdateResult struct {
+	RowsAffected int64 `json:"rowsAffected"`
+	LastInsertID int64 `json:"lastInsertId"`
+}
+
+func (t *ActionTx) Update(ctx context.Context, query string, args ...any) (result ActionUpdateResult, err error) {
 	query, args, ev, err := t.prepare(ctx, query, true, args)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	defer func() {
 		if ev != nil {
-			ev.Rows = int(count)
+			ev.Rows = int(result.RowsAffected)
 		}
 		err = errors.Join(err, t.s.Audit.Finish(ev, err))
 	}()
 	r, e := t.tx.ExecContext(ctx, query, args...)
 	if e != nil {
-		return 0, e
+		return result, e
 	}
-	return r.RowsAffected()
+	result.RowsAffected, err = r.RowsAffected()
+	result.LastInsertID, _ = r.LastInsertId()
+	return result, err
 }
 func (t *ActionTx) Query(ctx context.Context, query string, maxRows int, args ...any) (out *QueryResult, err error) {
 	query, args, ev, err := t.prepare(ctx, query, false, args)

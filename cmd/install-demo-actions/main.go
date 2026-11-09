@@ -33,6 +33,7 @@ func run() error {
 	replace := flag.Bool("replace", false, "显式替换同名的已修改演示 action")
 	backupRoot := flag.String("backup-dir", "data/legacy/action-install", "安装前管理库的一致性备份目录")
 	preview := flag.Bool("check", false, "仅检查案例定义、目标库和已有账号，不修改配置")
+	migrate := flag.Bool("migrate-scripts", false, "仅将已安装的18个证券 Action和3个公共库脚本升级为 qiuer 写法，保留其他配置和账号")
 	flag.Parse()
 	ctx := context.Background()
 	b, e := demoactions.Load()
@@ -62,8 +63,20 @@ func run() error {
 	if e = demoactions.ValidateSource(ctx, c, d); e != nil {
 		return e
 	}
+	app := &application.Service{Management: m, Catalog: c}
+	if *migrate && *preview {
+		result, err := demoactions.MigrateScripts(ctx, app, *id, true)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"checked": true, "result": result})
+	}
 	accounts := []string{}
-	for _, name := range strings.Split(*names, ",") {
+	grantNames := *names
+	if *migrate {
+		grantNames = ""
+	}
+	for _, name := range strings.Split(grantNames, ",") {
 		if name = strings.TrimSpace(name); name != "" {
 			if _, e = c.BusinessAccount(ctx, d, name); e != nil {
 				return e
@@ -88,8 +101,12 @@ func run() error {
 	if e = source.Backup(ctx, path); e != nil {
 		return fmt.Errorf("管理配置备份失败: %w", e)
 	}
-	app := &application.Service{Management: m, Catalog: c}
-	result, e := demoactions.Install(ctx, app, *id, accounts, *replace)
+	var result demoactions.InstallResult
+	if *migrate {
+		result, e = demoactions.MigrateScripts(ctx, app, *id, false)
+	} else {
+		result, e = demoactions.Install(ctx, app, *id, accounts, *replace)
+	}
 	if e != nil {
 		return e
 	}

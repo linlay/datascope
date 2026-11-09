@@ -1,5 +1,9 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "db.session() 连接当前数据库；使用 query/queryOne/update 和静态 SQL。动作自行检查业务权限，人工确认动作先预览再确认。": "db.session() connects to the current database. Use query/queryOne/update with literal SQL. Actions check business permissions explicitly; confirmed actions are previewed first.",
+ "使用 const { fn } = require(\"./库名称\") 引用当前数据库的公共函数。": "Use const { fn } = require(\"./library\") to load shared functions from this database.",
+ "使用 exports.fn 导出函数，通过 require(\"./库名称\") 引用。公共库与动作共享当前数据库事务，仅加载被引用的模块。": "Export functions with exports.fn and load them with require(\"./library\"). Libraries share the action transaction; only referenced modules are loaded.",
+
  "身份预览": "Identity preview",
  "使用管理台权限预览所选身份的数据，动作始终回滚，无需业务账号登录。": "Preview data for the selected identity using console permissions. Actions always roll back; no business login is required.",
  "使用已保存的 HTML 和模拟数据预览，支持草稿。业务工具调用请切换到身份预览或真实业务预览。": "Preview saved HTML, including drafts, with mock data. To call tools, switch to identity preview or live business preview.",

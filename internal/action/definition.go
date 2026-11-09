@@ -2,7 +2,6 @@
 package action
 
 import (
-	"datascope-server/internal/store"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -101,7 +100,7 @@ func (d Definition) Validate(libraries ...Library) error {
 		return e
 	}
 	for _, s := range sites {
-		if e = store.ValidateActionTemplate(s.sql, s.count, s.method == "exec"); e != nil {
+		if e = s.validate(); e != nil {
 			return e
 		}
 	}

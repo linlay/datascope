@@ -32,7 +32,7 @@ internal/
   guard/            统一授权检查与可信身份上下文
   rewrite/          AST 解析、表字段限制、行权限注入、参数检查
   store/            只读查询、独立 Action 写事务、结构读取、分页与限制
-  action/           goja 脚本、标准静态 import/export、固定 SQL 模板与事务运行器
+  action/           goja 脚本、qiuer 风格 main/CommonJS、静态 SQL 与事务运行器（兼容旧 Action）
   audit/            请求、改写、执行、权限检查及操作审计
   application/      Web 与管理 MCP 共用的领域动作
   adminapi/         受保护的后台 HTTP API
