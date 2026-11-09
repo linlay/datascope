@@ -20,7 +20,7 @@ export default function ViewWorkbench({ db, onSaved }: { db: Database; onSaved: 
  const { user } = useAuth();
  const canSimulate = user.system_admin || !!db.permissions?.includes('impersonate');
  const [mode, setMode] = useRouteChoice('mode', 'preview', ['preview', 'identity', 'business']);
- return <div className="view-workbench"><Tabs key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden tabBarExtraContent={<IconButton label={t('视图配置')} icon={<EditOutlined />} onClick={() => navigate('views', route.selection)} />} items={[
+ return <div className="view-workbench"><Tabs className="workbench-mode-tabs" size="small" tabBarGutter={24} key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden tabBarExtraContent={<IconButton label={t('视图配置')} icon={<EditOutlined />} onClick={() => navigate('views', route.selection)} />} items={[
   { key: 'preview', label: t('模拟数据预览'), children: <ViewPreview key={db.id} db={db} onSaved={onSaved} /> },
   { key: 'identity', label: t('身份预览'), disabled: !canSimulate, children: canSimulate && <ViewPreview key={`${db.id}:identity`} db={db} onSaved={onSaved} simulate /> },
   { key: 'business', label: <Space size={4} aria-label={t('真实业务预览')}>{t('真实业务预览')}<BusinessPreviewHelp label={t('真实业务预览')} /></Space>, children: <BusinessActionWorkbench key={db.id} db={db} viewsOnly /> },

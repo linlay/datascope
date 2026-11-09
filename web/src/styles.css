@@ -223,9 +223,9 @@ details > summary {
 .sql-result-summary .ant-tag { margin-inline-end: 0; }
 .sql-result-summary .ant-typography { font-size: 12px; }
 .sql-editor { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.7; }
-.sql-preview { min-height: 320px; }
-.sql-preview > .ant-empty { padding-top: 72px; }
-.sql-diff { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); font-size: 12px; }
+.sql-preview { min-height: 240px; }
+.sql-preview > .ant-empty { padding-top: 40px; }
+.sql-diff { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); font-size: 12px; }
 .sql-diff-heading { padding: 8px 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
 .sql-diff-lines { min-width: max-content; }
 .sql-diff-line { display: flex; white-space: pre; line-height: 1.8; padding-right: 12px; }
@@ -460,3 +460,9 @@ details > summary {
 .business-login { width: min(100% - 32px, 560px); margin: 8vh auto; padding-bottom: 32px; }
 .business-login .ant-card-body { padding: clamp(20px, 5vw, 32px); }
 .business-login-address { overflow-wrap: anywhere; word-break: break-word; }
+
+/* Compact mode switchers; keep nested result and editor tabs independent. */
+.workbench-mode-tabs > .ant-tabs-nav { min-height: 32px; margin-bottom: 8px; }
+.workbench-mode-tabs > .ant-tabs-nav .ant-tabs-tab { padding-block: 4px; font-size: 14px; line-height: 24px; }
+.workbench-mode-tabs > .ant-tabs-nav .ant-tabs-ink-bar { height: 2px; }
+.workbench-mode-tabs > .ant-tabs-nav .ant-tabs-extra-content { display: flex; align-items: center; }

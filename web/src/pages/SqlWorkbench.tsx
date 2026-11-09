@@ -120,7 +120,7 @@ export function SqlWorkbench({permissions,businessUserID,examples = []}:{permiss
             <div className="sql-context sql-original-context"><Tag>{canRaw?t("全量只读查询"):t("未授权全量查询")}</Tag><Text type="secondary">{t("⌘ / Ctrl + Enter 执行原始 SQL")}</Text>
               <Select size="small" aria-label={t("最大返回行数")} className="sql-row-limit" disabled={disabled} value={maxRows} onChange={(value) => { setRowLimit(String(value)); setRaw(undefined); setResult(undefined); }} options={[50, 200, 1000].map((n) => ({ value: n, label: t("最多 {0} 行", {"0":(n)}) }))} />
             </div>
-            <Input.TextArea ref={editor} aria-label={t("原始 SQL")} className="mono sql-editor" value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ height: 320, resize: 'vertical' }} onKeyDown={(e) => {
+            <Input.TextArea ref={editor} aria-label={t("原始 SQL")} className="mono sql-editor" rows={10} value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ resize: 'vertical' }} onKeyDown={(e) => {
               if (canRaw && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void run('raw'); }
             }} />
             <div><Space size={4}><Text>{t('绑定参数 JSON（可选）')}</Text><Tooltip trigger={['hover', 'focus']} title={t('SQL 使用 :arg_name，参数填写 {"arg_name":"值"}。仅接受文本、数字、布尔值或 null；身份和授权时间由服务端提供。')}><button type="button" className="help-tip" aria-label={t('{0}说明', { '0': t('绑定参数 JSON（可选）') })}><ExclamationCircleOutlined aria-hidden /></button></Tooltip></Space><Input.TextArea aria-label={t('绑定参数 JSON（可选）')} className="mono" rows={3} disabled={disabled} value={parameters} onChange={event => { setParameters(event.target.value); setRaw(undefined); setRewritten(undefined); setResult(undefined); }} /></div>
@@ -141,7 +141,7 @@ export function SqlWorkbench({permissions,businessUserID,examples = []}:{permiss
             </div>
             <div className="sql-preview">
               {rewritten?.error ? <Alert type={rewritten.denied ? 'warning' : 'error'} showIcon message={rewritten.denied ? t("改写拒绝") : t("改写失败")} description={rewritten.error} /> : rewritten?.data ? <>
-                {view === 'diff' ? <SqlDiff original={rewriteSource} rewritten={rewritten.data.rewritten_sql} /> : <SqlBlock sql={rewritten.data.rewritten_sql} maxHeight={320} format={false} />}
+                {view === 'diff' ? <SqlDiff original={rewriteSource} rewritten={rewritten.data.rewritten_sql} /> : <SqlBlock sql={rewritten.data.rewritten_sql} maxHeight={240} format={false} />}
               </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={action === 'preview' || action === 'execute' ? t("正在按员工权限改写…") : t("点击“改写”查看最终 SQL 与差异")} />}
             </div>
             {rewritten?.data && <Space orientation="vertical" size="small" style={{ width: '100%', marginTop: 12 }}>

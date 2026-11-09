@@ -22,7 +22,7 @@ function argumentTemplate(schema?: ActionSchema) {
 export default function ActionWorkbench({ db }: { db: Database }) {
  const t = useI18n();
  const [mode,setMode]=useRouteChoice('mode','trial',['trial','business']);
- return <Tabs key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden items={[{key:'trial',label:t('试运行（回滚）'),children:<ActionWorkflow db={db} />},{key:'business',label:<Space size={4} aria-label={t('真实业务调用')}>{t('真实业务调用')}<BusinessPreviewHelp label={t('真实业务调用')} /></Space>,children:<BusinessActionWorkbench key={db.id} db={db} />}]} />;
+ return <Tabs className="workbench-mode-tabs" size="small" tabBarGutter={24} key={db.id} activeKey={mode} onChange={setMode} destroyOnHidden items={[{key:'trial',label:t('试运行（回滚）'),children:<ActionWorkflow db={db} />},{key:'business',label:<Space size={4} aria-label={t('真实业务调用')}>{t('真实业务调用')}<BusinessPreviewHelp label={t('真实业务调用')} /></Space>,children:<BusinessActionWorkbench key={db.id} db={db} />}]} />;
 }
 
 function ActionWorkflow({ db }: { db: Database }) {
