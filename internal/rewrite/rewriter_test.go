@@ -161,3 +161,21 @@ func TestSplicedRejectsMismatch(t *testing.T) {
 		t.Error("splice changing the statement was accepted")
 	}
 }
+
+func TestQualifiedPolicyPreservesPhysicalSpelling(t *testing.T) {
+	cfg, err := ParseConfig([]byte("version: 1\nschemes: [{scheme: NONE, name: None}]\ntables: [{table: SALES.ORDERS, scheme: NONE, passthrough: true, columns: [ID]}]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tables[0].Table != "SALES.ORDERS" {
+		t.Fatal("physical identity spelling changed")
+	}
+	rw, err := New(cfg, []string{"SALES.ORDERS"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw.AllowQualified = true
+	if _, err := rw.Rewrite("SELECT o.ID FROM SALES.ORDERS o"); err != nil {
+		t.Fatal(err)
+	}
+}

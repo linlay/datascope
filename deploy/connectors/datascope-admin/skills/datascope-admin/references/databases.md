@@ -7,7 +7,7 @@
 | datascope_query | database | list | 无 | 返回当前用户有权限的数据库 |
 | datascope_query | database | get | database_id | config.read |
 | datascope_manage | database | create | database；可选 password | databases.create |
-| datascope_manage | database | update | database_id、database | config.read + config.write，仅改名称 |
+| datascope_manage | database | update | database_id、database | config.read + config.write，修改名称及 Schema 范围 |
 | datascope_manage | database | save | database_id、database | config.read + 实际变更部分的权限 |
 | datascope_manage | mcp | save | database_id、database | config.read + mcp.write |
 | datascope_inspect | database | test_connection | database_id | config.read |
@@ -43,15 +43,15 @@
 
 ## 网络数据库
 
-支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、schema、username；port 可省略，自动采用对应默认端口；MySQL/PG 还需 database，Oracle 需 service_name。MySQL schema 与 database 相同。密码可直接通过 args.password 传入，服务端加密保存；不要将密码放入 database 或 connection。旧 connection.password_env 继续兼容，必须为 DATASCOPE_DB_ 开头的大写变量名。两种密码来源二选一，禁止 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
+支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、username、可选 schema 和 allowed_schemas；port 可省略，自动采用对应默认端口；PG 还需 database，MySQL database 为可选默认库，Oracle 需 service_name。MySQL schema 与 database 相同。密码可直接通过 args.password 传入，服务端加密保存；不要将密码放入 database 或 connection。旧 connection.password_env 继续兼容，必须为 DATASCOPE_DB_ 开头的大写变量名。两种密码来源二选一，禁止 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
 
-未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{name,driver,connection},password:"实际密码"}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。connection 与驱动/目标登记后固定；保存策略需保留读取到的连接配置。
+未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{name,driver,connection},password:"实际密码"}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。驱动和目标连接登记后固定，默认 Schema 和 allowed_schemas 可修改；保存策略需保留读取到的连接配置。
 
-网络查询与权限 SQL使用受限 SELECT 子集。策略中的 main.表名映射到配置的 schema；不支持的语法会拒绝，不能绕过改写执行原 SQL。详细范围见仓库 docs/databases.md。
+网络查询与权限 SQL使用受限 SELECT 子集。网络策略使用完整 Schema.表名，内部 main."Schema.表名" 映射到物理表；不支持的语法会拒绝，不能绕过改写执行原 SQL。详细范围见仓库 docs/databases.md。
 
 ## 自动侦查与人工映射
 
-新建数据源自动提取全部表和字段并建立快照，全部表默认禁止、字段为当前显式白名单。管理 API 默认每 5 分钟自动检查结构变化；DISCOVERY_INTERVAL=0s 可关闭。扫描只读源库，不复制业务数据。表内容继续使用后台分页浏览。
+SQLite 创建时建立完整快照；网络源先登记 Schema 范围、再选表建立快照。新登记表默认禁止。管理 API 默认每 5 分钟自动检查结构变化；DISCOVERY_INTERVAL=0s 可关闭。扫描只读源库，不复制业务数据。表内容继续使用后台分页浏览。
 
 - 读取：`datascope_query`，action=`get`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。返回数据库配置、discovery.tables 原始结构、annotations 人工覆盖和 reports 最近 20 次结构变化报告。
 - 检查结构变化：`datascope_manage`，action=`refresh`，args=`{"resourceType":"discovery","database_id":"目标 ID"}`。需要 config.read + config.write；返回 discovery.pending 候选及 changes；没有确认前不改变结构或权限。扫描失败保留旧快照。
@@ -72,3 +72,14 @@
 确认后调用 `datascope_manage`，`action:"clone_configuration"`，使用相同 args.clone，补齐上述六个版本/确认字段及 `confirmed:true`。配置或目标结构变化需要重新预览。同名表配置覆盖、目标独有表保留；Actions 和知识整组替换，包含删除目标独有项。知识 ID 保留、归属改为目标库。保留目标连接/密码/密钥、ID/名称、账号、人员授权和身份绑定、MCP 与写入开关、审计和回执；不复制业务数据。静态依赖检查不证明 JavaScript / SQL 的业务兼容性。
 
 认证配置为默认不选的独立范围 scope.authentication:true，仅系统管理员可预览和提交。复制认证方式及全局提供方引用或本库独立连接，环境变量密钥仅复制引用。保留目标业务能力、默认身份、账号、人员授权和身份绑定，认证版本递增使旧业务 Token 与待确认操作失效。未选择时保留目标认证。确认指纹包含解析后的认证策略、提供方及全局认证 revision；全局引用更新后必须重做预览。
+
+## 多 Schema 范围与选表（更新）
+
+MySQL、Oracle、PostgreSQL、达梦均支持同连接允许范围内的跨 Schema JOIN。connection.schema 可空，allowed_schemas 为明确的允许范围；MySQL database 是与 schema 相同的可选默认数据库；PG database 和 Oracle service_name 仍必填。没有默认 Schema 时必须使用完整表名。SQLite 保留单库行为。
+
+- `datascope_query({action:"schemas",args:{resourceType:"database",database_id}})`：发现当前连接可见的 Schema，需 config.read。
+- `datascope_query({action:"candidates",args:{resourceType:"discovery",database_id,query?,limit?,offset?}})`：只发现允许范围内的候选表，返回 items/total，不读取字段、不开放 MCP。
+- `datascope_manage({action:"enroll",args:{resourceType:"discovery",database_id,revision,table_names:["SALES.ORDERS"]}})`：所选完整表名列表替换已登记表集合，需 config.read + policy.write。读取所选表字段、注释并确认 SELECT 权限，新表默认关闭。
+- `database.update` 的 database 可包含完整 connection，只允许改变 schema、allowed_schemas（MySQL 同步 database）。主机、Service/PG database、账号和凭据保持固定。移除范围会移除该 Schema 的登记表和查询策略。
+
+网络源创建时不读取所有字段；先登记范围、再选表登记和开放。网络策略使用完整 Schema.表名；内部 main."Schema.表名" 映射到对应物理表。raw_query 继续作为单独授权的高权限只读测试入口，绕过表开放、行字段访问策略，保留 Schema 范围和脱敏。

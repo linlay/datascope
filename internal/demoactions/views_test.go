@@ -29,7 +29,7 @@ func TestSecuritiesViewQueriesAndInstallation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(d.Views) != 3 || d.QueryViewID != "query" {
+	if len(d.Views) != 6 || d.QueryViewID != "query" {
 		t.Fatal("missing view bundle")
 	}
 	for _, a := range d.Actions {
@@ -70,6 +70,9 @@ func TestSecuritiesViewBrowserHarness(t *testing.T) {
 	app, ctx := platformFixture(t)
 	if _, err := demoactions.Install(ctx, app, "default", []string{"E0001", "E0121"}, false); err != nil {
 		t.Fatal(err)
+	}
+	if os.Getenv("DATASCOPE_VIEW_MASKING") == "1" {
+		maskSecuritiesCustomers(t, app, ctx)
 	}
 	d, err := app.Catalog.Get("default")
 	if err != nil {

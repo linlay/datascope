@@ -202,9 +202,9 @@ export function selectDatabase(id: string) {
  selectedDatabase = id; localStorage.setItem('datascope-database', id); usersPromise = undefined;
 }
 export interface DatabaseConnection {
- host:string; port:number; database?:string; service_name?:string; schema:string; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
+ host:string; port:number; database?:string; service_name?:string; schema:string; allowed_schemas?:string[]; username:string; password_env?:string; credential_id?:string; tls_mode?:string;
 }
-export interface NewDatabase {id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
+export interface NewDatabase {create_sqlite?:boolean;id?:string; password?:string; name:string; driver:string; path?:string; connection?:DatabaseConnection}
 export interface Annotation { display_name: string; comment: string | null }
 export interface TableAnnotation extends Annotation { columns: Record<string, Annotation> }
 export interface SchemaChange { table:string; column?:string; kind:'added'|'removed'|'modified'; property:string; before:string; after:string; manual?:string; conflict:boolean }
@@ -225,6 +225,8 @@ export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {
+ schema_identity_version?:number;
+ schema_editable?:boolean;
  views?:ViewDefinition[]; query_view_id?:string;
  sql_examples?: SQLExample[];
  management_path?:string; audit_path?:string; access?:{policy:AuthPolicy;provider:AuthProvider;revision:number;source?:'DATABASE'};
@@ -239,13 +241,18 @@ export interface Database {
  id: string; name: string; driver: string; path: string; mcp_enabled: boolean; knowledge_enabled?:boolean; mcp_path?: string; mcp_endpoint?: string; tools: string[]; revision: number; etag?: string;
  config: { version: number; schemes: SchemeInfo[]; tables: PolicyView[] };
 }
+export interface CandidateTable {name:string;schema?:string;table_name?:string}
+export interface CandidatePage {items:CandidateTable[];total:number;limit:number;offset:number}
 export const databases = {
+ candidates: (id:string,query:string,limit:number,offset:number)=>managementCall<CandidatePage>('list_table_candidates',{database_id:id,query,limit,offset}),
+ enroll: (id:string,revision:number,table_names:string[])=>managementCall<Database>('enroll_tables',{database_id:id,revision,table_names}),
+ schemas: (id:string)=>managementCall<string[]>('list_schemas',{database_id:id}),
  list: () => request<Database[]>('/api/databases'),
  applyDiscovery: (id:string,candidate:string,revision:number,resolutions:AnnotationResolution[]) => managementCall<Database>('apply_discovery',{database_id:id,id:candidate,revision,resolutions}),
  discover: (id:string) => managementCall<Database>('discover_database',{database_id:id}),
  annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
- test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number}>('test_database_connection', {database,password});},
+ test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number;schemas:string[];empty:boolean}>('test_database_connection', {database,password});},
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
  save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };

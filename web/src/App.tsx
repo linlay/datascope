@@ -12,6 +12,7 @@ import { databases, selectDatabase, selectedDatabase, type Database } from './ap
 import { SqlWorkbench } from './pages/SqlWorkbench';
 import { AuditPage } from './pages/Audit';
 import { useAuth } from './Auth';
+import { DatabaseIcon } from './components/DatabaseIcon';
 import { ConnectionFields } from './components/ConnectionFields';
 import { NavigationContext, navigate, readRoute, setRouteParams, startNavigation, type Page } from './navigation';
 
@@ -45,13 +46,14 @@ export function App() {
  const [testResult,setTestResult]=useState<string>();
  const [error,setError]=useState<string>();
  const [form]=Form.useForm();
+ const creatingSQLite=Form.useWatch('create_sqlite',form);
  const refresh=()=>databases.list().then(setItems).catch(e=>setError(e.message));
  useEffect(()=>{void refresh();},[]);
  const switchDB=(id:string)=>navigate(route.page, undefined, {database:id});
  useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) navigate(route.page,undefined,{database:items[0].id},true);},[items,dbID]);
  const connectionValues=async()=>{
  const values=await form.validateFields();
- if(values.driver==='sqlite') return {name:values.name,driver:values.driver,path:values.path};
+ if(values.driver==='sqlite') return {name:values.name,driver:values.driver,path:values.path,create_sqlite:!!values.create_sqlite};
  const connection={...values.connection};if(values.driver==='mysql') connection.schema=connection.database;
  return {name:values.name,driver:values.driver,connection,password:values.password};
  };
@@ -92,7 +94,7 @@ export function App() {
     <NavigationContext.Provider value={route}>
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
-          <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:d.name}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
+          <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={dbID} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:<Space size={6}><DatabaseIcon driver={d.driver}/>{d.name}</Space>}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
           <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>{t('退出')}</Button><Button aria-label={t('系统设置')} title={t('系统设置')} icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}/></Space>
         </Layout.Header>
         <Layout className="workspace-layout" style={{background:'transparent'}}>
@@ -111,18 +113,18 @@ export function App() {
  {!activePage&&<Alert type="info" title={t("当前账号尚未获得数据库权限，请联系系统管理员。")}/>}
  {error && <Alert type="error" title={error} closable onClose={()=>setError(undefined)}/>}
           {activePage === 'table' && <DataBrowser table={route.selection} onOpenTable={openTable} />}
-          {activePage === 'sql-workbench' && <SqlWorkbench examples={current?.sql_examples} views={current?.views} queryViewID={current?.query_view_id} permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
+          {activePage === 'sql-workbench' && <SqlWorkbench examples={current?.sql_examples} permissions={current?.permissions||[]} businessUserID={current?.business_user_id||0} />}
           {activePage === 'actions' && current && <Actions db={current} onSaved={()=>void refresh()}/> }
           {activePage === 'tables' && <QueryConfiguration id={dbID} onSaved={()=>{void refresh();}} />}
           {activePage === 'mcp' && <McpManagement id={dbID} onSaved={()=>{void refresh();}} />}
         </Layout.Content>
         </Layout>
       </Layout>
-      <Modal title={t("添加数据库")} centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText={t("添加数据库")} footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating}>{t("测试连接")}</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
+      <Modal title={t("添加数据库")} centered styles={{body:{maxHeight:'calc(100dvh - 240px)',overflowY:'auto',paddingRight:8}}} open={adding} onCancel={()=>{setAdding(false);form.resetFields();}} onOk={add} confirmLoading={creating} okText={t("添加数据库")} footer={(_, {OkBtn,CancelBtn})=><Space><Button onClick={testConnection} loading={testing} disabled={creating||creatingSQLite}>{t("测试连接")}</Button><CancelBtn/><OkBtn/></Space>} destroyOnHidden>
        {error && <Alert type="error" title={error}/>}
        {testResult&&<Alert type="success" title={testResult}/>}
-       <Form form={form} layout="vertical" initialValues={{driver:'sqlite'}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label={t("显示名称")} rules={[{required:true}]}><Input placeholder={t("例如：业务数据库")}/></Form.Item><ConnectionFields form={form}/></Form>
-       <p>{t("添加后自动侦查全部表、字段与注释，生成映射和结构快照。选择开放范围后，再开启 MCP。")}</p>
+       <Form form={form} layout="vertical" initialValues={{driver:'sqlite',create_sqlite:false}} onValuesChange={()=>setTestResult(undefined)}><Form.Item name="name" label={t("显示名称")} rules={[{required:true}]}><Input placeholder={t("例如：业务数据库")}/></Form.Item><ConnectionFields form={form}/></Form>
+       <p>{t("网络数据源先登记 Schema 范围，再到查询配置选择表并配置开放权限；SQLite 自动发现表结构。")}</p>
       </Modal>
       <SystemSettings open={settingsOpen} onClose={()=>setSettingsOpen(false)}/>
     </NavigationContext.Provider>

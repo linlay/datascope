@@ -23,6 +23,9 @@ func (v *visitor) addSplice(x *sql.QualifiedTableName, table string) {
 		aliasIdent = x.Alias
 	}
 	start, aliasEnd := x.Name.NamePos.Offset, identEnd(v.src, aliasIdent)
+	if x.Schema != nil {
+		start = x.Schema.NamePos.Offset
+	}
 	end := aliasEnd
 	if x.Index != nil {
 		end = identEnd(v.src, x.Index)
@@ -35,6 +38,9 @@ func (v *visitor) addSplice(x *sql.QualifiedTableName, table string) {
 		return
 	}
 	text := "main." + table
+	if strings.Contains(table, ".") {
+		text = "main." + `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+	}
 	if sub, ok := v.rewriter.subSQL[table]; ok {
 		text = "(" + sub + ")"
 	}

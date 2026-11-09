@@ -156,7 +156,7 @@ func Install(ctx context.Context, app *application.Service, id string, accounts 
 		}
 	}
 	d.Actions = merged
-	for _, v := range view.Templates() {
+	for _, v := range view.DemoViews() {
 		index := slices.IndexFunc(d.Views, func(old view.Definition) bool { return old.ID == v.ID })
 		if index < 0 {
 			d.Views = append(d.Views, v)

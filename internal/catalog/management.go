@@ -17,7 +17,7 @@ func BootstrapManaged(ctx context.Context, m *management.Store, path string, st 
 		return nil, e
 	}
 	if len(records) > 0 {
-		return c, nil
+		return c, c.MigrateSchemaIdentities(ctx)
 	}
 	old, e := Bootstrap(path, st, config, asOf, timeout, legacy)
 	if e != nil {
@@ -46,6 +46,7 @@ func (c *Catalog) listManaged(ctx context.Context) ([]Database, error) {
 		if e = json.Unmarshal([]byte(r.Data), &d); e != nil {
 			return nil, e
 		}
+		migrateSchemaIdentity(&d)
 		out = append(out, d)
 	}
 	c.overlayDiscovery(out)
@@ -61,6 +62,7 @@ func (c *Catalog) getManaged(ctx context.Context, id string) (*Database, error) 
 	if err = json.Unmarshal([]byte(records[0].Data), &d); err != nil {
 		return nil, err
 	}
+	migrateSchemaIdentity(&d)
 	items := []Database{d}
 	c.overlayDiscovery(items)
 	p, err := c.Management.ResolveAuth(ctx, "DATABASE", id)
@@ -79,6 +81,7 @@ func (c *Catalog) updateManaged(ctx context.Context, action, database string, fn
 			if e := json.Unmarshal([]byte(r.Data), &d); e != nil {
 				return nil, e
 			}
+			migrateSchemaIdentity(&d)
 			items = append(items, d)
 		}
 		if e := fn(&items); e != nil {

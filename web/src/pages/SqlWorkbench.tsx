@@ -1,10 +1,9 @@
 import { useI18n } from '../ui/preferences';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Input, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
-import { FormatPainterOutlined, PlayCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { ApiError, api, type QueryResult, type RewritePreview, type SQLExample, type ViewDefinition } from '../api';
-import { ViewFrame } from '../components/ViewFrame';
+import { ExclamationCircleOutlined, FormatPainterOutlined, PlayCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ApiError, api, type QueryResult, type RewritePreview, type SQLExample } from '../api';
 import { ResultTable, SchemeTag, SqlBlock, UserPicker } from '../components/shared';
 import { SqlDiff } from '../components/SqlDiff';
 import { formatSQL } from '../sqlFormat';
@@ -39,15 +38,12 @@ function ResultSummary({ outcome }: { outcome?: Outcome<QueryResult> }) {
   </div> : null;
 }
 
-export function SqlWorkbench({permissions,businessUserID,examples = [],views = [],queryViewID = ''}:{permissions:string[];businessUserID:number;examples?:SQLExample[];views?:ViewDefinition[];queryViewID?:string}) {
+export function SqlWorkbench({permissions,businessUserID,examples = []}:{permissions:string[];businessUserID:number;examples?:SQLExample[]}) {
  const t=useI18n();
  const route=useRoute();
  const exampleParam=route.params.get('example');
  const canRaw=permissions.includes("raw_query");const canImpersonate=permissions.includes("impersonate");
   const [parameters, setParameters] = useState('{}');
- const [resultView,setResultView] = useState(queryViewID);
- const [executedInput,setExecutedInput] = useState<Record<string,unknown>>({});
- const selectedView=views.find(v=>v.id===resultView&&v.published);
   const [sql, setSql] = useState(examples[Number(exampleParam)||0]?.sql || '');
   const editor = useRef<TextAreaRef>(null);
   // Execution and formatting always read the live editor; never fall back to
@@ -78,7 +74,9 @@ export function SqlWorkbench({permissions,businessUserID,examples = [],views = [
    const index=Number(exampleParam);
    if(Number.isSafeInteger(index)&&index>=0&&examples[index])changeSql(examples[index].sql,false);
   },[exampleParam,examples]);
-  useEffect(()=>{setRaw(undefined);setRewritten(undefined);setResult(undefined);},[userId,maxRows]);
+  // The simulated business identity only affects the rewritten query.
+  useEffect(()=>{setRewritten(undefined);setResult(undefined);},[userId]);
+  useEffect(()=>{setRaw(undefined);setRewritten(undefined);setResult(undefined);},[maxRows]);
   const run = async (next: 'raw' | 'preview' | 'execute') => {
     const currentSql = readSql();
     if (busy.current || !currentSql.trim()) return;
@@ -96,7 +94,6 @@ export function SqlWorkbench({permissions,businessUserID,examples = [],views = [
         const data = await api.rewrite(currentSql, userId, maxRows, values);
         setRewritten({ data });
         setResult({ data });
-        setExecutedInput({sql:currentSql,parameters:values,max_rows:maxRows});
       }
     } catch (e) {
       if (next === 'raw') setRaw(failure(e));
@@ -123,11 +120,10 @@ export function SqlWorkbench({permissions,businessUserID,examples = [],views = [
             <div className="sql-context sql-original-context"><Tag>{canRaw?t("全量只读查询"):t("未授权全量查询")}</Tag><Text type="secondary">{t("⌘ / Ctrl + Enter 执行原始 SQL")}</Text>
               <Select size="small" aria-label={t("最大返回行数")} className="sql-row-limit" disabled={disabled} value={maxRows} onChange={(value) => { setRowLimit(String(value)); setRaw(undefined); setResult(undefined); }} options={[50, 200, 1000].map((n) => ({ value: n, label: t("最多 {0} 行", {"0":(n)}) }))} />
             </div>
-            <Input.TextArea ref={editor} aria-label={t("原始 SQL")} className="mono sql-editor" value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ height: 320, resize: 'vertical' }} onKeyDown={(e) => {
+            <Input.TextArea ref={editor} aria-label={t("原始 SQL")} className="mono sql-editor" rows={10} value={sql} disabled={disabled} onChange={(e) => changeSql(e.target.value)} style={{ resize: 'vertical' }} onKeyDown={(e) => {
               if (canRaw && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void run('raw'); }
             }} />
-            <label><Text>{t('绑定参数 JSON（可选）')}</Text><Input.TextArea aria-label={t('绑定参数 JSON（可选）')} className="mono" rows={3} disabled={disabled} value={parameters} onChange={event => { setParameters(event.target.value); setRaw(undefined); setRewritten(undefined); setResult(undefined); }} /></label>
-            <Text type="secondary">{t('SQL 使用 :arg_name，参数填写 {"arg_name":"值"}。仅接受文本、数字、布尔值或 null；身份和授权时间由服务端提供。')}</Text>
+            <div><Space size={4}><Text>{t('绑定参数 JSON（可选）')}</Text><Tooltip trigger={['hover', 'focus']} title={t('SQL 使用 :arg_name，参数填写 {"arg_name":"值"}。仅接受文本、数字、布尔值或 null；身份和授权时间由服务端提供。')}><button type="button" className="help-tip" aria-label={t('{0}说明', { '0': t('绑定参数 JSON（可选）') })}><ExclamationCircleOutlined aria-hidden /></button></Tooltip></Space><Input.TextArea aria-label={t('绑定参数 JSON（可选）')} className="mono" rows={3} disabled={disabled} value={parameters} onChange={event => { setParameters(event.target.value); setRaw(undefined); setRewritten(undefined); setResult(undefined); }} /></div>
           </Card>
           <Card size="small" title={t("原始结果")} extra={<ResultSummary outcome={raw} />}><QueryOutput outcome={raw} loading={action === 'raw'} /></Card>
         </section>
@@ -145,7 +141,7 @@ export function SqlWorkbench({permissions,businessUserID,examples = [],views = [
             </div>
             <div className="sql-preview">
               {rewritten?.error ? <Alert type={rewritten.denied ? 'warning' : 'error'} showIcon message={rewritten.denied ? t("改写拒绝") : t("改写失败")} description={rewritten.error} /> : rewritten?.data ? <>
-                {view === 'diff' ? <SqlDiff original={rewriteSource} rewritten={rewritten.data.rewritten_sql} /> : <SqlBlock sql={rewritten.data.rewritten_sql} maxHeight={320} format={false} />}
+                {view === 'diff' ? <SqlDiff original={rewriteSource} rewritten={rewritten.data.rewritten_sql} /> : <SqlBlock sql={rewritten.data.rewritten_sql} maxHeight={240} format={false} />}
               </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={action === 'preview' || action === 'execute' ? t("正在按员工权限改写…") : t("点击“改写”查看最终 SQL 与差异")} />}
             </div>
             {rewritten?.data && <Space orientation="vertical" size="small" style={{ width: '100%', marginTop: 12 }}>
@@ -153,8 +149,8 @@ export function SqlWorkbench({permissions,businessUserID,examples = [],views = [
               <Space wrap><Text type="secondary">{t("绑定变量")}</Text>{Object.entries(rewritten.data.binds).map(([key, value]) => <Tag key={key} className="mono">:{key} = {String(value)}</Tag>)}{Object.keys(rewritten.data.binds).length === 0 && <Text type="secondary">{t("无")}</Text>}</Space>
             </Space>}
           </Card>
-          <Card size="small" title={t("改写后结果 · 员工 #{0}", {"0":(userId)})} extra={<Space><Select size="small" aria-label={t("结果视图")} style={{minWidth:140}} value={selectedView?.id||''} onChange={setResultView} options={[{value:'',label:t("结果表格")},...views.filter(v=>v.published).map(v=>({value:v.id,label:v.name}))]} /><ResultSummary outcome={result} /></Space>}>
-            {!result && rewritten?.data ? <Alert type="info" showIcon message={t("SQL 已改写，尚未执行")} description={t("点击“执行”查看该员工权限范围内的结果。")} /> : selectedView && result?.data ? <ViewFrame html={selectedView.html} data={{input:executedInput,result:result.data}} onCall={async(name,args)=>{if(name !== 'query')throw new Error(t('动作请通过业务预览中的本人认证执行。'));return api.rewrite(String(args.sql||''),userId,Number(args.max_rows||200),(args.parameters||{}) as Record<string,unknown>);}} /> : <QueryOutput outcome={result} loading={action === 'execute'} />}
+          <Card size="small" title={t("改写后结果 · 员工 #{0}", {"0":(userId)})} extra={<ResultSummary outcome={result} />}>
+            {!result && rewritten?.data ? <Alert type="info" showIcon message={t("SQL 已改写，尚未执行")} description={t("点击“执行”查看该员工权限范围内的结果。")} /> : <QueryOutput outcome={result} loading={action === 'execute'} />}
           </Card>
         </section>
       </div>

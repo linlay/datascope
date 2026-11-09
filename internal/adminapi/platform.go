@@ -163,13 +163,15 @@ func PlatformHandler(app *application.Service, next http.Handler) http.Handler {
 				action = "create_database"
 				var create struct {
 					catalog.Database
-					Password string `json:"password"`
+					CreateSQLite bool   `json:"create_sqlite"`
+					Password     string `json:"password"`
 				}
 				if !decode(w, r, &create) {
 					return
 				}
 				in.Database = &create.Database
 				in.Password = create.Password
+				in.CreateSQLite = create.CreateSQLite
 			} else if r.Method != "GET" {
 				http.NotFound(w, r)
 				return

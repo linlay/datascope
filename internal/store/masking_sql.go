@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -12,11 +13,18 @@ type maskingSource struct {
 	alias   string
 	columns []maskedColumn
 }
-type maskingAnalyzer struct{ store *Store }
+type maskingAnalyzer struct {
+	store   *Store
+	ctx     context.Context
+	rawTest bool
+}
 
 // prepareMasking validates lineage before execution and expands wildcards from
 // the registered snapshot. Unsupported SQL never falls back to unmasked output.
 func (s *Store) prepareMasking(query string) (string, []maskedColumn, error) {
+	return s.prepareMaskingContext(context.Background(), query, false)
+}
+func (s *Store) prepareMaskingContext(ctx context.Context, query string, rawTest bool) (string, []maskedColumn, error) {
 	if !s.hasMasking() {
 		return query, nil, nil
 	}
@@ -32,7 +40,7 @@ func (s *Store) prepareMasking(query string) (string, []maskedColumn, error) {
 	if !ok {
 		return "", nil, fmt.Errorf("脱敏查询只支持 SELECT")
 	}
-	plan, err := (maskingAnalyzer{s}).selectColumns(sel, nil)
+	plan, err := (maskingAnalyzer{s, ctx, rawTest}).selectColumns(sel, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("查询脱敏拒绝：%w", err)
 	}
@@ -149,8 +157,14 @@ func (a maskingAnalyzer) sources(node sql.Source, ctes map[string][]maskedColumn
 				return []maskingSource{{n.TableName(), cols}}, nil
 			}
 		}
-		if n.Schema != nil && !strings.EqualFold(sql.IdentName(n.Schema), "main") && (a.store.engine == nil || !strings.EqualFold(sql.IdentName(n.Schema), a.store.engine.Schema)) {
-			return nil, fmt.Errorf("不能分析跨 schema 字段")
+		if a.store.engine != nil {
+			physical, err := a.store.engine.Resolve(sql.IdentName(n.Schema), name)
+			if err != nil {
+				return nil, err
+			}
+			name = physical
+		} else if n.Schema != nil && !strings.EqualFold(sql.IdentName(n.Schema), "main") {
+			return nil, fmt.Errorf("不允许访问其他 Schema")
 		}
 		for _, t := range a.store.RegisteredSchema {
 			if strings.EqualFold(t.Name, name) {
@@ -160,6 +174,19 @@ func (a maskingAnalyzer) sources(node sql.Source, ctes map[string][]maskedColumn
 				}
 				return []maskingSource{{n.TableName(), cols}}, nil
 			}
+		}
+		// Only the separately authorized raw_query test entry may inspect an
+		// unenrolled table. Formal queries must never expand their registered scope.
+		if a.rawTest && a.store.engine != nil {
+			t, err := a.store.remoteDescribe(a.ctx, name)
+			if err != nil {
+				return nil, err
+			}
+			cols := []maskedColumn{}
+			for _, col := range t.Columns {
+				cols = append(cols, maskedColumn{name: col.Name, domain: t.Name + "\x00" + col.Name})
+			}
+			return []maskingSource{{n.TableName(), cols}}, nil
 		}
 		return nil, fmt.Errorf("表 %s 未登记，请先确认结构", name)
 	case *sql.SelectStatement:

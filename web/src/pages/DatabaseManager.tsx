@@ -19,7 +19,7 @@ export function TablePolicyEditor({ policy, disabled, onChange }: {
    <label className="policy-control"><span>{t('最多返回行数')}</span><InputNumber aria-label={t('最多返回行数')} disabled={disabled} min={1} max={1000} value={policy.max_rows || 1000} onChange={value => onChange({ max_rows: value ?? 200 })} /></label>
   </div>
   {!policy.passthrough && <div className="policy-sql-field">
-   <Space size={4}><Typography.Text>{t('行权限 SQL')}</Typography.Text><HelpTip label={t('行权限 SQL')}>{t('用 main.表名引用原表，${userId} 表示当前员工，${asOf} 表示授权时间。每张表保存完整的权限 SQL。')}</HelpTip></Space>
+   <Space size={4}><Typography.Text>{t('行权限 SQL')}</Typography.Text><HelpTip label={t('行权限 SQL')}>{t('用 Schema 限定名引用原表；${userId} 表示当前员工，${asOf} 表示授权时间。每张表保存完整的权限 SQL。')}</HelpTip></Space>
    <CodeEditor language="sql" height="auto" minHeight="160px" wrap value={policy.sql} readOnly={disabled} onChange={sql => onChange({ sql })} />
   </div>}
   {hasGuard.current && <div className="policy-sql-field">

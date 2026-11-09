@@ -23,6 +23,7 @@ type probeDriver struct{ conn *probeConn }
 func (d probeDriver) Open(string) (driver.Conn, error) { return d.conn, nil }
 
 type probeConn struct {
+	onQuery      func(string, []driver.NamedValue) (driver.Rows, error)
 	opts         driver.TxOptions
 	setup, query string
 	binds        []driver.NamedValue
@@ -48,6 +49,9 @@ func (c *probeConn) ExecContext(_ context.Context, query string, _ []driver.Name
 func (c *probeConn) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.query = query
 	c.binds = args
+	if c.onQuery != nil {
+		return c.onQuery(query, args)
+	}
 	return &probeRows{}, nil
 }
 

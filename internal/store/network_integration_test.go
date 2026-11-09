@@ -32,6 +32,23 @@ func TestNetworkDatabaseIntegration(t *testing.T) {
 			if err := c.Add(ctx, catalog.Database{ID: "integration", Name: "Integration", Driver: driver, Connection: &connection}); err != nil {
 				t.Fatal(err)
 			}
+			candidates, err := c.Candidates(ctx, "integration", "datascope_records", 50, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := []string{}
+			for _, table := range candidates.Items {
+				if strings.EqualFold(table.TableName, "datascope_records") {
+					selected = append(selected, table.Name)
+				}
+			}
+			initial, err := c.Get("integration")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.EnrollTables(ctx, "integration", initial.Revision, selected); err != nil {
+				t.Fatal(err)
+			}
 			d, err := c.Get("integration")
 			if err != nil {
 				t.Fatal(err)
@@ -43,18 +60,19 @@ func TestNetworkDatabaseIntegration(t *testing.T) {
 			if _, err := svc.Query(ctx, "SELECT * FROM datascope_records", 1, 10); err == nil {
 				t.Fatal("new source was not deny-by-default")
 			}
-			schema, err := svc.Store.Describe(ctx, "datascope_records")
+			tableName := connection.Schema + ".datascope_records"
+			schema, err := svc.Store.Describe(ctx, tableName)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, p := range d.Config.Tables {
-				if p.Table == "datascope_records" {
+				if strings.EqualFold(p.Table, tableName) {
 					yes := true
 					p.Enabled = &yes
 					p.Scheme = "CUSTOM"
 					p.Passthrough = false
-					p.SQL = "SELECT * FROM main.datascope_records WHERE owner_id = ${userId}"
-					p.DenyUnless = "EXISTS (SELECT 1 FROM main.datascope_records WHERE owner_id = ${userId})"
+					p.SQL = fmt.Sprintf("SELECT * FROM main.%q WHERE owner_id = ${userId}", schema.Name)
+					p.DenyUnless = fmt.Sprintf("EXISTS (SELECT 1 FROM main.%q WHERE owner_id = ${userId})", schema.Name)
 					p.Columns = []string{}
 					for _, col := range schema.Columns {
 						if strings.EqualFold(col.Name, "id") || strings.EqualFold(col.Name, "owner_id") {

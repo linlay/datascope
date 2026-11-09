@@ -28,10 +28,13 @@ func IsDenied(err error) bool {
 
 // Rewriter rewrites SELECT statements against a known set of tables.
 type Rewriter struct {
-	cfg    *Config
-	tables map[string]bool   // every real table name, lower case
-	quoted map[string]bool   // identifiers quoted in the policy SQL, lower case
-	subSQL map[string]string // one-line subquery text per table
+	Columns        map[string][]string
+	DefaultSchema  string
+	AllowQualified bool
+	cfg            *Config
+	tables         map[string]bool   // every real table name, lower case
+	quoted         map[string]bool   // identifiers quoted in the policy SQL, lower case
+	subSQL         map[string]string // one-line subquery text per table
 }
 
 // New returns a rewriter for the database's tables. The config must cover
@@ -44,19 +47,22 @@ func New(cfg *Config, tableNames []string) (*Rewriter, error) {
 	}
 	for _, pol := range cfg.Tables {
 		if !pol.Passthrough || len(pol.Columns) > 0 {
-			r.subSQL[pol.Table] = unquoteIdents(pol.subquery.String(), r.quoted)
+			r.subSQL[strings.ToLower(pol.Table)] = unquoteIdents(pol.subquery.String(), r.quoted)
 		}
 	}
 	var missing, unknown []string
 	for _, name := range tableNames {
 		name = strings.ToLower(name)
 		r.tables[name] = true
+		if strings.Contains(name, ".") {
+			r.quoted[name] = true
+		}
 		if _, ok := cfg.Lookup(name); !ok {
 			missing = append(missing, name)
 		}
 	}
 	for _, pol := range cfg.Tables {
-		if !r.tables[pol.Table] {
+		if !r.tables[strings.ToLower(pol.Table)] {
 			unknown = append(unknown, pol.Table)
 		}
 	}
@@ -116,7 +122,7 @@ func (r *Rewriter) RewriteWithParameters(query string, parameters []string) (*Re
 		}
 		allowed[":"+name] = true
 	}
-	if err := r.checkNoSchemaQualifiedTables(query); err != nil {
+	if err := r.checkNoSchemaQualifiedTables(query); err != nil && !r.AllowQualified {
 		return nil, err
 	}
 	parser := sql.NewParser(strings.NewReader(query))
@@ -132,22 +138,11 @@ func (r *Rewriter) RewriteWithParameters(query string, parameters []string) (*Re
 		return nil, deny("只允许 SELECT 查询")
 	}
 
-	src := []rune(query)
-	v := &visitor{rewriter: r, ctes: map[string]bool{}, src: src, allowedParams: allowed, usedParams: map[string]bool{}}
-	// CTE names must not shadow real tables; otherwise whether a reference
-	// means the CTE or the table would depend on SQLite's scoping rules.
-	if _, err := sql.Walk(sql.VisitFunc(func(n sql.Node) (sql.Node, error) {
-		if cte, ok := n.(*sql.CTE); ok {
-			name := strings.ToLower(sql.IdentName(cte.TableName))
-			if r.tables[name] {
-				return nil, deny("CTE 名称 %s 与数据表同名", name)
-			}
-			v.ctes[name] = true
-		}
-		return n, nil
-	}), sel); err != nil {
+	if err := r.validateColumns(sel); err != nil {
 		return nil, err
 	}
+	src := []rune(query)
+	v := &visitor{rewriter: r, ctes: map[string]bool{}, src: src, allowedParams: allowed, usedParams: map[string]bool{}}
 
 	out, err := sql.Walk(v, sel)
 	if err != nil {
@@ -187,6 +182,7 @@ type visitor struct {
 	usedParams    map[string]bool
 	rewriter      *Rewriter
 	ctes          map[string]bool
+	scopes        []map[string]bool
 	refs          []TableRef
 	src           []rune   // the input, for splicing
 	splices       []splice // in input order
@@ -194,6 +190,19 @@ type visitor struct {
 
 func (v *visitor) Visit(n sql.Node) (sql.Visitor, sql.Node, error) {
 	switch x := n.(type) {
+	case *sql.SelectStatement:
+		scope := maps.Clone(v.ctes)
+		if x.WithClause != nil {
+			for _, c := range x.WithClause.CTEs {
+				key := strings.ToLower(sql.IdentName(c.TableName))
+				if v.rewriter.tables[key] {
+					return nil, nil, deny("CTE 名称 %s 与数据表同名", key)
+				}
+				scope[key] = true
+			}
+		}
+		v.scopes = append(v.scopes, v.ctes)
+		v.ctes = scope
 	case *sql.QualifiedTableName:
 		replacement, err := v.rewriteTable(x)
 		// Never descend into the generated subquery.
@@ -224,17 +233,31 @@ func (v *visitor) Visit(n sql.Node) (sql.Visitor, sql.Node, error) {
 	return v, n, nil
 }
 
-func (v *visitor) VisitEnd(n sql.Node) (sql.Node, error) { return n, nil }
+func (v *visitor) VisitEnd(n sql.Node) (sql.Node, error) {
+	if _, ok := n.(*sql.SelectStatement); ok {
+		v.ctes = v.scopes[len(v.scopes)-1]
+		v.scopes = v.scopes[:len(v.scopes)-1]
+	}
+	return n, nil
+}
 
 func (v *visitor) rewriteTable(x *sql.QualifiedTableName) (sql.Source, error) {
 	name := strings.ToLower(sql.IdentName(x.Name))
+	if x.Schema == nil && v.ctes[name] {
+		return x, nil
+	}
 	if x.Schema != nil {
-		return nil, deny("不允许 schema 限定的表名 %s.%s", sql.IdentName(x.Schema), name)
+		if !v.rewriter.AllowQualified {
+			return nil, deny("不允许 schema 限定的表名 %s.%s", sql.IdentName(x.Schema), name)
+		}
+		name = strings.ToLower(sql.IdentName(x.Schema)) + "." + name
+	} else if v.rewriter.AllowQualified {
+		if v.rewriter.DefaultSchema == "" {
+			return nil, deny("没有默认 Schema，请使用 schema.table")
+		}
+		name = strings.ToLower(v.rewriter.DefaultSchema) + "." + name
 	}
 	if !v.rewriter.tables[name] {
-		if v.ctes[name] {
-			return x, nil
-		}
 		return nil, deny("未知表 %s", name)
 	}
 	pol, ok := v.rewriter.cfg.Lookup(name)
@@ -251,7 +274,7 @@ func (v *visitor) rewriteTable(x *sql.QualifiedTableName) (sql.Source, error) {
 	v.refs = append(v.refs, TableRef{Table: name, Alias: alias.Name, Scheme: pol.Scheme})
 	v.addSplice(x, name)
 	if pol.Passthrough && len(pol.Columns) == 0 {
-		return &sql.QualifiedTableName{Schema: &sql.Ident{Name: "main"}, Name: &sql.Ident{Name: name}, Alias: alias}, nil
+		return &sql.QualifiedTableName{Schema: &sql.Ident{Name: "main"}, Name: &sql.Ident{Name: name, Quoted: strings.Contains(name, ".")}, Alias: alias}, nil
 	}
 	return &sql.ParenSource{X: pol.subquery.Clone(), Alias: alias}, nil
 }

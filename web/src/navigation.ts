@@ -3,7 +3,22 @@ import { Modal } from 'antd';
 
 export type Page = 'database' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql-workbench' | 'table' | 'mcp' | 'audit';
 export interface Route { page: Page; selection?: string; params: URLSearchParams }
-const pages: Page[] = ['database', 'tables', 'actions', 'views', 'knowledge', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'sql-workbench', 'table', 'mcp', 'audit'];
+// Public paths describe the page's purpose; internal page keys remain stable.
+const pagePaths: Record<Page, string> = {
+ database: 'database-configuration',
+ tables: 'query-configuration',
+ actions: 'action-configuration',
+ views: 'view-configuration',
+ knowledge: 'knowledge-configuration',
+ mcp: 'mcp-configuration',
+ 'knowledge-workbench': 'knowledge-workbench',
+ 'action-workbench': 'action-workbench',
+ 'view-workbench': 'view-workbench',
+ 'sql-workbench': 'query-workbench',
+ table: 'table',
+ audit: 'audit',
+};
+const pages = Object.keys(pagePaths) as Page[];
 const aliases: Record<string, Page> = { sql: 'sql-workbench', data: 'table', discovery: 'tables', policies: 'tables', access: 'database' };
 
 export function readRoute(hash = window.location.hash): Route {
@@ -11,7 +26,8 @@ export function readRoute(hash = window.location.hash): Route {
  const path = (separator < 0 ? hash : hash.slice(0, separator)).replace(/^#\/?/, '');
  const params = new URLSearchParams(separator < 0 ? '' : hash.slice(separator + 1));
  const [rawPage, rawSelection] = path.split('/');
- let page = aliases[rawPage] ?? (pages.includes(rawPage as Page) ? rawPage as Page : 'database');
+ let page = pages.find(page => pagePaths[page] === rawPage)
+  ?? (pages.includes(rawPage as Page) ? rawPage as Page : Object.prototype.hasOwnProperty.call(aliases, rawPage) ? aliases[rawPage] : 'database');
  if (page === 'database' && params.get('tab') === 'audit') { page = 'audit'; params.delete('tab'); }
  let selection: string | undefined;
  try { selection = rawSelection ? decodeURIComponent(rawSelection) : undefined; } catch { /* An invalid bookmark falls back to the page's default selection. */ }
@@ -20,7 +36,7 @@ export function readRoute(hash = window.location.hash): Route {
 
 function routeHash(route: Route) {
  const query = route.params.toString();
- return `#/${route.page}${route.selection ? `/${encodeURIComponent(route.selection)}` : ''}${query ? `?${query}` : ''}`;
+ return `#/${pagePaths[route.page]}${route.selection ? `/${encodeURIComponent(route.selection)}` : ''}${query ? `?${query}` : ''}`;
 }
 
 export const NavigationContext = createContext<Route | null>(null);
