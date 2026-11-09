@@ -17,7 +17,6 @@ import (
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
 	"datascope-server/internal/store"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func configurationFiles(t *testing.T, path string) map[string]string {
@@ -144,7 +143,7 @@ func TestDerivedStateProcessPeer(t *testing.T) {
 	tokens, _, _ := employeeTokens(t, env, "default", "employee-default-password")
 	session := connectMCP(t, env.resource+"/default", tokens["access"])
 	ctx := context.Background()
-	_, err = session.ListPrompts(ctx, nil)
+	_, err = knowledgeSearchMCP(t, session, map[string]any{})
 	must(t, err)
 	_, err = f.m.SearchKnowledge(ctx, "OldSearchToken")
 	must(t, err)
@@ -166,15 +165,15 @@ func TestDerivedStateProcessPeer(t *testing.T) {
 	if len(matches) != 0 {
 		t.Fatal("search retained old description")
 	}
-	prompts, err := session.ListPrompts(ctx, nil)
+	prompts, err := knowledgeSearchMCP(t, session, map[string]any{})
 	must(t, err)
-	if len(prompts.Prompts) != 1 || prompts.Prompts[0].Description != "ChangedInAnotherProcess\n第二行" {
-		t.Fatal("stale prompt list", prompts)
+	if len(prompts.Items) != 1 || prompts.Items[0].Description != "ChangedInAnotherProcess\n第二行" {
+		t.Fatal("stale knowledge search", prompts)
 	}
-	full, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "peer-guide"})
+	full, err := readKnowledgeMCP(t, session, "peer-guide")
 	must(t, err)
-	if full.Messages[0].Content.(*mcp.TextContent).Text != "New body" {
-		t.Fatal("stale prompt body")
+	if full.Content != "New body" {
+		t.Fatal("stale knowledge body")
 	}
 	out, err := callMCP(t, session, "query", map[string]any{"sql": "SELECT id FROM items"})
 	must(t, err)
@@ -184,7 +183,7 @@ func TestDerivedStateProcessPeer(t *testing.T) {
 		t.Fatal("stale compiled permission SQL", string(raw))
 	}
 	run("revoke")
-	if _, err = session.ListPrompts(ctx, nil); err == nil {
+	if _, err = knowledgeSearchMCP(t, session, map[string]any{}); err == nil {
 		t.Fatal("revoked identity retained knowledge access")
 	}
 	if out, err = callMCP(t, session, "query", map[string]any{"sql": "SELECT id FROM items"}); err == nil && !out.IsError {

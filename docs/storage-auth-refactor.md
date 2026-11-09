@@ -17,7 +17,7 @@ data/
       tables/<table>.yml          # 完整权限 SQL、结构快照、表和字段说明
       actions/<action>.yml        # 描述、参数与 JavaScript
       action-libraries/<name>.yml # 标准 export 定义的动作公共函数库
-      knowledges/<knowledge_id>.yml # 完整描述与正文，Prompts 使用同一份内容
+      knowledges/<knowledge_id>.yml # 完整描述与正文，知识工具使用同一份内容
     audit.db                     # 逐库审计，独立 SQLite
     credentials.key              # 独立 AES-256-GCM 密钥（如已生成）
     management.db                # 仅升级前历史文件，运行时不读取、不创建
@@ -86,7 +86,7 @@ go run ./cmd/migrate-state -data-dir data
 
 `POST <OAUTH_ISSUER>/auth/databases/<id>/token` 接受本库账号密码，签发绑定数据库和认证配置的一小时 Bearer Token。账号停用、密码重置、权限与身份修改会增加账号 revision 并撤销旧令牌。平台管理入口必须保留有效认证。平台用户逐库权限由 grant.yml 维护，业务账号与平台用户相互独立。
 
-SELECT 直接使用 SQL、绑定参数和查询权限；DML 通过 Action，脚本内部可以 SELECT 校验。知识只由 prompts/list 与 prompts/get 读取同一 knowledges/ 内容，仍按发布状态和当前库身份过滤；Resources 留给未来 view。配置克隆及知识关联的产品改造不在本轮范围。
+SELECT 直接使用 SQL、绑定参数和查询权限；DML 通过 Action，脚本内部可以 SELECT 校验。知识由 search_knowledge 与 read_knowledge 渐进读取同一 knowledges/ 内容，按当前库、发布状态、knowledge.read 和知识开关过滤；视图继续使用 Resources。配置克隆及知识关联的产品改造不在本轮范围。
 
 ## Action 内存和审计
 

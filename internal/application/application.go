@@ -55,6 +55,7 @@ type Input struct {
 	BusinessUserID int64                          `json:"business_user_id,omitempty"`
 	SQL            string                         `json:"sql,omitempty"`
 	Query          string                         `json:"query,omitempty"`
+	Keyword        string                         `json:"keyword,omitempty"`
 	ID             string                         `json:"id,omitempty"`
 	Description    *string                        `json:"description,omitempty"`
 	Summary        *string                        `json:"summary,omitempty"` // Legacy request alias.
@@ -109,14 +110,11 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	defer func() { err = audit.Join(err, s.Management.Audit.Finish(ev, err)) }()
 	if _, business := guard.Business(ctx); business {
-		if action == "list_knowledge_prompts" {
-			return s.ListKnowledgePrompts(ctx, in)
+		if action == "search_knowledge" {
+			return s.SearchKnowledge(ctx, in)
 		}
-		if action == "get_knowledge_prompt" {
-			return s.GetKnowledgePrompt(ctx, in)
-		}
-		if action == "search_knowledge" || action == "read_knowledge" {
-			return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
+		if action == "read_knowledge" {
+			return s.ReadKnowledge(ctx, in, true, false)
 		}
 		return nil, management.ErrDenied
 	}
@@ -135,10 +133,6 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		return view.Templates(), nil
 	case "preview_clone_configuration", "clone_configuration":
 		return s.CloneConfiguration(ctx, in, action == "clone_configuration")
-	case "list_knowledge_prompts":
-		return s.ListKnowledgePrompts(ctx, in)
-	case "get_knowledge_prompt":
-		return s.GetKnowledgePrompt(ctx, in)
 	case "get_auth_config", "save_auth_config":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied
@@ -637,8 +631,10 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			}
 		}
 		return page, nil
-	case "search_knowledge", "read_knowledge":
-		return s.ReadKnowledge(ctx, in, action == "read_knowledge", false)
+	case "search_knowledge":
+		return s.SearchKnowledge(ctx, in)
+	case "read_knowledge":
+		return s.ReadKnowledge(ctx, in, true, false)
 	case "list_knowledge", "get_knowledge":
 		if e := require("knowledge.write"); e != nil {
 			return nil, e
@@ -697,9 +693,19 @@ func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool
 			return nil, e
 		}
 	}
-	if _, e := s.Catalog.Get(in.DatabaseID); e != nil {
+	d, e := s.Catalog.Get(in.DatabaseID)
+	if e != nil {
 		return nil, e
 	}
+	if !drafts && !d.KnowledgeAvailable() {
+		return nil, errors.New("该数据库未开启知识工具")
+	}
+	if !drafts {
+		if _, business := guard.Business(ctx); business && !d.MCPEnabled {
+			return nil, errors.New("该数据库未开启 MCP")
+		}
+	}
+	in.Query = strings.TrimSpace(in.Query)
 	records, e := s.Management.RecordsForDatabase(ctx, "knowledge", in.DatabaseID)
 	if e != nil {
 		return nil, e
@@ -720,7 +726,7 @@ func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool
 		if in.ID != "" && k.ID != in.ID {
 			continue
 		}
-		if in.Query != "" && !matches[r.Key] && !strings.Contains(strings.ToLower(k.Name+" "+k.Description+" "+k.Content), strings.ToLower(in.Query)) {
+		if in.Query != "" && !matches[r.Key] {
 			continue
 		}
 		if !full {

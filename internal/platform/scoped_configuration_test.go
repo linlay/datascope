@@ -50,6 +50,11 @@ func TestScopedConfigurationReadsIgnoreUnrelatedYAML(t *testing.T) {
 			if k.DatabaseID != "default" || k.Content != "ScopedKnowledgeToken default" {
 				t.Fatal("wrong knowledge body", k)
 			}
+		} else if action == "search_knowledge" {
+			entries := value.(*application.KnowledgeSearch).Items
+			if len(entries) != 1 || entries[0].ID != "guide" {
+				t.Fatal(entries)
+			}
 		} else {
 			entries := value.([]application.Knowledge)
 			if len(entries) != 1 || entries[0].DatabaseID != "default" || entries[0].Content != "" {

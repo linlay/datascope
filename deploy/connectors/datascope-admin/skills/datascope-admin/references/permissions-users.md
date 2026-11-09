@@ -16,7 +16,7 @@ user 所有动作需要 users.manage。创建用户不自动授予数据库权�
 
 grant.list 需要 grant。授予或撤销通过服务端检查操作者权限，不能授予自己没有的权限。只有系统管理员可改变业务身份绑定。grant 的 permissions 是**完整替换列表**，不是增量追加。先 list，保留用户没有要求撤销的权限和当前 business_user_id；未绑定身份为 0。要求显式提供 business_user_id 是为了避免缺省零值意外改变已有绑定。普通授权操作者必须原样保留绑定；需修改绑定时由有权限的系统管理员处理。
 
-权限键：config.read（读配置）、config.write（改名称）、policy.write（改策略）、mcp.write（配置 MCP）、knowledge.read（读已发布知识）、knowledge.write（维护知识）、query（改写查询）、raw_query（绕过行字段策略的只读查询）、audit.read（审计）、grant（授权）、impersonate（模拟业务身份）。知识读取独立于 query：本库有 knowledge.read 即可读取全部已发布知识；业务 MCP 还需开启 MCP 与知识 Prompts。
+权限键：config.read（读配置）、config.write（改名称）、policy.write（改策略）、mcp.write（配置 MCP）、knowledge.read（读已发布知识）、knowledge.write（维护知识）、query（改写查询）、raw_query（绕过行字段策略的只读查询）、audit.read（审计）、grant（授权）、impersonate（模拟业务身份）。知识读取独立于 query：本库有 knowledge.read 即可读取全部已发布知识；业务 MCP 还需开启 MCP 与知识工具。
 
 撤销全部数据库权限示例：
 

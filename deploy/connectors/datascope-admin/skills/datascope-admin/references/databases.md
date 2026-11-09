@@ -63,7 +63,7 @@ SQLite 创建时建立完整快照；网络源先登记 Schema 范围、再选�
 
 认证连接来源：`authentication.source` 为 `GLOBAL`（或省略）时引用全局提供方；为 `DATABASE` 时必须同时给出 `authentication.provider` 和 `authentication.access`，且 `access.provider_id` 与本库提供方 ID 一致。独立提供方字段与全局 AuthProvider 相同，支持 BUSINESS_ACCOUNT、DEMO_OAUTH、ENTERPRISE_ACCOUNT_API、ENTERPRISE_OAUTH，禁止 PLATFORM_ACCOUNT。无需认证时使用 GLOBAL 且省略 provider / provider_id。本库连接只保存在该库的 management/authentication.yml，失败不回退；企业密钥使用 DATASCOPE_AUTH_* 环境变量名。保存仍需要系统管理员和最新数据库版本。OAuth 资源发现自动发布最终选定的 issuer。
 
-知识使用独立 knowledge_enabled 开关，通过 prompts/list 和 prompts/get 提供，不是 tools 里的查询模板。旧 search_knowledge/read_knowledge 工具项仅用于读取旧配置时映射开关，业务 MCP 不再发布它们。
+知识使用独立 knowledge_enabled 开关，统一控制 search_knowledge 和 read_knowledge 两个只读工具的发现与调用，不需要逐项加入 tools。显式 true/false 优先；旧配置缺少 knowledge_enabled 时，tools 中任一旧知识工具项兼容映射为开启，工作台保存 MCP 配置时清理旧项。search 的 keyword 可选，留空分页返回全部可读已发布条目；read 按精确 id 返回正文。知识 Prompts 已下线，视图 Resources 保留。
 
 ## 克隆配置
 
