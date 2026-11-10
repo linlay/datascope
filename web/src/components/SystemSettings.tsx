@@ -4,6 +4,7 @@ import { Button, Card, Drawer, Select, Space, Typography } from 'antd';
 import { usePreferences, type Appearance, type Language } from '../ui/preferences';
 import { useAuth } from '../Auth';
 import { PlatformUsersDialog } from './PlatformUsers';
+import { appURL } from '../api';
 
 export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
  const {language,setLanguage,appearance,setAppearance,t}=usePreferences();
@@ -30,7 +31,7 @@ export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
    {user.system_admin&&<Card size="small" title="全局认证"><p>配置普通账号、企业认证、演示 OAuth 与接口绑定。</p><Button onClick={()=>setAuthOpen(true)}>认证配置</Button></Card>}
    <Card size="small" title={t('管理连接器')}>
     <Typography.Paragraph>{t('使用平台账号授权，权限与管理后台一致。')}</Typography.Paragraph>
-    <Button type="primary" href="/api/connectors/datascope-admin.zip">{t('下载连接器 ZIP')}</Button>
+    <Button type="primary" href={appURL('/api/connectors/datascope-admin.zip')}>{t('下载连接器 ZIP')}</Button>
    </Card>
   </Space>
  </Drawer>

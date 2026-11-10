@@ -9,6 +9,7 @@ const target = { target: adminApi, changeOrigin: false };
 const proxy = { '/auth': target, '/api': target, '/actions': target, '/healthz': target };
 
 export default defineConfig({
+  base: process.env.VITE_BASE_PATH ?? '/',
   esbuild: { jsx: 'automatic' },
   server: { host: '127.0.0.1', port, strictPort: true, proxy },
   preview: { host: '127.0.0.1', port, strictPort: true, proxy },

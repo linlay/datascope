@@ -1,5 +1,11 @@
 // Typed client for the Go admin API (proxied at /api by the dev server).
 
+const appBase = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+export function appURL(path: string): string {
+  return `${appBase}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 export type Scheme = string;
 export type Row = Record<string, unknown>;
 
@@ -248,12 +254,17 @@ export const databases = {
  annotate: (id:string,table:string,column:string,revision:number,annotation:Annotation) => managementCall<Database>('save_annotation',{database_id:id,table,column,revision,annotation}),
  get: (id: string) => request<Database>(`/api/databases/${encodeURIComponent(id)}`),
  test: (body: NewDatabase) => {const {password,...database}=body;return managementCall<{connected:boolean;table_count:number;schemas:string[];empty:boolean}>('test_database_connection', {database,password});},
+ importFile: (name: string, file: File) => {
+   const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'sqlite';
+   const params = new URLSearchParams({name, format});
+   return request<Database>(`/api/databases/import?${params}`, {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body:file});
+ },
  add: (body: NewDatabase) => post<Database>('/api/databases', body),
  save: (body: Database) => request<Database>(`/api/databases/${encodeURIComponent(body.id)}`, {method:'PUT', body: JSON.stringify(body)}),
 };
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
  if (path.startsWith('/api/') && !path.startsWith('/api/databases')) path = `/api/databases/${encodeURIComponent(selectedDatabase)}/${path.slice(5)}`;
-  const response = await fetch(path, {
+  const response = await fetch(appURL(path), {
  credentials: "same-origin",
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -321,7 +332,7 @@ export interface AuditResult {items:AuditEvent[];total:number;limit:number;offse
 
 // Global platform endpoints must never be rewritten into a selected database path.
 export async function platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
- const response=await fetch(path,{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});
+ const response=await fetch(appURL(path),{...init,credentials:'same-origin',headers:{'Content-Type':'application/json',...init?.headers}});
  const data=await response.json().catch(()=>({}));
  if(!response.ok){if(response.status===401&&!path.endsWith('/login'))window.dispatchEvent(new Event('platform-session-expired'));throw new ApiError(data.error||String(response.status),response.status,data);}
  return data as T;

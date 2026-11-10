@@ -1,8 +1,14 @@
 import { SaveButton } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
-import { Alert, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
-import { databases, managementCall, type Database } from '../api';
+import { Alert, Button, Card, Checkbox, Input, Space, Switch, Tag, Typography, message } from 'antd';
+import { appURL, databases, managementCall, type Database } from '../api';
+
+import { buildConnectorZip } from '../connectorZip';
+
+function databaseEndpoint(db: Database) {
+  return new URL(db.mcp_endpoint || appURL(`/mcp/${db.mcp_path || db.id}`), window.location.origin);
+}
 
 const { Text } = Typography;
 const toolOptions = [
@@ -28,6 +34,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
 
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -47,7 +54,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   if (!db) return <Card loading={!error}>{error && <Alert type="error" title={error} />}</Card>;
 
   const pathValid = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(mcpPath);
-  const endpoint = new URL(db.mcp_endpoint || `/mcp/${db.mcp_path || db.id}`, window.location.origin);
+  const endpoint = databaseEndpoint(db);
   const prefix = endpoint.pathname.slice(0, endpoint.pathname.lastIndexOf('/') + 1);
   const originalTools=db.tools.filter(name=>!['search_knowledge','read_knowledge'].includes(name));
  const canConfigureActions = !!db.permissions?.includes('action.write');
@@ -56,6 +63,23 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
  const writeAccountValid = !needsWriteAccount || !!writeUsername.trim() && (!!db.write_connection || !!writePassword);
  const writeAccountChanged = needsWriteAccount && (writeUsername !== (db.write_connection?.username || '') || !!writePassword);
  const dirty = writeEnabled !== !!db.write_enabled || writeAccountChanged || knowledgeEnabled!==(db.knowledge_enabled??db.tools.some(name=>['search_knowledge','read_knowledge'].includes(name))) || mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== originalTools.length || tools.some((tool) => !originalTools.includes(tool));
+  const downloadConnector = async () => {
+    setExporting(true);
+    try {
+      const current = await databases.get(id);
+      const { bytes, filename } = buildConnectorZip(current, databaseEndpoint(current));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      message.error(t((e as Error).message));
+    } finally {
+      setExporting(false);
+    }
+  };
   const save = async () => {
     setSaving(true);
     setError(undefined);
@@ -99,6 +123,10 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
             <Input aria-label={t("MCP 路径")} disabled={!db.permissions?.includes('mcp.write') || saving} addonBefore={prefix} value={mcpPath} onChange={(e) => setMcpPath(e.target.value)} status={!pathValid ? 'error' : undefined} placeholder={t("自定义路径，例如 securities")} maxLength={64} />
             {!pathValid && <Text type="danger">{t("请输入字母或数字开头的路径，仅允许字母、数字、下划线和连字符，最多 64 位。")}</Text>}
             <div className="mcp-current-address"><Text type="secondary">{t("当前地址")}：</Text><Text copyable={{ text: endpoint.href }} className="mono">{endpoint.href}</Text></div>
+            {db.access && <Space wrap>
+              <Button disabled={dirty || saving || !db.mcp_enabled || db.id !== id} loading={exporting} onClick={downloadConnector}>{t('下载连接器 ZIP')}</Button>
+              {dirty && <Text type="secondary">{t('保存 MCP 配置后即可导出')}</Text>}
+            </Space>}
           </Space>
           <section className="mcp-capability-section" aria-label={t("Tools · 工具")} >
             <Text strong>{t("Tools · 工具")}</Text>

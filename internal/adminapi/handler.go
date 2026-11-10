@@ -42,17 +42,23 @@ func Handler(svc *service.QueryService, inspector *Inspector) http.Handler {
 }
 
 // localhostOnlyHost mirrors the MCP SDK's DNS rebinding protection: on a
-// loopback listener, reject requests whose Host is not a loopback name.
+// loopback listener, reject requests whose Host is not a loopback name. The
+// combined Docker image deliberately proxies public requests from its local
+// nginx process, which preserves the public Host so same-origin checks work.
 func localhostOnlyHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if local, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && local != nil {
-			if isLoopback(local.String()) && !isLoopback(r.Host) {
+			if isLoopback(local.String()) && !isLoopback(r.Host) && !trustedLoopbackProxy(r) {
 				http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func trustedLoopbackProxy(r *http.Request) bool {
+	return r.Header.Get("X-Datascope-Proxy") == "1" && isLoopback(r.RemoteAddr)
 }
 
 func isLoopback(hostport string) bool {

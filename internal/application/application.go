@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 )
@@ -31,6 +32,7 @@ type Input struct {
 	PlanID         string                         `json:"plan_id,omitempty"`
 	ExecutionID    string                         `json:"execution_id,omitempty"`
 	Changes        []ddl.Change                   `json:"changes,omitempty"`
+	Upload         io.Reader                      `json:"-"`
 	TableNames     []string                       `json:"table_names,omitempty"`
 	CreateSQLite   bool                           `json:"create_sqlite,omitempty"`
 	Parameters     map[string]any                 `json:"parameters,omitempty"`
@@ -330,7 +332,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		}
 		var d *catalog.Database
 		var e error
-		if in.CreateSQLite {
+		if in.Upload != nil {
+			d, e = s.Catalog.ImportFile(ctx, in.Database.Name, in.Kind, in.Upload)
+		} else if in.CreateSQLite {
 			if in.Password != "" {
 				return nil, errors.New("SQLite 不接受密码")
 			}
@@ -342,6 +346,14 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *d), nil
+	case "remove_database":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if err := s.Management.RemoveSource(ctx, in.DatabaseID); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"removed": true}, nil
 	case "edit_sqlite_schema":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied

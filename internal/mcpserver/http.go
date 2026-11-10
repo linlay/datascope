@@ -25,7 +25,10 @@ func httpHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer
 	if mode != "oauth" && mode != "header" && mode != "none" {
 		return nil, fmt.Errorf("unknown MCP_AUTH_MODE %q", mode)
 	}
-	h := http.Handler(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: stateless}))
+	h := http.Handler(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
+		Stateless:                  stateless,
+		DisableLocalhostProtection: true,
+	}))
 	mux := http.NewServeMux()
 	if mode == "oauth" {
 		issuer = strings.TrimRight(issuer, "/")
@@ -43,6 +46,10 @@ func httpHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer
 		}
 		metadata := auth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{Resource: resource, AuthorizationServers: []string{issuer}, ScopesSupported: scopes, BearerMethodsSupported: []string{"header"}})
 		mux.Handle(metaPath, metadata)
+		localMetaPath := "/.well-known/oauth-protected-resource" + strings.TrimRight(path, "/")
+		if localMetaPath != metaPath && localMetaPath != "/.well-known/oauth-protected-resource" {
+			mux.Handle(localMetaPath, metadata)
+		}
 		if metaPath != "/.well-known/oauth-protected-resource" {
 			mux.Handle("/.well-known/oauth-protected-resource", metadata)
 		}

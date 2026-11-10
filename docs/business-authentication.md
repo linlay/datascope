@@ -13,6 +13,12 @@
 
 认证配置优先使用本库 `authentication.access`，其次使用逐库 `policyId` 绑定，最后使用全局业务默认策略。`MCP_AUTH_MODE=oauth` 不能覆盖本库明确保存的 NONE/TOKEN/ONEID 策略。更新 Docker 镜像会保留挂载数据中的策略。
 
+## 导出 gen-agent 连接器
+
+在「数据库配置 → 业务认证」保存认证方式，再打开同一数据库的「MCP 配置」。开启 MCP 并保存后，点击当前地址旁的「下载连接器 ZIP」，即可将下载的 ZIP 导入 gen-agent。导出会重新读取本库生效的地址、认证策略及提供方；地址应能从 gen-agent 访问。
+
+无需认证和 MCP OAuth 由平台按对应模式处理。企业 SSO 由 Desktop 提供 ID Token。静态密钥在导入后的凭据表单填写，连接器自动使用本库配置的请求头。账号密码方式导出为个人业务 Token 表单，可通过本库业务登录页获取 Token。包中仅包含连接器声明、MCP 地址和必要的凭据模板。
+
 ## OneID
 
 在“企业 SSO → 本库独立配置”填写受信任的签发方 Issuer、公钥 JWKS 地址及 Desktop ID Token 的接收方 Audience；也可在全局认证设置中定义 ONEID 提供方并引用。地址要求 HTTPS，本机回环 HTTP 仅用于测试。Platform 选择 `oneid` 并使用 HTTPS 默认端口的完整 MCP 地址，无需额外 OAuth 登录。
