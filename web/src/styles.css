@@ -466,3 +466,12 @@ details > summary {
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-tab { padding-block: 4px; font-size: 14px; line-height: 24px; }
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-ink-bar { height: 2px; }
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-extra-content { display: flex; align-items: center; }
+
+.user-guide { line-height: 1.75; overflow-wrap: anywhere; }
+.user-guide pre { overflow-x: auto; padding: 12px; background: rgba(128,128,128,.1); border-radius: 6px; }
+.user-guide table { border-collapse: collapse; width: 100%; }
+.user-guide th, .user-guide td { border: 1px solid rgba(128,128,128,.35); padding: 6px 10px; text-align: start; }
+.assistant-comparison { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:12px; }
+.assistant-comparison pre { overflow:auto; max-height:320px; padding:10px; background:var(--ant-color-fill-quaternary); border:1px solid var(--ant-color-border-secondary); }
+.assistant-comparison .added { background:rgba(60,170,91,.17); }
+.assistant-comparison .removed { background:rgba(205,72,66,.15); }

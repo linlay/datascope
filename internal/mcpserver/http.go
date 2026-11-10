@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/management"
 	"datascope-server/internal/oauth"
@@ -104,6 +105,7 @@ func HTTPHandlerWithManagement(server *mcp.Server, st *store.Store, mode, issuer
 			if e != nil {
 				return nil, auth.ErrInvalidToken
 			}
+			audit.UpdateRequest(ctx, "", u.ID)
 			return &auth.TokenInfo{UserID: strconv.FormatInt(u.ID, 10), Expiration: time.Now().Add(10 * time.Second), Scopes: []string{"sql:query"}}, nil
 		}
 		auth.RequireBearerToken(verify, &auth.RequireBearerTokenOptions{ResourceMetadataURL: u.Scheme + "://" + u.Host + metaPath})(unsigned).ServeHTTP(w, r)

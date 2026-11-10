@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 )
 
 type responseStatus struct {
@@ -61,10 +62,8 @@ func HTTPHandler(s *Store, source string, next http.Handler) http.Handler {
 			Method string `json:"method"`
 			SQL    string `json:"sql"`
 			Params struct {
-				Name      string `json:"name"`
-				Arguments struct {
-					SQL string `json:"sql"`
-				} `json:"arguments"`
+				Name      string                     `json:"name"`
+				Arguments map[string]json.RawMessage `json:"arguments"`
 			} `json:"params"`
 		}
 		_ = json.Unmarshal(raw, &request)
@@ -72,7 +71,8 @@ func HTTPHandler(s *Store, source string, next http.Handler) http.Handler {
 		meta.Source = source
 		meta.Tool = request.Params.Name
 		r = r.WithContext(With(r.Context(), meta))
-		original := request.Params.Arguments.SQL
+		var original string
+		_ = json.Unmarshal(request.Params.Arguments["sql"], &original)
 		if original == "" {
 			original = request.SQL
 		}
@@ -84,6 +84,13 @@ func HTTPHandler(s *Store, source string, next http.Handler) http.Handler {
 		if e != nil {
 			http.Error(w, "audit unavailable", 503)
 			return
+		}
+		if kind == "mcp.request" {
+			detail := map[string]any{"method": request.Method}
+			if request.Method == "tools/call" {
+				detail["arguments"] = requestArguments(request.Params.Arguments)
+			}
+			event.Detail = detail
 		}
 		r = r.WithContext(context.WithValue(r.Context(), httpEventKey{}, event))
 		status := &responseStatus{ResponseWriter: w}
@@ -99,7 +106,47 @@ func HTTPHandler(s *Store, source string, next http.Handler) http.Handler {
 	})
 }
 
+// Preserve scalar routing and query options. Dynamic payloads may contain
+// credentials or business data, so record their field names only.
+func requestArguments(args map[string]json.RawMessage) map[string]any {
+	out := map[string]any{}
+	for key, raw := range args {
+		switch key {
+		case "table", "view_id", "max_rows", "user_id", "as_of", "id", "name", "request_id", "result_only", "keyword", "action", "resourceType", "database_id", "limit", "offset":
+			var scalar any
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			if len(raw) <= 2048 && decoder.Decode(&scalar) == nil {
+				switch scalar.(type) {
+				case string, json.Number, bool:
+					out[key] = scalar
+				}
+			}
+		case "args", "arguments", "parameters":
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(raw, &fields) == nil {
+				names := make(map[string]string, len(fields))
+				for field := range fields {
+					names[field] = "[redacted]"
+				}
+				out[key] = names
+			}
+		}
+	}
+	return out
+}
+
 type httpEventKey struct{}
+
+func SetRequestBusinessIdentity(ctx context.Context, accountID, subjectID int64, username string) {
+	if event, ok := ctx.Value(httpEventKey{}).(*Event); ok {
+		event.SubjectID = subjectID
+		event.BusinessUsername = username
+		if accountID != 0 {
+			event.BusinessAccountID = strconv.FormatInt(accountID, 10)
+		}
+	}
+}
 
 func UpdateRequest(ctx context.Context, database string, actor int64) {
 	if event, ok := ctx.Value(httpEventKey{}).(*Event); ok {

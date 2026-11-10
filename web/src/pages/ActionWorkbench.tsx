@@ -3,6 +3,7 @@ import { Alert, Button, Card, Empty, Input, InputNumber, Space, Spin, Table, Tab
 import type { ActionDescription, ActionPreview, ActionSchema, Database } from '../api';
 import { useAuth } from '../Auth';
 import { CodeEditor } from '../components/CodeEditor';
+import { TrialAssistant } from '../components/ActionAssistant';
 import BusinessActionWorkbench from '../components/BusinessActionWorkbench';
 import { HelpTip } from '../components/HelpTip';
 import { BusinessPreviewHelp } from '../components/BusinessPreviewHelp';
@@ -35,6 +36,7 @@ function ActionWorkflow({ db }: { db: Database }) {
  const [selected, setSelected] = useState('');
  const [filter, setFilter] = useState('');
  const [args, setArgs] = useState('{}');
+ const [expected,setExpected]=useState('');
  const requestedIdentity=Number(route.params.get('identity'));
  const identity=Number.isSafeInteger(requestedIdentity)&&requestedIdentity>0?requestedIdentity:db.business_user_id||1;
  const [requestID, setRequestID] = useState('');
@@ -63,7 +65,7 @@ function ActionWorkflow({ db }: { db: Database }) {
  };
  const describe = async (name: string, sync=true) => {
   const request = ++detailSequence.current;
-  selectedRequest.current=name;
+  selectedRequest.current=name; setExpected('');
   resetTrial(); setSelected(name); setDetail(undefined); setDescribing(true); setArgs('{}');
   if(sync){selectResource(name);setDetailTab('parameters',true);}
   const result = await invoke<ActionDescription>(db.id, 'describe_action', { name });
@@ -137,6 +139,7 @@ function ActionWorkflow({ db }: { db: Database }) {
        <label><span>request_id</span><Space.Compact block><Input aria-label="request_id" value={requestID} maxLength={128} disabled={running} onChange={event => { setRequestID(event.target.value); setTrial(undefined); setValidation(''); }} /><Button disabled={running} onClick={resetTrial}>{t('新请求')}</Button></Space.Compact></label>
       </div>
       <div className="action-trial-arguments"><div className="action-trial-arguments-heading"><Typography.Text>{t('调用参数 JSON')}</Typography.Text><Button size="small" disabled={running} onClick={() => { setArgs(argumentTemplate(schema)); resetTrial(); }}>{t('填入参数模板')}</Button></div><CodeEditor language="json" height="200px" value={args} onChange={value => { setArgs(value); resetTrial(); }} readOnly={running} /></div>
+      {canImpersonate && db.permissions?.includes('config.read') && db.permissions.includes('action.write') && <TrialAssistant key={action.name} db={db} name={action.name} trial={trial} args={args} identity={identity} requestID={requestID} running={running} expected={expected} setExpected={setExpected} applyArgs={value=>{setArgs(value);resetTrial();}}/>}
       {validation && <Alert type="error" showIcon title={validation} />}
       <Space wrap><Button type="primary" onClick={() => void run()} loading={running} disabled={!db.write_enabled || !canImpersonate}>{t(trial?.data ? '再次获取结果' : '试运行（回滚）')}</Button><Typography.Text type="secondary">{t('同一 request_id 重用结果；修改参数或身份后自动生成新请求。')}</Typography.Text></Space>
       {trial && <div className="action-trial-result">

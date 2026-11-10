@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
@@ -81,6 +82,7 @@ func policyAuthentication(next http.Handler, c *catalog.Catalog, d *catalog.Data
 			http.Error(w, "身份认证失败", 401)
 			return
 		}
+		audit.SetRequestBusinessIdentity(r.Context(), a.ID, a.BusinessUserID, a.Username)
 		next.ServeHTTP(w, r.WithContext(guard.WithBusiness(r.Context(), a)))
 	})
 }

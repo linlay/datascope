@@ -29,6 +29,8 @@ type Metadata struct {
 	PolicyVersion int    `json:"policy_version"`
 }
 type Event struct {
+	BusinessAccountID string `json:"business_account_id,omitempty"`
+	BusinessUsername  string `json:"business_username,omitempty"`
 	Metadata
 	ID           string `json:"id"`
 	Kind         string `json:"kind"`
