@@ -55,7 +55,7 @@ function run(args, ctx) {
 
 需要复用校验或业务逻辑时，在当前数据库创建公共函数库，用 `export function` 导出函数，在动作中用 `import { 函数名 } from "库名称"` 引入。
 
-**AI 辅助**需要本库的 `config.read` 和 `action.write`。管理员在 admin-api 设置 `DATASCOPE_AI_ENDPOINT`、`DATASCOPE_AI_MODEL` 和提供商所需的 `DATASCOPE_AI_KEY` 后重启服务。在动作编辑器输入需求，例如“只允许修改 items 表中 owner_id 等于当前业务身份的记录，按 id 修改 name”。助手会使用当前草稿、库方言、已启用表的字段和公共库函数。如果出现澄清问题，在需求中补充答案后重新生成。对照当前草稿和建议，分别勾选参数、脚本，再点“应用到草稿”。检查后点击“保存”。模型离线时仍可手工编辑。
+**AI 辅助**需要本库的 `config.read` 和 `action.write`。管理员在 admin-api 设置 `DATASCOPE_AI_ENDPOINT`、`DATASCOPE_AI_MODEL` 和提供商所需的 `DATASCOPE_AI_KEY` 后重启服务。端点可填以 `/v1` 结尾的基址或完整的 `/v1/chat/completions` 地址。若提供商返回 HTTP 404，核对端点和模型名称。后台逐段接收模型输出，默认等待首段或后续有效增量的空闲时限为 30 秒。完整建议校验后显示。管理员可通过 `DATASCOPE_AI_TIMEOUT` 调整等待时间，并按整次生成耗时配置入口代理。在动作编辑器输入需求，例如“只允许修改 items 表中 owner_id 等于当前业务身份的记录，按 id 修改 name”。助手会使用当前草稿、库方言、已启用表的字段和公共库函数。如果出现澄清问题，在需求中补充答案后重新生成。对照当前草稿和建议，分别勾选参数、脚本，再点“应用到草稿”。检查后点击“保存”。模型离线时仍可手工编辑。
 
 ## 动作工作台、试运行与正式执行
 
