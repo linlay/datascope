@@ -26,6 +26,10 @@ type Preview struct {
 	Writes []Write `json:"writes"`
 }
 
+type Denial string
+
+func (d Denial) Error() string { return string(d) }
+
 var ErrOutcomeUnknown = errors.New("事务结果未知，请核对审计，禁止自动重试")
 
 type Runner struct {
@@ -90,7 +94,7 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 		}
 		panic(vm.NewGoError(e))
 	}
-	vm.Set("deny", func(c goja.FunctionCall) goja.Value { return abort(fmt.Errorf("%s", c.Argument(0).String())) })
+	vm.Set("deny", func(c goja.FunctionCall) goja.Value { return abort(Denial(c.Argument(0).String())) })
 	out = &Preview{Writes: []Write{}}
 	for _, s := range sites {
 		site := s

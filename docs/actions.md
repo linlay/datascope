@@ -95,6 +95,16 @@ function run(args, ctx) {
 
 UPDATE / DELETE 必须有 WHERE，并建议再次包含所有关键权限和状态条件、检查影响行数。普通 INSERT、UPDATE、DELETE 经 AST 编译为各数据库的参数和引用形式；网络库暂不支持 DML 的 WITH、UPDATE FROM、RETURNING、UPSERT、冲突处理、DELETE ORDER/LIMIT。SQLite 也禁止事务控制、DDL、PRAGMA、ATTACH、REPLACE、RETURNING 和冲突处理。写入账号本身应只获得必需表的权限。
 
+## 动作 AI 助手
+
+admin-api 的 `DATASCOPE_AI_ENDPOINT` 指向兼容 Chat Completions 的完整端点（包括 `/v1/chat/completions`），模型需支持 JSON 对象响应。`DATASCOPE_AI_MODEL` 选择模型，`DATASCOPE_AI_KEY` 仅配置在服务端，`DATASCOPE_AI_TIMEOUT` 默认为 30s。使用外部模型时，动作草稿与选定的结构元数据会发送到该端点。服务端记录模型、耗时、状态和提供商返回的 token 用量。
+
+控制台通过管理接口 `assist_action` 发送数据库标识、revision、已保存的动作名（新增时省略）和 assistant。draft 模式允许提交当前编辑中的定义，test 使用已保存定义生成示例，diagnose 用当前平台账号的 request_id 查找回滚回执。参数校验失败可从提交给平台的参数重建诊断。助手不会调用脚本、保存或发布。生成建议经过参数、模块和静态 SQL 校验，业务归属语义仍需作者审查并以不同身份试运行。
+
+其他业务场景可向应用服务注入同一个 `internal/ai.Client`，用自己的权限、提示词和输出类型调用 `Complete(ctx, ai.Request{Messages: ..., JSONObject: true})`，再校验返回内容。普通文本可省略 JSONObject。测试中用 `ai.Func` 实现固定或失败响应。术语提取的测试调用方位于 `internal/platform/terms_test.go`。
+
+离线验收使用 `go test ./internal/ai ./internal/action ./internal/platform`。浏览器闭环还需先运行 `npm --prefix web run build`，安装 Playwright 与 Chromium，设置 `DATASCOPE_ASSISTANT_BROWSER_NODE=node` 后执行 `go test ./internal/platform -run '^TestAssistantBrowser$' -count=1 -v`。可用 `DATASCOPE_PLAYWRIGHT` 指定模块路径、`DATASCOPE_CHROMIUM` 指定浏览器路径。测试启动隔离的 admin-api 和 SQLite 夹具，使用模拟模型。
+
 ## MCP 调用和人工确认
 
 ```json

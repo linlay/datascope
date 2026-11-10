@@ -764,6 +764,7 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 			return nil, bad
 		}
 		audit.UpdateRequest(ctx, v.DatabaseID, 0)
+		audit.SetRequestBusinessIdentity(ctx, a.ID, a.BusinessUserID, a.Username)
 		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID, "business_account": a}}, nil
 	}
 	if databaseIdentity(c.Identity) {
@@ -778,11 +779,11 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 		if e != nil || !u.Active || u.AuthVersion != c.Version || c.Identity != "platform" {
 			return nil, bad
 		}
-		audit.UpdateRequest(ctx, v.DatabaseID, u.ID)
 		scopes := strings.Fields(c.Scope)
 		if slices.Contains(scopes, "sql:debug") && !u.SystemAdmin {
 			return nil, bad
 		}
+		audit.UpdateRequest(ctx, v.DatabaseID, u.ID)
 		return &auth.TokenInfo{UserID: strconv.FormatInt(u.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes}, nil
 	}
 	us, e := v.Store.Users(ctx)
@@ -795,6 +796,7 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 			if slices.Contains(scopes, "sql:debug") && u.RoleCode != "ADMIN" {
 				return nil, bad
 			}
+			audit.SetRequestBusinessIdentity(ctx, u.ID, u.ID, u.EmpNo)
 			return &auth.TokenInfo{UserID: strconv.FormatInt(u.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"emp_no": c.Sub}}, nil
 		}
 	}

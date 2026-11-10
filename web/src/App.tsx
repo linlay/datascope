@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Spin, Tag, type MenuProps } from 'antd';
 import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined, LayoutOutlined, DesktopOutlined } from '@ant-design/icons';
+import { UserGuide } from './components/UserGuide';
 import { SystemSettings } from './components/SystemSettings';
 import { usePreferences } from './ui/preferences';
 import { QueryConfiguration } from './pages/QueryConfiguration';
@@ -96,7 +97,7 @@ export function App() {
       <Layout style={{ minHeight: '100vh', background: 'transparent' }}>
         <Layout.Header className="app-header">
           <Space><span className="app-title">DataScope</span><Select aria-label={t("切换数据库")} value={current?.id} onChange={switchDB} style={{width:190}} options={items.map(d=>({value:d.id,label:<Space size={6}><DatabaseIcon driver={d.driver}/>{d.name}</Space>}))}/>{user.system_admin&&<Button onClick={()=>{setError(undefined);setTestResult(undefined);setAdding(true);}}>{t("＋ 数据库")}</Button>}</Space>
-          <Space><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>{t('退出')}</Button><Button aria-label={t('系统设置')} title={t('系统设置')} icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}/></Space>
+          <Space><UserGuide/><Tag color="blue">{user.name||user.username}</Tag><Button onClick={logout}>{t('退出')}</Button><Button aria-label={t('系统设置')} title={t('系统设置')} icon={<SettingOutlined/>} onClick={()=>setSettingsOpen(true)}/></Space>
         </Layout.Header>
         <Layout className="workspace-layout" style={{background:'transparent'}}>
         <Layout.Sider className="workspace-sidebar" theme={dark?'dark':'light'} width={208} breakpoint="lg" collapsedWidth={56}>

@@ -2,6 +2,8 @@
 
 Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle 和达梦 DM8 业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
 
+登录后点击控制台右上角「使用帮助」阅读[用户手册](web/src/help/guide.zh-CN.md)。在动作编辑器旁点击「脚本接口手册」可直接查看内置函数和示例。
+
 ## 启动
 
 需要 Go 1.26、Node 22+。

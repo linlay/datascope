@@ -3,10 +3,12 @@ import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, ReloadO
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
 import { databases, managementCall, type Database, type ActionDefinition } from '../api';
 import { ActionLibraries } from '../components/ActionLibraries';
+import { DraftAssistant } from '../components/ActionAssistant';
 import { CodeEditor } from '../components/CodeEditor';
 import { PublicationSwitch } from '../components/PublicationSwitch';
 import { ActionConfirmationHelp } from '../components/ActionConfirmationHelp';
 import { IconButton, SaveButton } from '../components/IconButton';
+import { UserGuide } from '../components/UserGuide';
 import { HelpTip } from '../components/HelpTip';
 import { ParameterEditor, parameterMap, parameterRows, type ParameterRow } from '../components/ParameterEditor';
 import { useI18n } from '../ui/preferences';
@@ -15,7 +17,7 @@ import { selectResource, useNavigationBlocker, useRoute } from '../navigation';
 const example: ActionDefinition = {
  name: '', title: '', description: '', confirm: true, published: false,
  parameters: { id: { type: 'integer', description: '记录编号' }, value: { type: 'string', description: '新值', max_length: 200 } },
- script: 'function run(args, ctx) {\n  const row = my.one`SELECT id FROM records WHERE id = ${args.id}`;\n  if (!row) deny("记录不存在或无权查看");\n  const n = db.exec`UPDATE records SET value = ${args.value} WHERE id = ${args.id}`;\n  if (n !== 1) deny("记录已变化，请重试");\n  return { id: args.id, updated: n };\n}',
+ script: 'function run(args, ctx) {\n  const row = my.one`SELECT id FROM records WHERE id = ${args.id}`;\n  if (!row) deny("记录不存在或无权查看");\n  const n = db.exec`UPDATE records SET value = ${args.value} WHERE id = ${args.id} AND owner_id = ${ctx.userId}`;\n  if (n !== 1) deny("记录已变化，请重试");\n  return { id: args.id, updated: n };\n}',
 };
 type ActionFields = Omit<ActionDefinition, 'parameters'>;
 const fieldsOf = (action: ActionFields): ActionFields => ({ published: action.published !== false, view_id: action.view_id, name: action.name, title: action.title, description: action.description, confirm: action.confirm, script: action.script });
@@ -165,6 +167,12 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<IconButton label={t('刷新')} icon={<ReloadOutlined />} onClick={reload} />} />}
+     {draft && canWrite && currentDB.permissions?.includes('config.read') && !locked && !remoteChanged &&
+      <DraftAssistant key={JSON.stringify([currentDB.id, selectedName, creating])} db={currentDB} name={creating ? undefined : selectedName} draft={draft} rows={parameters}
+       apply={(script, params) => {
+        if (script !== undefined) { form.setFieldValue('script', script); setDraft({ ...draft, script }); }
+        if (params) setParameters(parameterRows(params));
+       }} />}
      {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
       <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
       <div className="action-fields-grid">
@@ -174,7 +182,7 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
        <Form.Item name="view_id" label={t("关联视图")}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
        <Form.Item name="confirm" label={<Space size={4}>{t('人工确认')}<ActionConfirmationHelp /></Space>} valuePropName="checked"><Switch /></Form.Item>
       </div>
-      <Form.Item name="script" label={<Space size={4}>JavaScript · run(args, ctx)<HelpTip label={t('动作代码')}>{t('my.one / my.all 按查询权限读取，db.exec 使用 SQL 模板写入。人工确认动作先预览，再由用户确认执行。')}{' '}{t('可用 import { fn1, fn2 } from "库名称" 引用当前数据库的公共函数。')}</HelpTip></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
+      <Form.Item name="script" label={<Space size={4}>JavaScript · run(args, ctx)<HelpTip label={t('动作代码')}>{t('my.one / my.all 按查询权限读取，db.exec 使用 SQL 模板写入。人工确认动作先预览，再由用户确认执行。')}{' '}{t('可用 import { fn1, fn2 } from "库名称" 引用当前数据库的公共函数。')}</HelpTip><UserGuide scriptReference/></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
       <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
      </Form> : <Empty description={t('从左侧选择动作，或新增一个动作。')} />}
     </Space>

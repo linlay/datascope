@@ -3,6 +3,7 @@ package application
 
 import (
 	"context"
+	"datascope-server/internal/ai"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/guard"
@@ -18,6 +19,7 @@ import (
 )
 
 type Service struct {
+	Model            ai.Client
 	Management       *management.Store
 	Catalog          *catalog.Catalog
 	WebURL           string
@@ -26,6 +28,7 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	Assistant      *AssistantInput                `json:"assistant,omitempty"`
 	Upload         io.Reader                      `json:"-"`
 	TableNames     []string                       `json:"table_names,omitempty"`
 	CreateSQLite   bool                           `json:"create_sqlite,omitempty"`
@@ -156,6 +159,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, errors.New("需要 action 名称，请先调用 list_actions")
 		}
 		return s.InspectAction(ctx, in.DatabaseID, in.Name)
+	case "assist_action":
+		return s.assistAction(ctx, in)
 	case "try_action":
 		if e := require("action.write"); e != nil {
 			return nil, e
