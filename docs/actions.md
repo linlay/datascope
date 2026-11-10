@@ -97,7 +97,7 @@ UPDATE / DELETE 必须有 WHERE，并建议再次包含所有关键权限和状�
 
 ## 动作 AI 助手
 
-admin-api 的 `DATASCOPE_AI_ENDPOINT` 指向兼容 Chat Completions 的完整端点（包括 `/v1/chat/completions`），模型需支持 JSON 对象响应。`DATASCOPE_AI_MODEL` 选择模型，`DATASCOPE_AI_KEY` 仅配置在服务端，`DATASCOPE_AI_TIMEOUT` 默认为 30s。使用外部模型时，动作草稿与选定的结构元数据会发送到该端点。服务端记录模型、耗时、状态和提供商返回的 token 用量。
+admin-api 的 `DATASCOPE_AI_ENDPOINT` 可填写以 `/v1` 结尾的网关基址或完整的 Chat Completions 端点，模型需支持 JSON 对象响应。`DATASCOPE_AI_MODEL` 选择模型，`DATASCOPE_AI_KEY` 仅配置在服务端，`DATASCOPE_AI_TIMEOUT` 默认为 30s，限制等待首个有效输出和后续连续空闲的时间。客户端请求流式响应，每段正文或推理增量都会重新计时。助手在流结束并校验完整 JSON 后返回建议。若首段输出较慢，可设置 `DATASCOPE_AI_TIMEOUT=120s` 后重启服务。入口代理仍需覆盖整次生成耗时；仓库 Docker 配置为管理调用预留 180s。使用外部模型时，动作草稿与选定的结构元数据会发送到该端点。服务端记录模型、耗时、状态和提供商返回的 token 用量。
 
 控制台通过管理接口 `assist_action` 发送数据库标识、revision、已保存的动作名（新增时省略）和 assistant。draft 模式允许提交当前编辑中的定义，test 使用已保存定义生成示例，diagnose 用当前平台账号的 request_id 查找回滚回执。参数校验失败可从提交给平台的参数重建诊断。助手不会调用脚本、保存或发布。生成建议经过参数、模块和静态 SQL 校验，业务归属语义仍需作者审查并以不同身份试运行。
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -80,9 +81,26 @@ func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, 
 	if e != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") || c.model == "" || c.timeout <= 0 {
 		return out, Unavailable
 	}
-	ctx, cancel := context.WithTimeout(parent, c.timeout)
-	defer cancel()
-	body := map[string]any{"model": c.model, "messages": r.Messages}
+	modelDeadline := fmt.Errorf("AI model idle timeout (%s, DATASCOPE_AI_TIMEOUT): %w", c.timeout, context.DeadlineExceeded)
+	ctx, cancel := context.WithCancelCause(parent)
+	defer cancel(nil)
+	timer := time.AfterFunc(c.timeout, func() { cancel(modelDeadline) })
+	defer timer.Stop()
+	progress := func() {
+		if timer.Stop() {
+			timer.Reset(c.timeout)
+		}
+	}
+	defer func() {
+		if ctx.Err() != nil {
+			out = Response{}
+			err = ctx.Err()
+			if context.Cause(ctx) == modelDeadline {
+				err = modelDeadline
+			}
+		}
+	}()
+	body := map[string]any{"model": c.model, "messages": r.Messages, "stream": true, "stream_options": map[string]bool{"include_usage": true}}
 	if r.JSONObject {
 		body["response_format"] = map[string]string{"type": "json_object"}
 	}
@@ -93,7 +111,12 @@ func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, 
 	if e != nil {
 		return out, Rejected
 	}
-	req, e := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(raw))
+	// A versioned API base is also commonly supplied by compatible gateways.
+	// Keep explicit completion routes, path prefixes and query parameters intact.
+	if path := strings.TrimRight(u.EscapedPath(), "/"); strings.HasSuffix(path, "/v1") {
+		u = u.JoinPath("chat/completions")
+	}
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(raw))
 	if e != nil {
 		return out, Unavailable
 	}
@@ -103,28 +126,43 @@ func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, 
 	}
 	resp, e := c.http.Do(req)
 	if e != nil {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
-		}
 		return out, Unavailable
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		return out, Unauthorized
+		return out, fmt.Errorf("%w (HTTP %d): check provider key and model access", Unauthorized, resp.StatusCode)
 	case resp.StatusCode == 429:
-		return out, RateLimited
+		return out, fmt.Errorf("%w (HTTP %d)", RateLimited, resp.StatusCode)
 	case resp.StatusCode >= 500:
-		return out, Unavailable
+		return out, fmt.Errorf("%w (HTTP %d)", Unavailable, resp.StatusCode)
+	case resp.StatusCode == http.StatusNotFound:
+		return out, fmt.Errorf("%w (HTTP 404): check the chat completions endpoint and model name", Rejected)
 	case resp.StatusCode != 200:
-		return out, Rejected
+		return out, fmt.Errorf("%w (HTTP %d)", Rejected, resp.StatusCode)
 	}
-	const limit = 1 << 20
-	raw, e = io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if e != nil {
-		if ctx.Err() != nil {
-			return out, ctx.Err()
+	if strings.EqualFold(strings.TrimSpace(strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0]), "text/event-stream") {
+		out, err = readStream(resp.Body, progress)
+	} else {
+		out, err = readCompletion(resp.Body)
+	}
+	if err != nil {
+		return out, err
+	}
+	if r.JSONObject {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal([]byte(out.Text), &obj) != nil || obj == nil {
+			return out, Invalid
 		}
+	}
+
+	return out, nil
+}
+
+func readCompletion(body io.Reader) (out Response, err error) {
+	const limit = 1 << 20
+	raw, e := io.ReadAll(io.LimitReader(body, limit+1))
+	if e != nil {
 		return out, Unavailable
 	}
 	var result struct {
@@ -141,12 +179,6 @@ func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, 
 	out.Usage = result.Usage
 	if strings.TrimSpace(choice.Message.Content) == "" || (choice.Finish != "" && choice.Finish != "stop") {
 		return out, Invalid
-	}
-	if r.JSONObject {
-		var obj map[string]json.RawMessage
-		if json.Unmarshal([]byte(choice.Message.Content), &obj) != nil || obj == nil {
-			return out, Invalid
-		}
 	}
 	out.Text = choice.Message.Content
 	return out, nil
