@@ -512,6 +512,8 @@ export const english: Record<string,string> = {
  "管理范围（仅管理员）":"Management scope (administrators)",
  "试图绕过：OR 1=1":"Bypass attempt: OR 1=1",
 
+ "OceanBase（MySQL 模式）":"OceanBase (MySQL mode)",
+ "仅支持 MySQL 租户；直连默认 2881，ODP 通常为 2883。账号填写 user@tenant 或 user@tenant#cluster。":"MySQL tenants only. Direct connections default to 2881; ODP usually uses 2883. Enter user@tenant or user@tenant#cluster as the username.",
  "达梦 DM8":"Dameng DM8",
  "尚未检查":"Not checked yet",
   " · {0} 行": " · {0} rows",

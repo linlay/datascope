@@ -1,6 +1,6 @@
 # 多数据库接入与 Linux 部署
 
-业务数据源可选择 SQLite、MySQL、PostgreSQL、Oracle、达梦 DM8。全局管理、OAuth 客户端注册和独立审计继续使用 SQLite，逐库管理配置使用分目录 YAML。网络数据源通过 Go `database/sql` 驱动接入，没有引入 ORM。
+业务数据源可选择 SQLite、MySQL、PostgreSQL、Oracle、达梦 DM8、OceanBase（MySQL 模式）。全局管理、OAuth 客户端注册和独立审计继续使用 SQLite，逐库管理配置使用分目录 YAML。网络数据源通过 Go `database/sql` 驱动接入，没有引入 ORM。
 
 ## 平台与版本
 
@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | SQLite | modernc.org/sqlite | 原有 SQLite 文件 |
 | MySQL | github.com/go-sql-driver/mysql v1.9.3 | MySQL 8.0+ |
+| OceanBase（MySQL 模式） | 复用 github.com/go-sql-driver/mysql v1.9.3 | OceanBase 4.x MySQL 租户；目标版本须真实库验收 |
 | PostgreSQL | github.com/jackc/pgx/v5 v5.7.6，stdlib 入口 | PostgreSQL 14+ |
 | Oracle | github.com/sijms/go-ora/v2 v2.9.0 | Oracle 19c+，需要支持 OFFSET/FETCH |
 | 达梦 | gitee.com/chunanyong/dm v1.8.23 | DM8；逐个实际版本、字符集和兼容模式验收 |
@@ -20,9 +21,9 @@
 
 ## 连接配置
 
-在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
+在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236、OceanBase 2881，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
 
-也可先选择数据库类型，再点击“从连接 URL 填写”展开输入框并粘贴 URL，浏览器会自动拆分连接字段，之后仍可逐项修改。URL 原文不提交到服务端；密码沿用原有加密凭据流程。支持 `mysql://`、`postgres://` / `postgresql://`、`oracle://`、`dm://` / `dameng://`、`sqlite:`，以及对应的常见 JDBC 格式，例如：
+也可先选择数据库类型，再点击“从连接 URL 填写”展开输入框并粘贴 URL，浏览器会自动拆分连接字段，之后仍可逐项修改。URL 原文不提交到服务端；密码沿用原有加密凭据流程。支持 `mysql://`、`oceanbase://`、`postgres://` / `postgresql://`、`oracle://`、`dm://` / `dameng://`、`sqlite:`，以及对应的常见 JDBC 格式，例如：
 
 ```text
 postgresql://reader:p%40ssword@db.example:5432/business?sslmode=verify-full&schema=public
@@ -45,9 +46,9 @@ DDL 预览在一致性副本上执行，校验数据约束、视图与触发器�
 
 API 新建示例：`POST /api/databases`，参数 `{"name":"业务库","driver":"sqlite","path":"business.sqlite3","create_sqlite":true}`。DDL 使用 `/api/management/call` 的 `list_ddl_objects`、`get_ddl_object`、`preview_ddl`、`apply_ddl`、`get_ddl_execution`、`list_ddl_executions`；旧 `edit_sqlite_schema` 入口停止执行。admin MCP 的 `ddl.list/get/preview/apply/execution/history` 完整对齐，参数见 [DDL 管理参考](../deploy/connectors/datascope-admin/skills/datascope-admin/references/ddl.md)。
 
-每个网络数据源通过 `connection.allowed_schemas` 登记允许范围，`connection.schema` 是可选默认 Schema。MySQL、Oracle、PostgreSQL、达梦均支持同一连接、允许范围内的跨 Schema JOIN；不扩展到其他实例、连接、Oracle Service/PDB 或 DB Link，也不隐式登记视图和同义词。逻辑表名不区分大小写；同一个 Schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
+每个网络数据源通过 `connection.allowed_schemas` 登记允许范围，`connection.schema` 是可选默认 Schema。MySQL、OceanBase（MySQL 模式）、Oracle、PostgreSQL、达梦均支持同一连接、允许范围内的跨 Schema JOIN；不扩展到其他实例、连接、Oracle Service/PDB 或 DB Link，也不隐式登记视图和同义词。逻辑表名不区分大小写；同一个 Schema 中存在仅大小写不同的表时，登记会被拒绝。字段白名单使用结构读取返回的精确字段名。未加引号的字段和别名按目标库规则折叠大小写；带引号的字段和别名保留大小写。
 
-MySQL 的 database 和 schema 表示同一个可选默认数据库，留空时两者均为空；PostgreSQL 的 database 仍必填，schema 可选；Oracle 的 service_name 仍必填（不使用 SID），schema 为可选默认 owner；达梦 schema 同样可选。默认 Schema 必须属于允许范围。
+MySQL/OceanBase 的 database 和 schema 表示同一个可选默认数据库，留空时两者均为空；PostgreSQL 的 database 仍必填，schema 可选；Oracle 的 service_name 仍必填（不使用 SID），schema 为可选默认 owner；达梦 schema 同样可选。默认 Schema 必须属于允许范围。
 
 例：通过管理 API `POST /api/databases` 登记达梦（需要已登录的系统管理员）：
 
@@ -79,9 +80,40 @@ MySQL 的 database 和 schema 表示同一个可选默认数据库，留空时�
 
 连接目标登记后固定，普通策略保存不会改变地址、schema、驱动或密码引用。更换目标或凭据引用时应新建数据源并重新配置权限，避免旧权限静默应用到另一套表。
 
-MySQL、PostgreSQL 默认启用证书与主机名校验；可信开发网络可显式设置 `tls_mode: "disable"`。PostgreSQL 额外允许 `require`（加密但不验证身份）。当前 Oracle/达梦适配器只提供 TCP 连接，尚未接入钱包、厂商加密或客户端证书配置；需要这些能力的环境应先完成对应适配再部署。达梦驱动日志关闭，不保存 DSN。
+MySQL、OceanBase、PostgreSQL 默认启用证书与主机名校验；可信开发网络可显式设置 `tls_mode: "disable"`。PostgreSQL 额外允许 `require`（加密但不验证身份）。当前 Oracle/达梦适配器只提供 TCP 连接，尚未接入钱包、厂商加密或客户端证书配置；需要这些能力的环境应先完成对应适配再部署。达梦驱动日志关闭，不保存 DSN。
 
 未保存配置的连接测试使用管理动作 `test_database_connection`，参数为 `{database: {...}, password: "实际密码"}`（使用环境变量方式时不传 password），仅限系统管理员。管理 MCP 对应 `datascope_inspect` 的 `connection.test`。已有数据源继续使用 `database.test_connection`。
+
+## OceanBase（MySQL 模式）
+
+使用独立 `driver: "oceanbase"`，底层复用 MySQL 驱动、元数据查询与受限 SQL 方言；不增加客户端库或 CGO 依赖。当前仅支持 MySQL 兼容租户，不支持 OceanBase Oracle 模式。连接后读取 `@@ob_compatibility_mode`，不能确认 MySQL 模式时拒绝接入。兼容目标为 OceanBase 4.x，具体发行版、版本及 ODP 组合仍须真实库验收。
+
+直连 OBServer 默认端口为 2881；通过 ODP 通常使用 2883，表单和 API 均可自定义端口。用户名按实际部署填写 `reader@tenant` 或 `reader@tenant#cluster`；云服务或代理提供专用连接账号时，以其连接信息为准。账号原样传给驱动，不自动拆分租户或集群。每个数据源固定一个连接目标及账号；允许 Schema 范围仅作用于当前租户内的数据库，不扩展到其他租户。
+
+```json
+{"name":"OceanBase 业务库","driver":"oceanbase","password":"实际数据库密码","connection":{"host":"obproxy.example.internal","port":2883,"database":"business","schema":"business","allowed_schemas":["business"],"username":"datascope_reader@tenant#cluster","tls_mode":"verify-full"}}
+```
+
+支持 `oceanbase://` 和 `jdbc:oceanbase://` 的单地址 URL，例如：
+
+```text
+oceanbase://reader%40tenant%23cluster:p%40ssword@obproxy.example.internal:2883/business
+jdbc:oceanbase://obproxy.example.internal:2883/business?user=reader%40tenant%23cluster&password=p%40ssword
+```
+
+URL 中账号的 `@`、`#` 和密码特殊字符须百分号编码；表单账号字段直接填原文。database/schema 同义且必须一致，均可留空。默认 TLS 校验证书和主机名；只有明确使用可信开发网络时才选择关闭 TLS。沿用加密密码、独立 Action 写账号、默认拒绝、行列权限、脱敏及跨 Schema 限制；DDL 管理仍仅支持 SQLite。
+
+真实库回归通过 `DATASCOPE_INTEGRATION_OCEANBASE` 提供 connection JSON，密码使用 `DATASCOPE_DB_OCEANBASE_PASSWORD`（或其他合法引用）：
+
+```sh
+export DATASCOPE_DB_OCEANBASE_PASSWORD='测试账号密码'
+export DATASCOPE_INTEGRATION_OCEANBASE='{"host":"obproxy.example.internal","port":2883,"database":"business","schema":"business","username":"datascope_reader@tenant#cluster","password_env":"DATASCOPE_DB_OCEANBASE_PASSWORD","tls_mode":"verify-full"}'
+make test-network
+```
+
+测试数据沿用下文 `datascope_records`，由管理员在隔离测试数据库预先准备。跨 Schema 回归使用 `DATASCOPE_SCHEMA_INTEGRATION_OCEANBASE`，格式同 [跨 Schema 验收](schema-join-acceptance.md)。单元测试和协议模拟不能替代真实库验收；上线前验证 ANSI_QUOTES/NO_BACKSLASH_ESCAPES、只读事务、TLS、注释/主外键、DECIMAL/日期/大字段、超时取消及 ODP 重连。Action 写入另需在隔离环境验证提交、回滚与失败处理。
+
+参考：[官方 Go MySQL 驱动接入](https://en.oceanbase.com/docs/common-oceanbase-cloud-10000000001212290)、[连接账号及直连/ODP 端口](https://docs.oceanbase.com/obd/obd-takeover)、[兼容模式变量](https://docs.oceanbase.com/oceanbase-database/V4.4.2-system-management-set-variables)。
 
 ## SQL 与权限改写范围
 
@@ -107,7 +139,7 @@ sqlExamples:
 - 支持 COUNT、SUM、AVG、MIN、MAX、ABS、ROUND、LOWER、UPPER、LENGTH、COALESCE、NULLIF、SUBSTR。内置函数的类型与空值语义仍以目标数据库为准。
 - 暂不支持递归 CTE、窗口函数、用户函数、表值函数、CAST、专有运算符、索引提示、MATERIALIZED、存储过程、写入型 CTE、SELECT INTO 和 FOR UPDATE。
 - Oracle 自动移除表别名的 AS，常量查询从 SYS.DUAL 读取，LIMIT/OFFSET 生成 OFFSET/FETCH。
-- MySQL 每个连接使用 ANSI_QUOTES 和 NO_BACKSLASH_ESCAPES，使字符串规则与内部解析一致。
+- MySQL/OceanBase 每个连接使用 ANSI_QUOTES 和 NO_BACKSLASH_ESCAPES，使字符串规则与内部解析一致。
 - PostgreSQL 固定 search_path 为 pg_catalog，业务表始终显式限定 schema。
 
 网络权限 SQL 使用完整物理表名，例如：
@@ -124,7 +156,7 @@ SELECT * FROM sales.orders WHERE owner_id = ${userId}
 
 ## 只读运行与 Linux 构建
 
-数据库账号只授予登记 schema 中需要的表的 SELECT 权限，不使用 SYSDBA、数据库超级用户或业务写入账号。查询执行还建立只读事务：MySQL/PG 使用只读事务选项；Oracle/达梦显式执行并检查 SET TRANSACTION READ ONLY，避免驱动不支持或忽略只读设置错误。无法建立只读事务时拒绝登记和查询。
+数据库账号只授予登记 schema 中需要的表的 SELECT 权限，不使用 SYSDBA、数据库超级用户或业务写入账号。查询执行还建立只读事务：MySQL/OceanBase/PG 使用只读事务选项；Oracle/达梦显式执行并检查 SET TRANSACTION READ ONLY，避免驱动不支持或忽略只读设置错误。无法建立只读事务时拒绝登记和查询。
 
 服务端设置连接、读取、语句执行超时和返回行数上限；不同驱动的服务端取消效果仍应使用真实库验收。行数上限仅限制返回结果，不等同于限制数据库扫描或聚合计算量。
 
@@ -141,7 +173,7 @@ make build-linux
 
 单元测试覆盖参数、SQL 边界、拒绝规则和权限改写语义；真实库测试单独启用，不会自动修改数据库或建立对象。
 
-在专用测试 schema 使用管理员预先创建以下三行数据，再给 DataScope 只读账号 SELECT 权限。MySQL、PG、Oracle、DM 均可使用以下基础 DDL（在目标 schema 中执行，Oracle/DM 常规未引用标识符会存为大写）：
+在专用测试 schema 使用管理员预先创建以下三行数据，再给 DataScope 只读账号 SELECT 权限。MySQL、OceanBase MySQL 模式、PG、Oracle、DM 均可使用以下基础 DDL（在目标 schema 中执行，Oracle/DM 常规未引用标识符会存为大写）：
 
 ```sql
 CREATE TABLE datascope_records (
@@ -163,7 +195,7 @@ export DATASCOPE_INTEGRATION_DAMENG='{"host":"10.0.0.20","port":5236,"schema":"T
 make test-network
 ```
 
-其他变量为 DATASCOPE_INTEGRATION_MYSQL、DATASCOPE_INTEGRATION_POSTGRESQL、DATASCOPE_INTEGRATION_ORACLE，内容为对应 connection 对象。未配置的数据库显示 SKIP，不能计为验收通过。测试覆盖元数据、默认拒绝、行与字段权限、JOIN/CTE、前置拒绝、分页与写入拒绝。上线前额外验证目标版本的 TLS、字符集、日期/DECIMAL/LOB、连接中断以及服务端超时取消。
+其他变量为 DATASCOPE_INTEGRATION_MYSQL、DATASCOPE_INTEGRATION_OCEANBASE、DATASCOPE_INTEGRATION_POSTGRESQL、DATASCOPE_INTEGRATION_ORACLE，内容为对应 connection 对象。未配置的数据库显示 SKIP，不能计为验收通过。测试覆盖元数据、默认拒绝、行与字段权限、JOIN/CTE、前置拒绝、分页与写入拒绝。上线前额外验证目标版本的 TLS、字符集、日期/DECIMAL/LOB、连接中断以及服务端超时取消。
 
 ## Schema 范围与选表
 

@@ -34,9 +34,10 @@ build:
 test:
 	node --test deploy/connectors/tests/*.test.cjs
 	$(GO_ENV) go test ./...
+	cd web && node --test tests/*.test.mjs
 	cd web && npm run typecheck
 
-# Linux x86_64 release with all five pure Go drivers; no vendor client libraries.
+# Linux x86_64 release with pure Go drivers (OceanBase reuses MySQL); no vendor client libraries.
 build-linux:
 	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/mcp-server ./cmd/mcp-server
 	$(GO_ENV) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/admin-api ./cmd/admin-api

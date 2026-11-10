@@ -17,3 +17,6 @@ https://github.com/dataease/dataease/blob/dev-v2/core/core-frontend/src/assets/s
 Original vector paths, unchanged. See DATAEASE-LICENSE.txt.
 
 Downloaded 2026-11-06. Logos and trademarks belong to their respective owners.
+
+oceanbase.svg
+Original generic database illustration created for DataScope; not an official OceanBase logo.

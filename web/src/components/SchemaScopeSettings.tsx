@@ -1,6 +1,7 @@
 import { useEffect,useState } from 'react';
 import { Alert,Button,Card,Input,Select,Space,message } from 'antd';
 import { databases,managementCall,type Database } from '../api';
+import { isMySQLDriver } from './connectionURL';
 import { useI18n } from '../ui/preferences';
 
 export function SchemaScopeSettings({db,onSaved,disabled}:{db:Database;onSaved:()=>void;disabled:boolean}) {
@@ -21,7 +22,7 @@ export function SchemaScopeSettings({db,onSaved,disabled}:{db:Database;onSaved:(
    <Space>
     <Button loading={busy} onClick={()=>void run(async()=>setAvailable(await databases.schemas(db.id)))}>{t('发现可用 Schema')}</Button>
     <Button type="primary" loading={busy} disabled={disabled} onClick={()=>void run(async()=>{
-     await managementCall('update_database',{database_id:db.id,database:{id:db.id,revision:db.revision,name:db.name,connection:{...c,schema:schema.trim(),...(db.driver==='mysql'?{database:schema.trim()}:{}),allowed_schemas:allowed}}});message.success(t('Schema 范围已保存'));onSaved();
+     await managementCall('update_database',{database_id:db.id,database:{id:db.id,revision:db.revision,name:db.name,connection:{...c,schema:schema.trim(),...(isMySQLDriver(db.driver)?{database:schema.trim()}:{}),allowed_schemas:allowed}}});message.success(t('Schema 范围已保存'));onSaved();
     })}>{t('保存配置')}</Button>
    </Space>
   </Space>

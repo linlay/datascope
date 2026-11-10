@@ -1,6 +1,6 @@
 # DataScope 数据库访问管理平台
 
-Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle 和达梦 DM8 业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
+Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle、达梦 DM8 和 OceanBase（MySQL 模式）业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
 
 ## 启动
 
@@ -330,4 +330,4 @@ make build         # 两个服务器、数据生成器与前端构建
 - 视图按类型生成 SQL 字面量：字符串加单引号并转义，负数加括号，布尔写为 1/0；占位符不能写在引号或注释里，未声明的占位符直接报错。最终 SQL 仍由服务端解析并按权限改写，视图只调用 `query`，不使用 `raw_query`。
 - 数据库需启用 `query` 工具，并在该数据库的独立业务账号域中为员工账号配置业务身份。连接器 ID 当前为默认库的 `datascope`；按库拼装的连接器下载尚未提供。
 
-网络数据源支持同一连接、允许 Schema 范围内的跨 Schema JOIN，包含 MySQL、Oracle、PostgreSQL、达梦。数据库管理分别配置默认 Schema（可空）和允许范围，查询管理选择登记表、配置开放权限。所有网络表使用 Schema＋表名标识；Oracle Service name 仍必填。网络源只为所选表读取完整结构，已登记网络表目录按页显示；SQLite 保持原有单库发现与查询行为。详情见 [数据源配置](docs/databases.md#schema-范围与选表) 和 [跨 Schema 验收](docs/schema-join-acceptance.md)。
+网络数据源支持同一连接、允许 Schema 范围内的跨 Schema JOIN，包含 MySQL、Oracle、PostgreSQL、达梦、OceanBase（MySQL 模式）。数据库管理分别配置默认 Schema（可空）和允许范围，查询管理选择登记表、配置开放权限。所有网络表使用 Schema＋表名标识；Oracle Service name 仍必填。网络源只为所选表读取完整结构，已登记网络表目录按页显示；SQLite 保持原有单库发现与查询行为。详情见 [数据源配置](docs/databases.md#schema-范围与选表) 和 [跨 Schema 验收](docs/schema-join-acceptance.md)。

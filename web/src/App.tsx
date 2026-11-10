@@ -13,6 +13,7 @@ import { SqlWorkbench } from './pages/SqlWorkbench';
 import { AuditPage } from './pages/Audit';
 import { useAuth } from './Auth';
 import { DatabaseIcon } from './components/DatabaseIcon';
+import { isMySQLDriver } from './components/connectionURL';
 import { ConnectionFields } from './components/ConnectionFields';
 import { NavigationContext, navigate, readRoute, setRouteParams, startNavigation, type Page } from './navigation';
 
@@ -55,7 +56,7 @@ export function App() {
  useEffect(()=>{if(items.length && !items.some(d=>d.id===dbID)) navigate(route.page,undefined,{database:items[0].id},true);},[items,dbID]);
  const connectionValues=(values: Record<string,any>)=>{
  if(values.driver==='sqlite') return {name:values.name,driver:values.driver,path:values.path,create_sqlite:!!values.create_sqlite};
- const connection={...values.connection};if(values.driver==='mysql') connection.schema=connection.database;
+ const connection={...values.connection};if(isMySQLDriver(values.driver)) connection.schema=connection.database;
  return {name:values.name,driver:values.driver,connection,password:values.password};
  };
  const testConnection=async()=>{

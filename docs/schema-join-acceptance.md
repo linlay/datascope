@@ -18,6 +18,8 @@ DATASCOPE_CHROMIUM=/path/to/chrome \
 node scripts/test-schema-configuration-browser.cjs
 ```
 
+OceanBase 表单可单独运行 `node scripts/test-oceanbase-browser.cjs`（使用相同 Playwright/Chrome 环境变量），覆盖类型、直连/ODP 端口、租户 URL、TLS、连接测试、创建及 Schema/database 同步；全部使用模拟 API。
+
 覆盖 Oracle 默认 Schema 可空、Service name 必填、切换驱动后默认端口、零表连接成功、Schema 范围保存、候选表搜索分页、显式选表登记和新表默认关闭。
 
 `internal/dialect/schema_join_test.go` 在独立 SQLite 参考数据上执行四种网络方言生成的 JOIN，验证行/字段权限和 JOIN 结果；这不代表真实厂商数据库验证。`internal/store/schema_mcp_test.go` 使用协议模拟连接和真实 MCP 内存传输，验证 Oracle OWNER、候选与开放隔离、预览及拒绝查询不触达业务驱动。`schema_scope_test.go` 验证独立脱敏规则、迁移与范围移除。
@@ -33,6 +35,8 @@ export DATASCOPE_DB_SCHEMA_TEST_PASSWORD='测试账号密码'
 export DATASCOPE_SCHEMA_INTEGRATION_MYSQL='{"connection":{"host":"127.0.0.1","port":3306,"username":"ds_join_reader","password_env":"DATASCOPE_DB_SCHEMA_TEST_PASSWORD","tls_mode":"disable"},"first_schema":"ds_sales","second_schema":"ds_crm"}'
 go test ./internal/store -run TestSchemaJoinNetworkIntegration -v -count=1
 ```
+
+OceanBase MySQL 模式可沿用 MySQL 验收数据脚本，使用 `DATASCOPE_SCHEMA_INTEGRATION_OCEANBASE`，填写实际租户账号及直连/ODP 端口。它是独立的验收目标，不能以 MySQL 实例测试代替。
 
 其他变量为 `DATASCOPE_SCHEMA_INTEGRATION_POSTGRESQL`、`DATASCOPE_SCHEMA_INTEGRATION_ORACLE`、`DATASCOPE_SCHEMA_INTEGRATION_DAMENG`。PG connection 仍需 database；Oracle connection 仍需 service_name；端口必须提供。Oracle/DM 的 first_schema、second_schema 使用实际大写名称。测试主动清空默认 Schema，配置两个允许范围；不运行建表、授权或写入语句。
 

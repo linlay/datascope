@@ -45,7 +45,7 @@ SQLite DDL 管理：database.update 另接受 `database.ddl_enabled`（布尔值
 
 ## 网络数据库
 
-支持 mysql、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、username、可选 schema 和 allowed_schemas；port 可省略，自动采用对应默认端口；PG 还需 database，MySQL database 为可选默认库，Oracle 需 service_name。MySQL schema 与 database 相同。密码可直接通过 args.password 传入，服务端加密保存；不要将密码放入 database 或 connection。旧 connection.password_env 继续兼容，必须为 DATASCOPE_DB_ 开头的大写变量名。两种密码来源二选一，禁止 DSN。MySQL/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
+支持 mysql、oceanbase（仅 MySQL 模式）、postgresql、oracle、dameng，创建时使用 `connection` 对象代替 `path`：host、username、可选 schema 和 allowed_schemas；port 可省略，自动采用对应默认端口；PG 还需 database，MySQL database 为可选默认库，Oracle 需 service_name。MySQL/OceanBase schema 与 database 相同。OceanBase 直连默认 2881，ODP 通常使用 2883；username 原样填写 user@tenant 或 user@tenant#cluster。密码可直接通过 args.password 传入，服务端加密保存；不要将密码放入 database 或 connection。旧 connection.password_env 继续兼容，必须为 DATASCOPE_DB_ 开头的大写变量名。两种密码来源二选一，禁止 DSN。MySQL/OceanBase/PG 默认 TLS verify-full，可信开发网络可显式 tls_mode=disable。
 
 未保存连接测试：`datascope_inspect`，`{action:"test",args:{resourceType:"connection",database:{name,driver,connection},password:"实际密码"}}`，仅系统管理员可用。已有数据源继续使用 database.test_connection。创建后仍需回读，所有表默认禁止、MCP 关闭。驱动和目标连接登记后固定，默认 Schema 和 allowed_schemas 可修改；保存策略需保留读取到的连接配置。
 

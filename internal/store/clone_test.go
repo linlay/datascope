@@ -10,7 +10,7 @@ import (
 
 func TestCloneSQLChecksNeverExecuteBusinessStatements(t *testing.T) {
 	ctx := context.Background()
-	for _, name := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, name := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(name, func(t *testing.T) {
 			conn := &probeConn{}
 			st := probeStore(name, conn)
