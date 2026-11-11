@@ -39,9 +39,20 @@ func emptyState() *sourceState {
 }
 
 // A stable sibling lock protects both readers and writers across processes.
-// No generation is cached: API and MCP observe the same committed files.
+// MCP may reuse a private snapshot within a single HTTP request only.
 func (s *Source) withState(ctx context.Context, write bool, fn func(*sourceState) error) error {
 	defer requesttiming.Start(ctx, "config_state")()
+	if snapshot := snapshotFrom(ctx); snapshot != nil {
+		if !write {
+			return snapshot.read(ctx, s, fn)
+		}
+		// A request that publishes must never reuse its pre-write state or auth.
+		snapshot.disabled.Store(true)
+	}
+	return s.withStateUncached(ctx, write, fn)
+}
+
+func (s *Source) withStateUncached(ctx context.Context, write bool, fn func(*sourceState) error) error {
 	for {
 		if s.owner != nil {
 			if err := s.owner.recoverPending(ctx); err != nil {

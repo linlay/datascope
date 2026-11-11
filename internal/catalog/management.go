@@ -54,6 +54,19 @@ func (c *Catalog) listManaged(ctx context.Context) ([]Database, error) {
 }
 
 func (c *Catalog) getManaged(ctx context.Context, id string) (*Database, error) {
+	d, err := c.getManagedConfiguration(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	p, err := c.Management.ResolveAuth(ctx, "DATABASE", id)
+	if err != nil {
+		return nil, err
+	}
+	d.AuthPolicyFingerprint = p.Fingerprint()
+	return d, nil
+}
+
+func (c *Catalog) getManagedConfiguration(ctx context.Context, id string) (*Database, error) {
 	records, err := c.Management.RecordsForDatabase(ctx, "databases", id)
 	if err != nil {
 		return nil, err
@@ -65,11 +78,6 @@ func (c *Catalog) getManaged(ctx context.Context, id string) (*Database, error) 
 	migrateSchemaIdentity(&d)
 	items := []Database{d}
 	c.overlayDiscovery(items)
-	p, err := c.Management.ResolveAuth(ctx, "DATABASE", id)
-	if err != nil {
-		return nil, err
-	}
-	items[0].AuthPolicyFingerprint = p.Fingerprint()
 	return &items[0], nil
 }
 

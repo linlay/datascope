@@ -6,7 +6,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -246,6 +248,17 @@ func (c *Catalog) ByMCPPathContext(ctx context.Context, segment string) (*Databa
 	var items []Database
 	var err error
 	if c.Management != nil {
+		// Most endpoints use the database ID. Resolve that source directly,
+		// but never make the old ID route an alias for a renamed MCP route.
+		if validID.MatchString(segment) {
+			d, err := c.getManagedConfiguration(ctx, segment)
+			if err == nil && d.MCPRoute() == segment {
+				return d, nil
+			}
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+		}
 		items, err = c.listManaged(ctx)
 	} else {
 		items, err = c.List()

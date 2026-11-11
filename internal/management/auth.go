@@ -291,6 +291,7 @@ func validateAuth(cfg AuthConfig) error {
 var regexpEnv = regexp.MustCompile(`^DATASCOPE_AUTH_[A-Z0-9_]+$`)
 
 func (s *Store) SaveAuthConfig(ctx context.Context, cfg AuthConfig) error {
+	invalidateRequestSnapshot(ctx)
 	if e := validateAuth(cfg); e != nil {
 		return e
 	}
@@ -345,6 +346,13 @@ func (s *Store) SaveAuthConfig(ctx context.Context, cfg AuthConfig) error {
 	})
 }
 func (s *Store) ResolveAuth(ctx context.Context, kind, id string) (ResolvedAuth, error) {
+	if snapshot := snapshotFrom(ctx); snapshot != nil {
+		return snapshot.resolveAuth(ctx, s, kind, id)
+	}
+	return s.resolveAuth(ctx, kind, id)
+}
+
+func (s *Store) resolveAuth(ctx context.Context, kind, id string) (ResolvedAuth, error) {
 	defer requesttiming.Start(ctx, "resolve_auth")()
 	// Resolve only this target. AuthConfig also enumerates every database's
 	// YAML bindings for the settings editor, which is unnecessary on requests.

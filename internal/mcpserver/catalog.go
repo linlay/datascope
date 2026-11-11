@@ -31,6 +31,9 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 	}
 	publicMeta := metadataRoot + strings.TrimRight(resourceURL.Path, "/")
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stateless HTTP requests share no configuration snapshots. Long-lived
+		// stdio transports keep resolving their live configuration on each call.
+		r = r.WithContext(management.WithRequestSnapshot(r.Context()))
 		if r.URL.Path == "/healthz" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"status":"ok"}`))

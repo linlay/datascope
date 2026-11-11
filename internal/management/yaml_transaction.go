@@ -45,6 +45,7 @@ func (s *Store) recoverPendingLocked(ctx context.Context) error {
 	return s.applyChange(ctx, change)
 }
 func (s *Store) commitChange(ctx context.Context, change configurationChange) error {
+	invalidateRequestSnapshot(ctx)
 	// Validate every generation before the durable decision; validation failures
 	// leave all existing configuration untouched.
 	for id, state := range change.Sources {
