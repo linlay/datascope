@@ -1,4 +1,5 @@
 import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
+import { EditConnection } from '../components/EditConnection';
 import { DatabaseIcon } from '../components/DatabaseIcon';
 import { SQLiteSchemaEditor } from '../components/SQLiteSchemaEditor';
 import { SaveButton } from '../components/IconButton';
@@ -48,6 +49,7 @@ export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; on
    <Card title={t('基本信息')} extra={<Space wrap>
     {user.system_admin && <Button danger disabled={busy} onClick={() => { setRemoveError(undefined); setRemoveOpen(true); }}>{t('移除数据源')}</Button>}
     <DatabaseClone db={db} onSaved={onSaved} />
+    {user.system_admin && db.connection && <EditConnection key={db.id} db={db} onSaved={onSaved} />}
     <Button onClick={() => setDetailsOpen(true)}>{t('存储详情')}</Button>
     <Button loading={busy} onClick={() => void run(() => managementCall('test_connection', { database_id: db.id }), t('数据库连接正常'))}>{t('测试连接')}</Button>
     <SaveButton type="primary" loading={busy} disabled={!can('config.write') || !name.trim() || name === db.name} onClick={() => void run(() => managementCall('update_database', { database_id: db.id, database: { id: db.id, revision: db.revision, name: name.trim() } }), t('数据库名称已保存'))} />

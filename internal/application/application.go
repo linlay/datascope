@@ -328,6 +328,17 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *d), nil
+	case "edit_database_connection", "test_edited_database_connection":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("需要标识一致的 database 参数")
+		}
+		if err := s.Catalog.EditConnection(ctx, in.DatabaseID, in.Database.Revision, in.Database.Connection, in.Password, action == "edit_database_connection"); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"connected": true}, nil
 	case "remove_database":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied

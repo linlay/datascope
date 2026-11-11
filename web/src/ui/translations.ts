@@ -1,5 +1,10 @@
 // Interface copy only. Database content, SQL and user-authored text remain unchanged.
 export const english: Record<string,string> = {
+ "编辑连接": "Edit connection",
+ "校验并保存": "Validate and save",
+ "数据源连接已保存": "Data source connection saved",
+ "连接及已登记字段结构校验通过": "Connection and enrolled column structure checks passed",
+ "用于同一业务库的连接维护。密码留空保留原密码；已有写连接同步地址、端口和 TLS。保存前会重新校验连接及已登记字段结构。": "Maintain the connection to the same business database. Leave the password blank to keep it. Existing write connections receive the same host, port and TLS settings. Saving rechecks connectivity and enrolled column structure.",
  "停止生成": "Stop generation",
  "清空对话": "Clear conversation",
  "先对话，再确认应用": "Discuss, then confirm changes",

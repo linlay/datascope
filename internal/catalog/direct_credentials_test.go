@@ -55,6 +55,53 @@ func TestLiveDirectPasswordAndIndependentServer(t *testing.T) {
 	if strings.Contains(string(encoded), password) {
 		t.Fatal("API representation leaked password")
 	}
+	// Testing a draft must not persist it; a blank password resolves the old secret.
+	if err := c.EditConnection(ctx, d.ID, d.Revision, d.Connection, "", false); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, err := c.Get(d.ID)
+	if err != nil || unchanged.Revision != d.Revision {
+		t.Fatal("probe changed revision", err)
+	}
+	if err := c.EditConnection(ctx, d.ID, d.Revision, d.Connection, password, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EditConnection(ctx, d.ID, d.Revision, d.Connection, password, true); err == nil {
+		t.Fatal("stale edit accepted")
+	}
+	d, err = c.Get(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The edit API must preserve logical scope and never trust credential references.
+	draft := *d.Connection
+	draft.Database, draft.Schema, draft.ServiceName = "other", "other", "other"
+	draft.AllowedSchemas = []string{"other"}
+	draft.CredentialID, draft.PasswordEnv = "other-source", "DATASCOPE_DB_OTHER"
+	if err := c.EditConnection(ctx, d.ID, d.Revision, &draft, "", true); err != nil {
+		t.Fatal(err)
+	}
+	retainedSource, err := c.Get(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retainedSource.Connection.Database != d.Connection.Database || retainedSource.Connection.Schema != d.Connection.Schema || retainedSource.Connection.CredentialID != d.ID {
+		t.Fatal("edit changed logical target or credential reference")
+	}
+	d = retainedSource
+	broken := *d.Connection
+	broken.Host, broken.Port = "127.0.0.1", 1
+	if err := c.EditConnection(ctx, d.ID, d.Revision, &broken, "not-the-saved-password", true); err == nil {
+		t.Fatal("unreachable target accepted")
+	}
+	unchanged, err = c.Get(d.ID)
+	if err != nil || unchanged.Revision != d.Revision || unchanged.Connection.Host != d.Connection.Host {
+		t.Fatal("failed edit changed source", err)
+	}
+	retained, err := m.DatabasePassword(ctx, d.ID)
+	if err != nil || retained != password {
+		t.Fatal("failed edit changed password", err)
+	}
 	other, err := management.Open(path, nil)
 	if err != nil {
 		t.Fatal(err)
