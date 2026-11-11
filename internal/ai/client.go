@@ -66,7 +66,7 @@ func New(endpoint, model, key string, timeout time.Duration) *ChatClient {
 	return &ChatClient{endpoint, model, key, timeout, &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 func FromEnv() Client {
-	return New(os.Getenv("DATASCOPE_AI_ENDPOINT"), os.Getenv("DATASCOPE_AI_MODEL"), os.Getenv("DATASCOPE_AI_KEY"), envflag.Duration("DATASCOPE_AI_TIMEOUT", 30*time.Second))
+	return New(os.Getenv("DATASCOPE_AI_ENDPOINT"), os.Getenv("DATASCOPE_AI_MODEL"), os.Getenv("DATASCOPE_AI_KEY"), envflag.Duration("DATASCOPE_AI_TIMEOUT", 120*time.Second))
 }
 func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, err error) {
 	start := time.Now()
