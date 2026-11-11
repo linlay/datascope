@@ -43,7 +43,17 @@ func TestAssistantBrowser(t *testing.T) {
 		case strings.Contains(prompt, "synthetic example"):
 			out = map[string]any{"arguments": map[string]any{"id": 1, "name": "browser preview"}, "expected": "One owned row"}
 		default:
-			out = map[string]any{"parameters": def.Parameters, "script": def.Script}
+			var data struct {
+				Intent       string
+				Conversation []ai.Message
+			}
+			if err := json.Unmarshal([]byte(r.Messages[1].Content), &data); err != nil {
+				return ai.Response{}, err
+			}
+			if data.Intent == "Keep the same ownership checks" && (len(data.Conversation) != 2 || !strings.Contains(data.Conversation[0].Content, "owner_id")) {
+				return ai.Response{}, ai.Invalid
+			}
+			out = map[string]any{"parameters": def.Parameters, "script": def.Script, "summary": "Check visibility and ownership before updating.", "explanation": "Update only the owned item and verify one affected row."}
 		}
 		b, e := json.Marshal(out)
 		return ai.Response{Text: string(b)}, e
