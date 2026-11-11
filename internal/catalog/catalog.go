@@ -239,7 +239,17 @@ func (c *Catalog) AllowsMCPResource(base, resource string) bool {
 }
 
 func (c *Catalog) ByMCPPath(segment string) (*Database, error) {
-	items, err := c.List()
+	return c.ByMCPPathContext(context.Background(), segment)
+}
+
+func (c *Catalog) ByMCPPathContext(ctx context.Context, segment string) (*Database, error) {
+	var items []Database
+	var err error
+	if c.Management != nil {
+		items, err = c.listManaged(ctx)
+	} else {
+		items, err = c.List()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +269,12 @@ func configFilename(d Database) string {
 }
 
 func (c *Catalog) Get(id string) (*Database, error) {
+	return c.GetContext(context.Background(), id)
+}
+
+func (c *Catalog) GetContext(ctx context.Context, id string) (*Database, error) {
 	if c.Management != nil {
-		return c.getManaged(context.Background(), id)
+		return c.getManaged(ctx, id)
 	}
 	items, err := c.List()
 	if err != nil {

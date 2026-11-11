@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"context"
+	"datascope-server/internal/requesttiming"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,6 +68,7 @@ func HTTPHandler(s *Store, source string, next http.Handler) http.Handler {
 			} `json:"params"`
 		}
 		_ = json.Unmarshal(raw, &request)
+		requesttiming.Method(r.Context(), request.Method)
 		meta := From(r.Context())
 		meta.Source = source
 		meta.Tool = request.Params.Name

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"datascope-server/internal/requesttiming"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -344,6 +345,7 @@ func (s *Store) SaveAuthConfig(ctx context.Context, cfg AuthConfig) error {
 	})
 }
 func (s *Store) ResolveAuth(ctx context.Context, kind, id string) (ResolvedAuth, error) {
+	defer requesttiming.Start(ctx, "resolve_auth")()
 	// Resolve only this target. AuthConfig also enumerates every database's
 	// YAML bindings for the settings editor, which is unnecessary on requests.
 	cfg, e := s.authConfig(ctx, false)
@@ -591,6 +593,7 @@ func providerRequest(ctx context.Context, p AuthProvider, endpoint, method, toke
 	return claims, nil
 }
 func (r ResolvedAuth) VerifyBearer(ctx context.Context, database, token string) (BusinessAccount, error) {
+	defer requesttiming.Start(ctx, "verify_token")()
 	if r.Policy.Mode == "ONEID" && r.Provider.Type == "ONEID" {
 		claims, err := verifyOneID(ctx, r.Provider, token)
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/management"
+	"datascope-server/internal/requesttiming"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
 	"fmt"
@@ -54,11 +55,13 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		}
 		var d *catalog.Database
 		var err error
+		routeDone := requesttiming.Start(r.Context(), "route_lookup")
 		if segment == "" {
-			d, err = c.Get("default")
+			d, err = c.GetContext(r.Context(), "default")
 		} else {
-			d, err = c.ByMCPPath(segment)
+			d, err = c.ByMCPPathContext(r.Context(), segment)
 		}
+		routeDone()
 		if err != nil {
 			http.Error(w, "数据库不存在", 404)
 			return
@@ -105,7 +108,9 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		selected.AuthMode = authMode
 		// Open a query service only for tool calls. Knowledge tools and protocol
 		// discovery do not depend on query policies or a live data connection.
+		buildDone := requesttiming.Start(r.Context(), "handler_build")
 		h, err := HTTPHandlerWithManagement(ManagedServer(c, d.ID, nil, selected), identity, authMode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
+		buildDone()
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -116,7 +121,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 
 		h.ServeHTTP(w, r)
 	})
-	return audit.HTTPHandler(c.Audit, "database-mcp", handler), nil
+	return timingHandler(audit.HTTPHandler(c.Audit, "database-mcp", handler)), nil
 }
 
 // ManagedServer applies the same live catalog rules to long-lived transports
@@ -129,7 +134,10 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 	server := New(svc, opts)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			d, err := c.Get(id)
+			requesttiming.Method(ctx, method)
+			getDone := requesttiming.Start(ctx, "middleware_get")
+			d, err := c.GetContext(ctx, id)
+			getDone()
 			if err != nil {
 				return nil, err
 			}

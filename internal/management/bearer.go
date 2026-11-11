@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
+	"datascope-server/internal/requesttiming"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -87,7 +88,9 @@ var oneIDKeys = struct {
 // A short bounded cache avoids network I/O on every tool call. Unknown key IDs
 // do not force refreshes; rotations become visible within one minute.
 func loadOneIDKeys(ctx context.Context, endpoint string) ([]oneIDKey, error) {
+	waitDone := requesttiming.Start(ctx, "jwks_lock_wait")
 	oneIDKeys.Lock()
+	waitDone()
 	defer oneIDKeys.Unlock()
 	if entry, ok := oneIDKeys.entries[endpoint]; ok && time.Now().Before(entry.expires) {
 		return entry.keys, nil
@@ -99,6 +102,8 @@ func loadOneIDKeys(ctx context.Context, endpoint string) ([]oneIDKey, error) {
 		return nil, ErrDenied
 	}
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	fetchDone := requesttiming.Start(ctx, "jwks_fetch")
+	defer fetchDone()
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("OneID 公钥服务暂不可用")

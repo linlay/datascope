@@ -102,6 +102,10 @@ function run(args, ctx) {
 
 在「操作日志」选择目标数据库或平台日志，按请求 ID、操作用户、业务身份或工具定位记录。排查一次调用时，先核对数据库和身份，再看工具、策略版本及执行结果。
 
+排查 HTTP MCP 的 `ping` 或公共路径延迟时，由运维在 MCP 进程的环境中设置 `DATASCOPE_MCP_TIMING=1` 并重启服务；默认关闭，排查完成后移除变量并重启。在服务进程日志中搜索 `mcp.request.timing`，按 `request_id` 与操作日志关联。每个 POST 请求输出一条汇总，包含 `method`、HTTP `status`、`total_ms`、`first_write_ms`、`stages_ms` 和 `stage_counts`，不记录请求头、令牌、SQL 或业务结果。`first_write_ms` 是应用首次写响应头的时间，不是客户端首字节时间；未写响应时为 null。认证前失败且未解析方法的请求，`method` 可能为空。
+
+`route_lookup` 表示端点配置查找，`resolve_auth` 表示认证策略解析，`handler_build` 表示协议处理器构建，`verify_token` 表示令牌校验，`middleware_get` 表示协议中间件再次读取配置；`config_state`、`read_state`、`lock_wait` 和 `lock_hold` 分别表示配置操作、配置文件读取、文件锁等待和持锁耗时。OneID 另记录 `jwks_lock_wait`，公钥缓存未命中时记录 `jwks_fetch`。阶段单位均为毫秒，同名阶段累计，调用次数见 `stage_counts`；阶段会嵌套，不能直接相加。对照串行和 4 并发的 `ping`：若 `lock_wait` 明显增加，优先检查配置锁竞争；若应用总耗时很低而客户端耗时高，对照应用内部端口与公网入口定位网关或网络等待。计时只用于诊断，不改变鉴权、缓存或锁策略。
+
 - **找不到菜单**：核对顶部数据库和平台账号的库级授权。
 - **查询返回空结果**：核对参数值、业务身份和行过滤条件；在查询工作台查看改写后的 SQL。
 - **试运行成功但业务数据未变化**：试运行会回滚。到真实业务调用页查看正式请求及确认状态。
