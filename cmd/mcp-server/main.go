@@ -87,6 +87,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer catalogue.CloseQueryCache()
 	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
 		return err
 	}

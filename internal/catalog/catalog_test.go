@@ -52,6 +52,7 @@ tables:
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(c.CloseQueryCache)
 	return c, path
 }
 func mustGet(t *testing.T, c *catalog.Catalog, id string) *catalog.Database {

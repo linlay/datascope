@@ -166,11 +166,33 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				if call.Params.Name == "search_knowledge" || call.Params.Name == "read_knowledge" {
 					return next(ctx, method, req)
 				}
-				current, err := c.Open(ctx, d)
+				meta := audit.From(ctx)
+				meta.DatabaseID, meta.PolicyVersion = d.ID, d.Revision
+				ctx = audit.With(ctx, meta)
+				auditor := c.Audit
+				if c.Management != nil {
+					auditor = c.Management.AuditFor(d.ID)
+				}
+				event, _ := auditor.Start(ctx, "query.initialize", "")
+				var current *service.QueryService
+				var release func()
+				var hit bool
+				if call.Params.Name == "query" || call.Params.Name == "raw_query" {
+					current, release, hit, err = c.AcquireQuery(ctx, d)
+				} else {
+					current, err = c.Open(ctx, d)
+					if err == nil {
+						release = func() { current.Store.Close() }
+					}
+				}
+				if event != nil {
+					event.Detail = map[string]any{"cache_hit": hit}
+				}
+				_ = auditor.Finish(event, err)
 				if err != nil {
 					return nil, err
 				}
-				defer current.Store.Close()
+				defer release()
 				ctx = context.WithValue(ctx, serviceContextKey{}, current)
 			}
 			return next(ctx, method, req)

@@ -76,6 +76,9 @@ type Catalog struct {
 	runtimeMu      sync.Mutex
 	discoveryState map[string]*discoveryRuntime
 	mu             sync.Mutex
+	queryMu        sync.Mutex
+	queryServices  map[string]*queryEntry
+	queryClosed    bool
 }
 
 // Bootstrap imports legacy JSON or the initial rewrite rules only once.

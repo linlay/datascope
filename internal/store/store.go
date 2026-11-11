@@ -77,15 +77,19 @@ func (s *Store) Path() string {
 
 // QueryResult is a bounded result set.
 type QueryResult struct {
-	Columns   []string         `json:"columns" yaml:"columns"`
-	Rows      []map[string]any `json:"rows" yaml:"rows"`
-	RowCount  int              `json:"row_count" yaml:"rowCount"`
-	Truncated bool             `json:"truncated" yaml:"truncated"`
+	EffectiveMaxRows int              `json:"effective_max_rows" yaml:"effectiveMaxRows"`
+	LimitSource      string           `json:"limit_source" yaml:"limitSource"`
+	LimitingTables   []string         `json:"limiting_tables,omitempty" yaml:"limitingTables,omitempty"`
+	Columns          []string         `json:"columns" yaml:"columns"`
+	Rows             []map[string]any `json:"rows" yaml:"rows"`
+	RowCount         int              `json:"row_count" yaml:"rowCount"`
+	Truncated        bool             `json:"truncated" yaml:"truncated"`
 }
 
 // Query runs a single read-only statement and returns at most maxRows rows.
 // args are bind values (e.g. sql.Named) for trusted, server-built SQL.
 func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...any) (out *QueryResult, err error) {
+	requested := maxRows
 	if e := s.validateAudit(ctx, rawSQL, false); e != nil {
 		return nil, e
 	}
@@ -104,6 +108,9 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 		return nil, err
 	}
 	result, err := s.read(ctx, maxRows, stmt, args...)
+	if err == nil {
+		result.SetRowLimit(requested)
+	}
 	if err == nil {
 		err = s.applyMasking(result, plan)
 	}
@@ -161,6 +168,7 @@ func (s *Store) RawQuery(ctx context.Context, rawSQL string, maxRows int) (*Quer
 	return s.RawQueryWithParameters(ctx, rawSQL, maxRows, nil)
 }
 func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRows int, parameters map[string]any) (*QueryResult, error) {
+	requested := maxRows
 	if err := queryparams.Validate(parameters); err != nil {
 		return nil, err
 	}
@@ -186,6 +194,9 @@ func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRo
 		return nil, err
 	}
 	result, err := s.read(ctx, maxRows, body, args...)
+	if err == nil {
+		result.SetRowLimit(requested)
+	}
 	if err == nil {
 		err = s.applyMasking(result, plan)
 	}
@@ -262,6 +273,9 @@ func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native
 		}
 		err = audit.Join(err, s.Audit.Finish(event, err))
 	}()
+	if !native {
+		query = boundedQuery(query, maxRows)
+	}
 	var tx *sql.Tx
 	if s.engine != nil {
 		if !native {

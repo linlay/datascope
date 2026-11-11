@@ -33,14 +33,16 @@ type QueryService struct {
 // New builds a QueryService. It fails if the rewrite config does not cover
 // exactly the database's tables.
 func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Time) (*QueryService, error) {
-	names, err := st.TableNames(ctx)
-	if err != nil {
-		return nil, err
-	}
+	var names []string
 	if st.Driver() != "sqlite" && st.RegisteredSchema != nil {
-		names = []string{}
 		for _, t := range st.RegisteredSchema {
 			names = append(names, t.Name)
+		}
+	} else {
+		var err error
+		names, err = st.TableNames(ctx)
+		if err != nil {
+			return nil, err
 		}
 	}
 	for _, pol := range cfg.Tables {
@@ -223,6 +225,7 @@ func (s *QueryService) Query(ctx context.Context, query string, userID int64, ma
 
 // Execute runs an already rewritten statement with its binds.
 func (s *QueryService) Execute(ctx context.Context, r *Rewritten, maxRows int) (*store.QueryResult, error) {
+	requested := maxRows
 	if maxRows <= 0 {
 		maxRows = store.DefaultMaxRows
 	}
@@ -237,7 +240,19 @@ func (s *QueryService) Execute(ctx context.Context, r *Rewritten, maxRows int) (
 	m.PolicyVersion = s.PolicyVersion
 	ctx = audit.With(ctx, m)
 	ctx = audit.WithSQL(ctx, r.OriginalSQL, r.RewrittenSQL)
-	return s.Store.Query(ctx, r.RewrittenSQL, maxRows, r.args...)
+	result, err := s.Store.Query(ctx, r.RewrittenSQL, maxRows, r.args...)
+	if err == nil {
+		result.SetRowLimit(requested)
+		if maxRows < result.EffectiveMaxRows {
+			result.EffectiveMaxRows, result.LimitSource = maxRows, "table_policy"
+			for _, name := range r.TableNames() {
+				if pol, ok := s.Config().Lookup(name); ok && pol.MaxRows == maxRows {
+					result.LimitingTables = append(result.LimitingTables, name)
+				}
+			}
+		}
+	}
+	return result, err
 }
 
 // QueryWithParameters executes direct SELECT with explicit bound values.

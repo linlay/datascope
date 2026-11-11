@@ -358,7 +358,13 @@ func (e Engine) emit(canonical string, args []any) (string, []any, error) {
 				continue
 			}
 		}
-		parts = append(parts, v)
+		// MySQL resolves some built-ins as stored functions when whitespace
+		// separates the name from '('. Keep calls tight without changing literals.
+		if t.kind == parser.LP && i > 0 && tokens[i-1].kind == parser.IDENT && safeFunctions[strings.ToUpper(tokens[i-1].value)] {
+			parts[len(parts)-1] += v
+		} else {
+			parts = append(parts, v)
+		}
 	}
 	if Family(e.Driver) == "oracle" {
 		parts = oracleLimits(parts)

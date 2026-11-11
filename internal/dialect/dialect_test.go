@@ -18,6 +18,23 @@ func engine(driver string) dialect.Engine {
 	return dialect.Engine{Driver: driver, Schema: "business", Tables: map[string]string{"records": "Records"}}
 }
 
+func TestMySQLBuiltinsHaveNoSpaceBeforeParenthesis(t *testing.T) {
+	for _, driver := range []string{"mysql", "oceanbase"} {
+		out, _, err := engine(driver).Compile(`SELECT SUM(id), COUNT(*), MAX(id), MIN(id), AVG(id), 'SUM (id)' AS literal FROM main.records`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"SUM", "COUNT", "MAX", "MIN", "AVG"} {
+			if !strings.Contains(out, name+"(") {
+				t.Fatalf("%s: invalid built-in call: %s", driver, out)
+			}
+		}
+		if !strings.Contains(out, "'SUM (id)'") {
+			t.Fatalf("literal changed: %s", out)
+		}
+	}
+}
+
 func TestBindingsAndLiteralBoundaries(t *testing.T) {
 	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {

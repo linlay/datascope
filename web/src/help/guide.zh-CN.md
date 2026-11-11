@@ -84,6 +84,14 @@ function run(args, ctx) {
 
 ## MCP 配置与客户端接入
 
+`query` 默认最多返回 200 行，全局上限为 1000 行，还受所涉及表的「返回行数上限」约束；多表查询取最小值。请求 `max_rows: 1000` 仍只返回 200 行时，先检查查询配置和 SQL 自带的 `LIMIT`。结果中的 `effective_max_rows` 是实际返回上限，`limit_source` 为 `default`（默认值）、`request`（请求值）、`hard_limit`（全局上限）或 `table_policy`（表策略）；表策略进一步降低上限时，`limiting_tables` 列出限制表。服务不会自动放宽已有策略。
+
+只需汇总时，直接使用 `SUM`、`COUNT`、`MIN`、`MAX`、`AVG` 和 `GROUP BY`，例如 `SELECT natural_day, SUM(coop_fund) AS total FROM cashmgmt GROUP BY natural_day ORDER BY natural_day`（将表名、字段名替换为当前库已开放的名称）。这些聚合仍遵守行权限及字段限制。MySQL 与 OceanBase MySQL 模式支持这些普通聚合调用，不要求客户端设置 `IGNORE_SPACE`。
+
+确需明细时，按稳定且唯一的键排序分页。例如 `SELECT id, amount FROM records WHERE id > :arg_after ORDER BY id`，传入 `parameters: {"arg_after": 0}` 和 `max_rows: 1000`；每页保存成功后，以最后一行的 id 作为下一页参数。根据实际表结构替换示例；复合键需要完整的排序和续页条件。`truncated: true` 表示本条 SQL 的结果超过返回上限。没有 SQL `LIMIT` 时可据此判断是否续页；SQL 自带 `LIMIT` 时，`truncated: false` 只表示该 SQL 的结果没有被额外截断，不能证明后面没有记录。多次请求不共享数据库快照，数据变动时需固定业务时间窗或使用业务快照。
+
+托管 MCP 的 `query` / `raw_query` 复用同一配置版本的连接池和已校验规则，空闲一分钟释放，持续使用满五分钟后重新初始化。配置变化后的新请求重新初始化；每次调用仍校验当前身份及工具权限，不缓存查询结果。排查耗时时，在审计中按请求 ID 对照 `query.initialize`（详情 `cache_hit` 标明是否命中复用）、`sql.rewrite`、`sql.guard`、`sql.execute` 和 `mcp.request` 的起止时间；这些事件可能嵌套，不能直接相加。
+
 在「MCP 配置」为当前库开放所需工具，保存配置。按页面提供的连接信息配置客户端，并使用该库匹配的业务认证方式。先列出工具，再用一个简单请求检查身份、权限和返回内容。
 
 客户端支持导入连接器时，可在启用 MCP 并保存后点击「下载连接器 ZIP」，将文件导入客户端，再按当前库的认证方式登录。

@@ -75,6 +75,14 @@ Create an HTML view from a template, enter its identifier, name and HTML, and sa
 
 ## Connecting an MCP client
 
+`query` returns at most 200 rows by default, with a global ceiling of 1000 and additional per-table row limits; a multi-table query uses the smallest applicable limit. If `max_rows: 1000` still returns 200 rows, check query configuration and any SQL `LIMIT`. The response's `effective_max_rows` reports the actual cap. `limit_source` is `default`, `request`, `hard_limit`, or `table_policy`; when table policies further reduce the cap, `limiting_tables` identifies those tables. Existing policies are never automatically relaxed.
+
+For summaries, use `SUM`, `COUNT`, `MIN`, `MAX`, `AVG` and `GROUP BY` directly, for example `SELECT natural_day, SUM(coop_fund) AS total FROM cashmgmt GROUP BY natural_day ORDER BY natural_day` (replace the table and column names with those exposed by your database). Aggregates still obey row permissions and column restrictions. MySQL and OceanBase MySQL mode support these ordinary aggregate calls without client-side `IGNORE_SPACE` configuration.
+
+When details are necessary, paginate using a stable unique ordering key. For example, send `SELECT id, amount FROM records WHERE id > :arg_after ORDER BY id` with `parameters: {"arg_after": 0}` and `max_rows: 1000`; after saving each page successfully, use its final id for the next request. Adapt the example to the actual schema; composite keys require complete ordering and continuation predicates. `truncated: true` means this SQL statement produced more rows than the response cap. Without a SQL `LIMIT`, it indicates whether to continue. With a SQL `LIMIT`, `truncated: false` only means that statement's result was not additionally truncated; more records may still exist. Separate requests do not share a database snapshot, so use a fixed business time window or business snapshot when data can change.
+
+Managed MCP `query` / `raw_query` calls reuse the connection pool and validated rules for the same configuration version. Resources are released after one idle minute and reinitialized after five minutes of continuous use. New requests after configuration changes reinitialize; current identity and tool permissions are checked on every call, and query results are not cached. To investigate latency, correlate audit events by request ID and compare the start/end times of `query.initialize` (its `cache_hit` detail indicates reuse), `sql.rewrite`, `sql.guard`, `sql.execute` and `mcp.request`. Events can be nested, so do not simply add their durations.
+
 Enable the required tools in MCP configuration and save. Configure the client using the displayed connection information and the database's business authentication method. List the tools before sending a test request.
 
 For clients that support connector packages, enable MCP, save and download the connector ZIP. Import it in the client and authenticate for the selected database.
