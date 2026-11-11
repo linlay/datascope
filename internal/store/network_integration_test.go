@@ -17,7 +17,7 @@ import (
 // Opt-in, non-destructive vendor tests. See docs/databases.md for fixture DDL
 // and configuration. This test never creates objects using a business account.
 func TestNetworkDatabaseIntegration(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			raw := os.Getenv("DATASCOPE_INTEGRATION_" + strings.ToUpper(driver))
 			if raw == "" {

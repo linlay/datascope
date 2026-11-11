@@ -1,6 +1,6 @@
 # DataScope 数据库访问管理平台
 
-Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle 和达梦 DM8 业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
+Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL、Oracle、达梦 DM8 和 OceanBase（MySQL 模式）业务数据源，内置平台用户、数据库直接授权、SQL 权限改写、独立审计库，以及管理系统自身的 MCP 与逐库数据库 MCP。
 
 登录后点击控制台右上角「使用帮助」阅读[用户手册](web/src/help/guide.zh-CN.md)。在动作编辑器旁点击「脚本接口手册」可直接查看内置函数和示例。
 
@@ -75,7 +75,7 @@ internal/
   guard/            统一授权检查与可信身份上下文
   rewrite/          AST 解析、表字段限制、行权限注入、参数检查
   store/            只读查询、独立 Action 写事务、结构读取、分页与限制
-  action/           goja 脚本、标准静态 import/export、固定 SQL 模板与事务运行器
+  action/           goja 脚本、qiuer 风格 main/CommonJS、静态 SQL 与事务运行器（兼容旧 Action）
   audit/            请求、改写、执行、权限检查及操作审计
   application/      Web 与管理 MCP 共用的领域动作
   adminapi/         受保护的后台 HTTP API
@@ -103,6 +103,8 @@ DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；�
 
 配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数。工作台路径为 `query-workbench`（查询工作台）、`knowledge-workbench`（知识工作台）、`action-workbench`（动作工作台）和 `view-workbench`（视图工作台）；旧 `sql`、`sql-workbench` 链接兼容转为 `query-workbench`。
 
+SQLite 数据库配置提供“打开 DDL 管理”开关，默认关闭，仅系统管理员可修改。开启后出现 `ddl-management` 独立菜单，管理表、字段、约束、索引、数据库视图和触发器，支持批量 SQL、变更预览、自动备份及执行记录。查看需 `config.read`，修改另需 `ddl.write`；admin MCP 的 ddl 资源提供相同能力。执行成功后服务端侦查，仍在查询配置审核结构，新表、新字段不会自动开放。详见 [数据库说明](docs/databases.md)。
+
 控制台地址会随数据库、数据表、动作、知识及公共函数的选择更新。例如 `#/query-configuration/employees?database=default`、`#/action-configuration/update_customer_mobile?database=default` 和 `#/knowledge-configuration/securities-actions-guide?database=default`。工作台模式、详情视图、表数据分页与排序、已应用的日志筛选也保存在地址中；刷新、复制链接及浏览器前进后退会恢复对应选择。打开动作工作台链接只读取元数据，不自动试运行或正式调用；密码、Token、动作参数和自定义 SQL 不写入地址。未保存的配置在离开前仍会提示确认。
 
 ## 全站显示设置
@@ -117,6 +119,7 @@ DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；�
 | --- | --- |
 | `config.read` | 查看连接和配置，使用配置管理页面 |
 | `config.write` | 修改数据库名称 |
+| `ddl.write` | 管理已打开 DDL 管理的 SQLite 业务库结构，需同时拥有 config.read |
 | `policy.write` | 修改表、字段、行权限策略 |
 | `mcp.write` | 配置 MCP 地址、基础工具与知识发布开关 |
 | `action.write` | 编写业务 Action、启停独立写入及维护写入账号 |
@@ -329,4 +332,4 @@ make build         # 两个服务器、数据生成器与前端构建
 - 视图按类型生成 SQL 字面量：字符串加单引号并转义，负数加括号，布尔写为 1/0；占位符不能写在引号或注释里，未声明的占位符直接报错。最终 SQL 仍由服务端解析并按权限改写，视图只调用 `query`，不使用 `raw_query`。
 - 数据库需启用 `query` 工具，并在该数据库的独立业务账号域中为员工账号配置业务身份。连接器 ID 当前为默认库的 `datascope`；按库拼装的连接器下载尚未提供。
 
-网络数据源支持同一连接、允许 Schema 范围内的跨 Schema JOIN，包含 MySQL、Oracle、PostgreSQL、达梦。数据库管理分别配置默认 Schema（可空）和允许范围，查询管理选择登记表、配置开放权限。所有网络表使用 Schema＋表名标识；Oracle Service name 仍必填。网络源只为所选表读取完整结构，已登记网络表目录按页显示；SQLite 保持原有单库发现与查询行为。详情见 [数据源配置](docs/databases.md#schema-范围与选表) 和 [跨 Schema 验收](docs/schema-join-acceptance.md)。
+网络数据源支持同一连接、允许 Schema 范围内的跨 Schema JOIN，包含 MySQL、Oracle、PostgreSQL、达梦、OceanBase（MySQL 模式）。数据库管理分别配置默认 Schema（可空）和允许范围，查询管理选择登记表、配置开放权限。所有网络表使用 Schema＋表名标识；Oracle Service name 仍必填。网络源只为所选表读取完整结构，已登记网络表目录按页显示；SQLite 保持原有单库发现与查询行为。详情见 [数据源配置](docs/databases.md#schema-范围与选表) 和 [跨 Schema 验收](docs/schema-join-acceptance.md)。

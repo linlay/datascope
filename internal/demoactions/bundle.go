@@ -107,6 +107,60 @@ type InstallResult struct {
 	Revision        int      `json:"revision"`
 }
 
+// MigrateScripts upgrades the installed suite without reinstalling it. In
+// particular it preserves publication, schemas, view links, tools, write flags
+// and accounts. Save uses the observed revision and invalidates old previews.
+func MigrateScripts(ctx context.Context, app *application.Service, id string, check bool) (InstallResult, error) {
+	result := InstallResult{DatabaseID: id, GrantedAccounts: []string{}}
+	if err := guard.Require(ctx, app.Management, id, "action.write"); err != nil {
+		return result, err
+	}
+	d, err := app.Catalog.Get(id)
+	if err != nil {
+		return result, err
+	}
+	bundle, err := Load()
+	if err != nil {
+		return result, err
+	}
+	changed := false
+	for _, a := range bundle.Actions {
+		i := slices.IndexFunc(d.Actions, func(old action.Definition) bool { return old.Name == a.Name })
+		if i < 0 {
+			return result, fmt.Errorf("证券 Action %s 尚未安装，请先安装完整案例包", a.Name)
+		}
+		changed = changed || d.Actions[i].Script != a.Script
+		d.Actions[i].Script = a.Script
+	}
+	for _, lib := range bundle.ActionLibraries {
+		i := slices.IndexFunc(d.ActionLibraries, func(old action.Library) bool { return old.Name == lib.Name })
+		if i < 0 {
+			return result, fmt.Errorf("证券公共库 %s 尚未安装", lib.Name)
+		}
+		changed = changed || d.ActionLibraries[i].Script != lib.Script
+		d.ActionLibraries[i].Script = lib.Script
+	}
+	if err = action.ValidateLibraries(d.ActionLibraries); err != nil {
+		return result, err
+	}
+	for _, a := range d.Actions {
+		if err = a.Validate(d.ActionLibraries...); err != nil {
+			return result, fmt.Errorf("action %s: %w", a.Name, err)
+		}
+	}
+	if changed && !check {
+		if _, err = app.Call(ctx, "configure_actions", application.Input{DatabaseID: id, Database: d}); err != nil {
+			return result, err
+		}
+		d, err = app.Catalog.Get(id)
+		if err != nil {
+			return result, err
+		}
+	}
+	result.ActionCount, result.ConfigChanged, result.Revision = len(d.Actions), changed, d.Revision
+	return result, nil
+}
+
 // Install preserves custom actions, query policies, existing capabilities and
 // passwords. Different definitions with an existing name require explicit replace.
 func Install(ctx context.Context, app *application.Service, id string, accounts []string, replace bool) (InstallResult, error) {

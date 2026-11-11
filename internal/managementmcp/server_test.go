@@ -8,6 +8,8 @@ import (
 func TestRejectInvalidManagementArguments(t *testing.T) {
 	for _, tc := range []struct{ name, tool, raw string }{
 		{"write through query", "datascope_query", `{"action":"save","args":{"resourceType":"policy","database_id":"default","database":{}}}`},
+		{"ddl write through query", "datascope_query", `{"action":"apply","args":{"resourceType":"ddl","database_id":"default","plan_id":"p_x","request_id":"x"}}`},
+		{"ddl foreign fields", "datascope_inspect", `{"action":"preview","args":{"resourceType":"ddl","database_id":"default","sql":"CREATE TABLE x(id)","write_password":"secret"}}`},
 		{"wrong resource", "datascope_inspect", `{"action":"validate","args":{"resourceType":"user"}}`},
 		{"missing resource", "datascope_query", `{"action":"list","args":{}}`},
 		{"missing database", "datascope_query", `{"action":"get","args":{"resourceType":"database"}}`},
@@ -32,6 +34,34 @@ func TestRejectInvalidManagementArguments(t *testing.T) {
 			}
 			if _, _, err := decode(tc.tool, in); err == nil {
 				t.Fatal("accepted invalid arguments")
+			}
+		})
+	}
+}
+
+func TestDDLManagementOperationMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		tool, action, domain string
+		args                 map[string]any
+	}{
+		{"datascope_query", "list", "list_ddl_objects", map[string]any{"object_type": "table", "query": "clients", "limit": 20, "offset": 0}},
+		{"datascope_query", "get", "get_ddl_object", map[string]any{"object_type": "table", "name": "clients"}},
+		{"datascope_query", "execution", "get_ddl_execution", map[string]any{"execution_id": "e_1"}},
+		{"datascope_query", "history", "list_ddl_executions", map[string]any{}},
+		{"datascope_inspect", "preview", "preview_ddl", map[string]any{"changes": []map[string]any{{"operation": "drop", "object_type": "table", "name": "clients"}}}},
+		{"datascope_manage", "apply", "apply_ddl", map[string]any{"plan_id": "p_1", "request_id": "apply-1"}},
+	} {
+		t.Run(tc.domain, func(t *testing.T) {
+			tc.args["resourceType"] = "ddl"
+			tc.args["database_id"] = "default"
+			raw, _ := json.Marshal(map[string]any{"action": tc.action, "args": tc.args})
+			var in input
+			if err := json.Unmarshal(raw, &in); err != nil {
+				t.Fatal(err)
+			}
+			domain, args, err := decode(tc.tool, in)
+			if err != nil || domain != tc.domain || args.DatabaseID != "default" {
+				t.Fatalf("%s %+v %v", domain, args, err)
 			}
 		})
 	}

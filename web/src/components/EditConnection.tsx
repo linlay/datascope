@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, message } from 'antd';
 import { managementCall, type Database } from '../api';
+import { isMySQLDriver } from './connectionURL';
 import { useI18n } from '../ui/preferences';
 
 export function EditConnection({ db, onSaved }: { db: Database; onSaved: () => void }) {
@@ -24,7 +25,7 @@ export function EditConnection({ db, onSaved }: { db: Database; onSaved: () => v
   } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
  };
  return <>
-  <Button onClick={() => { setRevision(db.revision); form.setFieldsValue({ connection: { ...db.connection, tls_mode: db.connection?.tls_mode || ((db.driver === 'mysql' || db.driver === 'postgresql') ? 'verify-full' : '') }, password: '' }); setOpen(true); }}>{t('编辑连接')}</Button>
+  <Button onClick={() => { setRevision(db.revision); form.setFieldsValue({ connection: { ...db.connection, tls_mode: db.connection?.tls_mode || ((isMySQLDriver(db.driver) || db.driver === 'postgresql') ? 'verify-full' : '') }, password: '' }); setOpen(true); }}>{t('编辑连接')}</Button>
   <Modal title={t('编辑连接')} open={open} onCancel={() => { if (!busy) close(); }} footer={<Space>
    <Button disabled={busy} onClick={close}>{t('取消')}</Button>
    <Button loading={busy} onClick={() => void run(false)}>{t('测试连接')}</Button>
@@ -36,7 +37,7 @@ export function EditConnection({ db, onSaved }: { db: Database; onSaved: () => v
     <Form.Item name={['connection', 'port']} label={t('端口')} rules={[{ required: true }]}><InputNumber min={1} max={65535} precision={0} /></Form.Item>
     <Form.Item name={['connection', 'username']} label={t('数据库只读账号')} rules={[{ required: true, whitespace: true }]}><Input autoComplete="off" /></Form.Item>
     <Form.Item name="password" label={t('数据库密码')}><Input.Password autoComplete="new-password" placeholder={t('留空保留原密码')} /></Form.Item>
-    {(db.driver === 'mysql' || db.driver === 'postgresql') && <Form.Item name={['connection', 'tls_mode']} label={t('连接加密')} rules={[{ required: true }]}>
+    {(isMySQLDriver(db.driver) || db.driver === 'postgresql') && <Form.Item name={['connection', 'tls_mode']} label={t('连接加密')} rules={[{ required: true }]}>
      <Select options={[{ value: 'verify-full', label: t('TLS：校验证书和主机名') }, ...(db.driver === 'postgresql' ? [{ value: 'require', label: t('TLS：只加密') }] : []), { value: 'disable', label: t('关闭 TLS（可信网络）') }]} />
     </Form.Item>}
    </Form>

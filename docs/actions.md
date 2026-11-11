@@ -12,88 +12,105 @@ Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保
 
 在「开放工具」启用 `list_actions`、`describe_action`、`invoke_action`，并为当前数据库的业务账号授予 `action`。业务账号可以只有 `action`，与 `query` 并列；该账号不能登录管理后台。`my.*` 始终应用数据库已有查询策略，不需要额外授予业务账号通用查询工具。
 
-## 定义示例
+## qiuer 风格脚本
 
-下面使用示意表，实际应替换为数据库中的真实名称。金额采用整数分，参数整数限定在 JavaScript 安全整数范围。
+新 Action 参照 qiuer-go 正式业务 JS 契约：入口为 `main(params, context)`，公共库使用 CommonJS，相对 `require` 只解析当前数据库的公共库。DataScope 仍使用自身的 Goja 执行器与事务管理，不需要部署 qiuer 服务；开放的是受限的 Action API，并非 qiuer 全部宿主能力。
 
 ```yaml
 actions:
   - name: rename_item
     title: 修改本人记录名称
-    description: 修改可见且归本人管理的记录名称
+    description: 修改归本人管理的记录名称
     confirm: true
     parameters:
       id: {type: integer, description: 记录编号, min: 1}
       name: {type: string, description: 新名称, maxLength: 100}
     script: |
-      function run(args, ctx) {
-        const row = my.one`SELECT id, owner_id FROM items WHERE id = ${args.id}`;
-        if (!row) deny('记录不存在或无权查看');
-        if (row.owner_id !== ctx.userId) deny('只能修改本人记录');
-        const n = db.exec`UPDATE items SET name = ${args.name}
-                          WHERE id = ${args.id} AND owner_id = ${ctx.userId}`;
-        if (n !== 1) deny('记录已变化，请重试');
-        const updated = my.one`SELECT id, name FROM items WHERE id = ${args.id}`;
-        if (!updated || updated.name !== args.name) deny('后置检查失败');
+      function main(params, context) {
+        const conn = db.session();
+        const row = conn.queryOne("SELECT id, owner_id FROM items WHERE id=:id", {id: params.id});
+        if (!row || row.owner_id !== context.userId) throw new HttpError(403, "无权修改此记录");
+        const result = conn.update(
+          "UPDATE items SET name=:name WHERE id=:id AND owner_id=:userId",
+          {name: params.name, id: params.id, userId: context.userId}
+        );
+        if (result.rowsAffected !== 1) throw new HttpError(409, "记录已变化，请重试");
+        const updated = conn.queryOne("SELECT id, name FROM items WHERE id=:id", {id: params.id});
+        if (!updated || updated.name !== params.name) throw new Error("后置检查失败");
         return updated;
       }
 ```
 
-参数支持 `string`、`integer`、`number`、`boolean`，默认必填；可加 `optional: true`、`enum`、`min`、`max`、`maxLength`、`pattern`。拒绝未知参数和 null；校验错误附完整 JSON Schema。`maxLength` 按 Unicode 字符计算。`pattern` 使用 Go 正则语法。
+参数支持 `string`、`integer`、`number`、`boolean`，默认必填；可加 `optional: true`、`enum`、`min`、`max`、`maxLength`、`pattern`。拒绝未知参数和 null；校验错误附完整 JSON Schema。`maxLength` 按 Unicode 字符计算，`pattern` 使用 Go 正则语法。
 
 | 脚本接口 | 行为 |
 | --- | --- |
-| `my.one` / `my.all` | SELECT 自动应用表、字段、行策略、denyUnless 和各表行数上限 |
-| `db.one` / `db.all` | SELECT 读取可信业务数据，绕过查询策略 |
-| `db.exec` | 执行单条 INSERT / UPDATE / DELETE，返回影响行数 |
-| `deny(message)` | 中止事务，拒绝原因返回给调用方 |
-| `ctx.userId` / `ctx.now` | 可信业务身份、本次操作的固定 UTC RFC3339 时间 |
-| `return value` | 同步返回 JSON 值，最多 1 MiB |
+| `db.session()` | 当前 Action 所属数据库的连接；本次调用及公共库共享同一事务 |
+| `db.session(databaseId)` | 显式指定当前数据库也可使用；预留额外数据库入口，目前拒绝其他 ID |
+| `conn.query(sql, params?)` | SELECT，返回行对象数组 |
+| `conn.queryOne(sql, params?)` | SELECT，返回首行或 null |
+| `conn.update(sql, params?)` | 单条 INSERT/UPDATE/DELETE，返回 `{rowsAffected,lastInsertId}`；部分驱动不提供 lastInsertId |
+| `context.userId / databaseId / now` | 可信业务身份、当前数据库 ID、本次操作固定 UTC 时间 |
+| `throw new HttpError(status,message,details?)` | 拒绝操作；未捕获异常使整次事务回滚 |
+| `list/map/string/coalesce/typeOf/contains/nil` | 与 qiuer 同名的普通值处理助手；contains 默认读取当前入参 |
 
-所有 SQL 必须写成标签模板，如 ``db.one`SELECT ... WHERE id=${args.id}` ``。编译时固定每个模板的 SQL，插值只能作为参数值绑定；字符串拼接、动态模板、引号或注释内的插值均不能执行。表和列名直接写在模板中。
+`db.session()` 的默认连接由本次 Action 所属数据库决定，不取配置目录中第一个数据源。没有 `connect/open/commit/rollback/close` 接口，脚本不能控制事务边界。显式额外数据库连接保留 API 位置，跨库连接及跨库写入尚未实现。
 
-`one` 无记录时返回 null，`all` 返回数组。BIGINT、DECIMAL、NUMERIC 作为字符串返回；其他超出安全整数范围的整数也返回字符串。若驱动已把精确小数转换成浮点，拒绝返回，需在 SQL 中将该字段转为文本。`db.*` 读出的内容不自动脱敏，脚本作者应只返回业务需要的结果。
+新 Action 查询**不自动继承普通查询工具的表、字段、行权限和脱敏规则**，也不提供 `my.*`。管理员编写、审核并发布 Action，由脚本根据可信身份显式检查角色、数据归属和业务状态；UPDATE/DELETE 应再次包含关键归属与状态条件并检查 rowsAffected。普通查询工具仍执行原查询策略。证券示例的员工、账户与客户公共库已包含显式业务权限检查。
 
-每次操作共享一个事务，前置/后置 SELECT 都能看到本事务的修改。正常返回才提交；deny、SQL 异常、JS 异常、超时均回滚，即使脚本捕获了 deny/SQL 异常也不能提交。限制为总时限 5 秒（包括连接建立）、50 条脚本 SQL（包括权限 guard）、每次 SELECT 最多 1000 行。脚本仅支持当前数据库公共函数库的静态模块导入，没有网络、文件、进程、动态 import、require 或计时器接口。
+所有 SQL 必须直接写为 `query/queryOne/update` 的字符串字面量，使用 `:name` + 参数对象，或 `?` + 参数数组；不混用两种绑定。重复命名参数只绑定一次。值只接受 null、字符串、布尔和安全范围内有限数值，不接受对象、数组值或 undefined。SQL 结构在保存时静态抽取、验证；表名与列名写在 SQL 中，不能通过参数传入。动态 SQL、SQL 变量/拼接/普通模板字符串、方法别名和方括号调用不可执行数据库操作。当前 Action 不开放 qiuer 的动态 SQL 指令、数组展开、表达式参数和 queryTable/batch 等扩展。
 
-## 公共函数库与标准 import
+`update` 不允许 DDL、事务控制或多条 SQL。UPDATE/DELETE 必须有 WHERE，禁止 REPLACE、RETURNING 和冲突处理；网络库还不支持 DML WITH、UPDATE FROM、UPSERT、DELETE ORDER/LIMIT 等形式。SQL 经现有 AST 与驱动适配层执行，写账号应只获得必需表的权限。
 
-在「动作配置 → 公共函数库」管理本库的复用代码，需要 `config.read` 和 `action.write`。公共库保存为 `management/action-libraries/<name>.yml`，字段为 `name`、`title`、`description`、`script`，采用小驼峰。例如 `employee.yml`：
+BIGINT、DECIMAL、NUMERIC 作为字符串返回；其他超出安全整数范围的整数也返回字符串。若驱动已把精确小数转换成浮点，拒绝返回，需在 SQL 中将字段转为文本。脚本应只返回业务所需数据。
+
+每次调用创建独立 VM，入参及 context 深度冻结。正常返回才提交；未捕获 JS 异常、SQL 异常或超时均回滚，SQL 失败被 catch 后也不能提交。普通业务异常若被脚本主动 catch，则由脚本处理；需要不可恢复拒绝时仍可使用兼容的 `deny(message)`。总时限 5 秒（包括连接建立），最多 50 条 SQL，每次 SELECT 最多 1000 行，结果最多 1 MiB。数据库调用同步执行；已完成 Promise 可解包，rejected/pending Promise 拒绝，没有定时器事件循环。顶层 undefined 返回 null。没有网络、文件、进程或 npm 能力。
+
+## 公共函数库
+
+公共库保存在 `management/action-libraries/<name>.yml`，需要 `config.read` 和 `action.write`。虚拟路径为 `./<name>`，可加 `.js`，不解析文件系统、URL 或 npm 包。
 
 ```yaml
 name: employee
 title: 员工身份检查
 description: 校验在职员工
 script: |
-  export function operator(ctx) {
-    const user = db.one`SELECT e.employee_id, e.status, r.code AS role_code FROM employees e JOIN roles r ON r.id=e.role_id WHERE e.employee_id=${ctx.userId}`;
-    if (!user || user.status !== 'active') deny('员工不存在或已停用');
+  exports.operator = function(context) {
+    const conn = db.session();
+    const user = conn.queryOne(
+      "SELECT employee_id, status FROM employees WHERE employee_id=:userId",
+      {userId: context.userId}
+    );
+    if (!user || user.status !== "active") throw new HttpError(403, "员工不存在或已停用");
     return user;
-  }
-
-  export function administrator(user) {
-    if (user.role_code !== 'ADMIN') deny('需要管理员身份');
-  }
+  };
 ```
 
-动作的 `script` 使用 JavaScript ES Modules 静态语法；一条语句可导入多个函数，也可用 `as` 改名，或使用 `import * as employee from "employee"`。支持默认导出及模块间的静态导入、重新导出，不增加 YAML `uses` 字段：
-
 ```js
-import { operator, administrator as requireAdmin } from "employee";
-
-function run(args, ctx) {
-  const user = operator(ctx);
-  return { employeeId: user.employee_id };
+const { operator } = require("./employee");
+function main(params, context) {
+  const user = operator(context);
+  return {employeeId: user.employee_id};
 }
 ```
 
-模块名称只解析为当前数据库的公共库名称，不解析文件路径、URL 或 npm 包。保存时校验库与动作的语法、导出、缺失依赖、循环依赖以及全部静态 SQL；被引用的库不能直接删除。运行时只编译和装载本次动作可达的模块，不执行无关库。按模块加载，不按单个导出函数裁剪。源码及配置仍每次读取当前 YAML；不可变编译结果按数据库与全部源码内容缓存，上限 128 项和 8 MiB 源码预算。源码变化会使用新的编译结果。
+支持 `exports.name`、`module.exports`，require 参数必须为静态相对路径。CommonJS 循环依赖遵循部分 exports 语义。保存时检查语法、依赖和静态 SQL；CJS 导出函数是否存在由运行时确定。被引用的库不能删除。只装载本次动作可达的库，模块内不按单个导出裁剪，模块变量不跨调用保留。初始化可以取得 session，但不能执行 SQL，即使捕获初始化 SQL 错误仍会失败。
 
-每次调用创建新的 JS 执行环境，模块变量、用户身份和事务不跨请求共享。模块初始化阶段禁止执行 SQL；SQL 必须放在函数体中，由动作调用时执行。公共库与动作共享同一事务、身份、SQL 条数和超时限制；导入库中的 SQL 也进入既有静态模板校验、参数绑定和权限改写。公共库修改提高数据库 revision，并使待确认预览失效；即使手动修改库却未提高 revision，代码指纹变化也会拒绝旧确认。已完成的幂等回执继续复用。
+不可变编译结果按数据库与完整源码缓存，最多 128 项、8 MiB；源码变更使用新结果。公共库与动作共享身份、事务、SQL 条数和期限。库更新提高 revision，并使旧确认预览失效；即使直接改 YAML 未提高 revision，代码指纹变化也拒绝旧确认。已完成幂等回执仍复用。配置克隆同时复制公共库，并检查可达 SQL 与目标库结构。
 
-配置克隆选择 Actions 时同时复制公共函数库，并检查导入库中的 SQL 与目标库结构。证券演示包的 18 个动作已改为引用 employee、account、customer 三个公共库；安装器按原有冲突与 `-replace` 规则处理库定义。
+## 旧脚本兼容与证券迁移
 
-UPDATE / DELETE 必须有 WHERE，并建议再次包含所有关键权限和状态条件、检查影响行数。普通 INSERT、UPDATE、DELETE 经 AST 编译为各数据库的参数和引用形式；网络库暂不支持 DML 的 WITH、UPDATE FROM、RETURNING、UPSERT、冲突处理、DELETE ORDER/LIMIT。SQLite 也禁止事务控制、DDL、PRAGMA、ATTACH、REPLACE、RETURNING 和冲突处理。写入账号本身应只获得必需表的权限。
+已有 `run(args, ctx)`、ES Modules 和 `db.one/db.all/db.exec`、`my.one/my.all` SQL 标签模板继续通过旧路径执行；`my.*` 仅在旧路径继续应用原查询策略。新 `main` 脚本及其库使用 CommonJS，不能混用两套契约。
+
+证券案例包全部 18 个 Action、3 个公共库已采用新契约。已有安装可仅升级脚本，保留参数、确认开关、发布状态、视图、写入开关、MCP 配置与账号授权：
+
+```sh
+# 加载与服务相同的环境变量后执行
+ go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts -check
+ go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts
+```
+
+实际迁移前会备份逐库管理配置，通过 revision 检查一次保存全部脚本；重复迁移无变更。不提交证券业务数据，不重装视图或重新授权账号。源码升级后需构建并重启 API/MCP 服务，使新脚本由新执行器运行。
 
 ## 动作 AI 助手
 

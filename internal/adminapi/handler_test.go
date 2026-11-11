@@ -3,7 +3,6 @@ package adminapi
 import (
 	"bytes"
 	"context"
-	"datascope-server/internal/testutil"
 	"encoding/json"
 	"net"
 	"net/http"

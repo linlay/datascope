@@ -17,7 +17,7 @@ import { selectResource, useNavigationBlocker, useRoute } from '../navigation';
 const example: ActionDefinition = {
  name: '', title: '', description: '', confirm: true, published: false,
  parameters: { id: { type: 'integer', description: '记录编号' }, value: { type: 'string', description: '新值', max_length: 200 } },
- script: 'function run(args, ctx) {\n  const row = my.one`SELECT id FROM records WHERE id = ${args.id}`;\n  if (!row) deny("记录不存在或无权查看");\n  const n = db.exec`UPDATE records SET value = ${args.value} WHERE id = ${args.id} AND owner_id = ${ctx.userId}`;\n  if (n !== 1) deny("记录已变化，请重试");\n  return { id: args.id, updated: n };\n}',
+ script: "function main(params, context) {\n  const conn = db.session();\n  const row = conn.queryOne(\"SELECT id, owner FROM records WHERE id=:id\", { id: params.id });\n  if (!row || row.owner !== context.userId) throw new HttpError(403, \"无权修改此记录\");\n  const result = conn.update(\"UPDATE records SET value=:value WHERE id=:id AND owner=:userId\", { value: params.value, id: params.id, userId: context.userId });\n  if (result.rowsAffected !== 1) throw new HttpError(409, \"记录已变化，请重试\");\n  return { id: params.id, updated: result.rowsAffected };\n}",
 };
 type ActionFields = Omit<ActionDefinition, 'parameters'>;
 const fieldsOf = (action: ActionFields): ActionFields => ({ published: action.published !== false, view_id: action.view_id, name: action.name, title: action.title, description: action.description, confirm: action.confirm, script: action.script });
@@ -182,7 +182,7 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
        <Form.Item name="view_id" label={t("关联视图")}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
        <Form.Item name="confirm" label={<Space size={4}>{t('人工确认')}<ActionConfirmationHelp /></Space>} valuePropName="checked"><Switch /></Form.Item>
       </div>
-      <Form.Item name="script" label={<Space size={4}>JavaScript · run(args, ctx)<HelpTip label={t('动作代码')}>{t('my.one / my.all 按查询权限读取，db.exec 使用 SQL 模板写入。人工确认动作先预览，再由用户确认执行。')}{' '}{t('可用 import { fn1, fn2 } from "库名称" 引用当前数据库的公共函数。')}</HelpTip><UserGuide scriptReference/></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
+      <Form.Item name="script" label={<Space size={4}>JavaScript · main(params, context)<HelpTip label={t('动作代码')}>{t('db.session() 连接当前数据库；使用 query/queryOne/update 和静态 SQL。动作自行检查业务权限，人工确认动作先预览再确认。')}{' '}{t('使用 const { fn } = require("./库名称") 引用当前数据库的公共函数。')}</HelpTip><UserGuide scriptReference/></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
       <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
      </Form> : <Empty description={t('从左侧选择动作，或新增一个动作。')} />}
     </Space>

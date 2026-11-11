@@ -6,6 +6,7 @@ import (
 	"datascope-server/internal/ai"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
+	"datascope-server/internal/ddl"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
 	"datascope-server/internal/store"
@@ -29,6 +30,11 @@ type Service struct {
 }
 type Input struct {
 	Assistant      *AssistantInput                `json:"assistant,omitempty"`
+	ObjectType     string                         `json:"object_type,omitempty"`
+	ParentName     string                         `json:"parent_name,omitempty"`
+	PlanID         string                         `json:"plan_id,omitempty"`
+	ExecutionID    string                         `json:"execution_id,omitempty"`
+	Changes        []ddl.Change                   `json:"changes,omitempty"`
 	Upload         io.Reader                      `json:"-"`
 	TableNames     []string                       `json:"table_names,omitempty"`
 	CreateSQLite   bool                           `json:"create_sqlite,omitempty"`
@@ -129,6 +135,23 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "list_ddl_objects", "get_ddl_object", "preview_ddl", "apply_ddl", "get_ddl_execution", "list_ddl_executions":
+		result, ddlErr := s.DDL(ctx, action, in)
+		if ev != nil {
+			ev.OriginalSQL = in.SQL
+			switch value := result.(type) {
+			case *ddl.Plan:
+				if value != nil {
+					ev.Detail = value
+				}
+			case *ddl.Execution:
+				if value != nil {
+					ev.ExecutedSQL = strings.Join(value.SQL, ";\n")
+					ev.Detail = value
+				}
+			}
+		}
+		return result, ddlErr
 	case "configure_views":
 		return s.ConfigureViews(ctx, in)
 	case "list_view_templates":
@@ -390,7 +413,20 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		}
 		switch action {
 		case "update_database":
-			d.Name = in.Database.Name
+			if in.Database.Name != "" {
+				d.Name = in.Database.Name
+			} else if in.Database.DDLEnabled == nil {
+				return nil, errors.New("需要数据库名称或 ddl_enabled")
+			}
+			if in.Database.DDLEnabled != nil {
+				if !u.SystemAdmin {
+					return nil, management.ErrDenied
+				}
+				if d.Driver != "sqlite" {
+					return nil, errors.New("DDL 管理仅支持 SQLite 数据库")
+				}
+				d.DDLEnabled = in.Database.DDLEnabled
+			}
 			if in.Database.Connection != nil {
 				d.Connection = in.Database.Connection
 			}
@@ -538,6 +574,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e != nil {
 			return nil, e
 		}
+		if !reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
 		_, maskingChanged, maskErr := catalog.MergeColumnMasking(old.Discovery, in.Database.Discovery)
 		if maskErr != nil {
 			return nil, maskErr
@@ -581,7 +620,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if !maskingChanged && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
+		if !maskingChanged && reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
@@ -808,7 +847,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	view := DatabaseView{SchemaEditable: u.SystemAdmin && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{SchemaEditable: s.Management.Can(ctx, u.ID, d.ID, "ddl.write") && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
 	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		if source, e := s.Management.Source(ctx, d.ID); e == nil {
 			view.ManagementPath = source.Path

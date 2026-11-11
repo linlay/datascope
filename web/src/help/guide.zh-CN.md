@@ -31,6 +31,8 @@
 
 ## 动作配置与脚本接口
 
+新建动作的默认模板使用 `main(params, context)`：通过 `db.session()` 获取当前库连接，以 `conn.query` / `conn.queryOne` 读取、`conn.update` 写入，SQL 使用静态字符串和 `:name` 参数。查询不自动应用普通查询权限，脚本必须用 `context.userId` 检查记录归属；写入后核对 `result.rowsAffected`。公共库用 `exports.fn` 导出、`require("./库名称")` 引用。下面介绍仍兼容的 `run(args, ctx)` 模板，两种脚本接口不要混用。
+
 在「动作配置」新建动作，填写名称、用途、参数及类型，再编写同步入口 `function run(args, ctx)`。例如把 id 定为整数、value 定为字符串，执行时就能从 `args.id` 和 `args.value` 取值。正式写入前需为当前库配置写连接并启用写入。
 
 | 接口 | 用途 |

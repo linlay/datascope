@@ -19,7 +19,7 @@ func engine(driver string) dialect.Engine {
 }
 
 func TestBindingsAndLiteralBoundaries(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			out, args, err := engine(driver).Compile(`SELECT id, ':who; LIMIT 8' AS literal FROM main.records AS r WHERE owner=:who OR id=:other OR owner=:who`, sql.Named("other", 9), sql.Named("who", 2))
 			if err != nil {
@@ -85,7 +85,7 @@ func TestRejectUnreviewedOrMutatingSQL(t *testing.T) {
 		`SELECT ROW_NUMBER() OVER () FROM records`,
 		`WITH RECURSIVE x AS (SELECT 1) SELECT * FROM x`,
 	}
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		for _, query := range queries {
 			t.Run(driver+"/"+query, func(t *testing.T) {
 				if out, _, err := engine(driver).Compile(query); err == nil {
@@ -125,7 +125,7 @@ tables:
 		t.Fatal(err)
 	}
 	queries := []string{`SELECT * FROM records ORDER BY id`, `WITH x AS (SELECT * FROM records) SELECT * FROM x ORDER BY id`, `SELECT a.id,a.owner FROM records a JOIN records b ON a.id=b.id ORDER BY a.id`}
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		for _, query := range queries {
 			e := engine(driver)
 			e.Schema = "main"
@@ -187,7 +187,7 @@ func TestExecutableCommentsAreNotForwarded(t *testing.T) {
 }
 
 func TestActionDMLCompilation(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			for _, q := range []string{"INSERT INTO records(id,owner) VALUES(:id,:owner)", "UPDATE records SET owner=:owner WHERE id=:id", "DELETE FROM records WHERE id=:id"} {
 				out, args, e := engine(driver).CompileWrite(q, sql.Named("id", 7), sql.Named("owner", 2))

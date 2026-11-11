@@ -358,7 +358,7 @@ go run ./cmd/install-demo-actions -check
 ## 记账和修改边界
 
 - 金额使用整数分，入金/出金/划转都是合成数据记账，不调用银行，不收取手续费。参数 amount_cents 为 1–100000000。
-- 只操作每个账户当前最新演示日结，初始数据为 2026-10-20；ctx.now 是调用时间，不把系统日期误当作账期。不会在历史记录中间插流水，不改后续日期的期初余额。
+- 只操作每个账户当前最新演示日结，初始数据为 2026-10-20；context.now 是调用时间，不把系统日期误当作账期。不会在历史记录中间插流水，不改后续日期的期初余额。
 - 资金操作先检查流水尾余额与日结一致，使用条件 UPDATE 防止余额不足或并发覆盖，并同时写流水；随后验证日结公式和转入转出对账。划转检查同客户同币种、双方操作权限及资金守恒，四条写入整体提交。
 - 客户资料被多个资金账户共享。普通经理只有管理该客户全部账户时才能修改；例如 C00001359 属于经理1完整管理，而 C00000061 跨多个经理，需业务管理员维护。
 - 冻结只修改账户状态；演示模型未建立冻结资金/冻结证券字段，撤余单也只终结剩余委托，保留已成交数量，不编造退款或改历史持仓。
@@ -396,3 +396,7 @@ go test ./internal/demoactions -v
 # 可选：对指定完整证券数据库先复制、再执行无准备步骤的31个预览，最终验证副本哈希不变。
 DATASCOPE_DEMO_ACTIONS_TEST_DB=/absolute/path/securities_demo.sqlite3 go test ./internal/demoactions -run TestFull -v -count=1
 ```
+
+## qiuer 风格脚本升级
+
+案例包与已迁移安装使用 `main(params, context)`、CommonJS 公共库和 `db.session().query/queryOne/update`。所有默认 session 绑定 Action 所属数据库；权限由员工、账户和客户公共库显式检查，不自动套用普通查询策略。旧安装使用 `install-demo-actions -database securities_demo -migrate-scripts` 仅升级18个动作与3个库脚本，保留其他配置，详见 [Action 契约](actions.md)。

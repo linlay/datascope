@@ -66,7 +66,7 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 		return nil, e
 	}
 	for _, s := range sites {
-		if e = store.ValidateActionTemplate(s.sql, s.count, s.method == "exec"); e != nil {
+		if e = s.validate(); e != nil {
 			return nil, e
 		}
 	}
@@ -87,7 +87,8 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 		}
 	}()
 	var fatal error
-	initializing := len(r.Libraries) > 0
+	native := hasMain(d.Script)
+	initializing := native || len(r.Libraries) > 0
 	abort := func(e error) goja.Value {
 		if fatal == nil {
 			fatal = e
@@ -95,10 +96,66 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 		panic(vm.NewGoError(e))
 	}
 	vm.Set("deny", func(c goja.FunctionCall) goja.Value { return abort(Denial(c.Argument(0).String())) })
+	parseJSON, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+	nativeValue := func(value any) goja.Value {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return abort(err)
+		}
+		result, err := parseJSON(goja.Undefined(), vm.ToValue(string(raw)))
+		if err != nil {
+			return abort(err)
+		}
+		return result
+	}
+	var connection *goja.Object
+	if native {
+		connection = vm.NewObject()
+		for _, name := range []string{"query", "queryOne", "update"} {
+			_ = connection.Set(name, func(goja.FunctionCall) goja.Value {
+				return abort(errors.New("SQL 必须直接使用 query/queryOne/update 和静态字符串，不能使用动态调用"))
+			})
+		}
+		db := vm.NewObject()
+		_ = db.Set("session", func(c goja.FunctionCall) goja.Value {
+			id := r.DatabaseID
+			if id == "" {
+				id = "default"
+			}
+			if len(c.Arguments) > 1 {
+				return abort(errors.New("db.session 只接受可选数据库 ID"))
+			}
+			if v := c.Argument(0); !goja.IsUndefined(v) && !goja.IsNull(v) {
+				name, ok := v.Export().(string)
+				if !ok || name != "" && name != id {
+					return abort(errors.New("Action 当前只允许连接所属数据库，额外数据库尚未开放"))
+				}
+			}
+			return connection
+		})
+		_ = vm.GlobalObject().DefineDataProperty("db", db, goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+		freeze, _ := goja.AssertFunction(vm.Get("Object").ToObject(vm).Get("freeze"))
+		_, _ = freeze(goja.Undefined(), db)
+		_, _ = freeze(goja.Undefined(), connection)
+		if _, e = vm.RunString(nativePrelude); e != nil {
+			return nil, e
+		}
+	}
 	out = &Preview{Writes: []Write{}}
 	for _, s := range sites {
 		site := s
 		if e = vm.GlobalObject().DefineDataProperty(site.name, vm.ToValue(func(c goja.FunctionCall) goja.Value {
+			if site.native && site.optionalReceiver && c.Argument(0) != connection && !goja.IsNull(c.Argument(0)) && !goja.IsUndefined(c.Argument(0)) {
+				// Business methods retain normal JS receiver/argument semantics,
+				// including calls made during module initialization.
+				if fn, ok := goja.AssertFunction(c.Argument(0).ToObject(vm).Get(site.method)); ok {
+					value, err := fn(c.Argument(0), append([]goja.Value{vm.ToValue(site.sql)}, c.Arguments[1:]...)...)
+					if err != nil {
+						panic(err)
+					}
+					return value
+				}
+			}
 			if initializing {
 				return abort(errors.New("模块初始化阶段不能执行 SQL，请在函数中执行"))
 			}
@@ -107,6 +164,41 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 			}
 			if ctx.Err() != nil {
 				return abort(ctx.Err())
+			}
+			if site.native {
+				if c.Argument(0) != connection {
+					return abort(errors.New("SQL 连接必须来自 db.session()"))
+				}
+				args, err := site.arguments(vm, c.Argument(1))
+				if err != nil {
+					return abort(err)
+				}
+				if fatal != nil {
+					return abort(fatal)
+				}
+				if site.method == "update" {
+					result, err := tx.Update(ctx, site.sql, args...)
+					if err != nil {
+						return abort(err)
+					}
+					out.Writes = append(out.Writes, Write{SQL: site.sql, Rows: result.RowsAffected, Binds: args})
+					var lastID any = result.LastInsertID
+					if result.LastInsertID > 9007199254740991 || result.LastInsertID < -9007199254740991 {
+						lastID = strconv.FormatInt(result.LastInsertID, 10)
+					}
+					return nativeValue(map[string]any{"rowsAffected": result.RowsAffected, "lastInsertId": lastID})
+				}
+				rows, err := tx.Query(ctx, site.sql, 1000, args...)
+				if err != nil {
+					return abort(err)
+				}
+				if site.method == "queryOne" {
+					if len(rows.Rows) == 0 {
+						return goja.Null()
+					}
+					return nativeValue(rows.Rows[0])
+				}
+				return nativeValue(rows.Rows)
 			}
 			if len(c.Arguments) != site.count+1 {
 				return abort(errors.New("SQL 只接受模板调用"))
@@ -221,18 +313,25 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 	}
 	// Capture JSON intrinsics before untrusted script can replace them.
 	stringify, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("stringify"))
-	raw, _ := json.Marshal(map[string]any{"args": args, "ctx": map[string]any{"userId": r.UserID, "now": r.Now.UTC().Format(time.RFC3339Nano)}})
+	raw, _ := json.Marshal(map[string]any{"args": args, "ctx": map[string]any{"userId": r.UserID, "databaseId": r.DatabaseID, "now": r.Now.UTC().Format(time.RFC3339Nano)}})
 	setup := `(function(){const x=JSON.parse(` + strconv.Quote(string(raw)) + `);function freeze(v){if(v&&typeof v==='object'){Object.keys(v).forEach(k=>freeze(v[k]));Object.freeze(v)}return v}Object.defineProperty(globalThis,'__input',{value:freeze(x),writable:false,configurable:false});})();`
 	if _, e = vm.RunString(setup); e != nil {
 		return nil, e
+	}
+	if native {
+		_ = vm.Set("$context", vm.Get("__input").ToObject(vm).Get("args"))
 	}
 	if _, e = vm.RunProgram(program); e != nil {
 		return nil, e
 	}
 	initializing = false
-	run, ok := goja.AssertFunction(vm.Get("run"))
+	entry := "run"
+	if native {
+		entry = "main"
+	}
+	run, ok := goja.AssertFunction(vm.Get(entry))
 	if !ok {
-		return nil, errors.New("脚本必须定义 function run(args, ctx)")
+		return nil, errors.New("脚本必须定义 function main(params, context)")
 	}
 	input := vm.Get("__input").ToObject(vm)
 	value, e := run(goja.Undefined(), input.Get("args"), input.Get("ctx"))
@@ -243,7 +342,21 @@ func (r Runner) Run(ctx context.Context, d Definition, args map[string]any, prev
 		return nil, e
 	}
 	if value.ExportType() == reflect.TypeFor[*goja.Promise]() {
-		return nil, errors.New("run 必须同步返回 JSON 对象")
+		if !native {
+			return nil, errors.New("run 必须同步返回 JSON 对象")
+		}
+		promise := value.Export().(*goja.Promise)
+		switch promise.State() {
+		case goja.PromiseStateFulfilled:
+			value = promise.Result()
+		case goja.PromiseStateRejected:
+			return nil, fmt.Errorf("main 执行失败: %s", promise.Result().String())
+		default:
+			return nil, errors.New("main 返回的 Promise 未完成，宿主没有事件循环")
+		}
+	}
+	if native && goja.IsUndefined(value) {
+		value = goja.Null()
 	}
 	serialized, e := stringify(goja.Undefined(), value)
 	if fatal != nil {

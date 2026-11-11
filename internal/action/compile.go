@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"datascope-server/internal/store"
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/ast"
 	"github.com/dop251/goja/parser"
@@ -15,6 +16,17 @@ import (
 type site struct {
 	name, scope, method, sql string
 	count                    int
+	native                   bool
+	parameters               []string
+	optionalReceiver         bool
+}
+
+func (s site) validate() error {
+	if s.native {
+		_, err := store.ActionSQLParameters(s.sql, s.method == "update")
+		return err
+	}
+	return store.ValidateActionTemplate(s.sql, s.count, s.method == "exec")
 }
 
 // Replace each literal tag with a host function closing over its static SQL.

@@ -165,6 +165,65 @@ func TestInstalledSecuritiesActionConfirmationAndReplay(t *testing.T) {
 		t.Fatal("replay result changed")
 	}
 }
+
+func TestMigrateSecuritiesScriptsPreservesConfigurationAndIsIdempotent(t *testing.T) {
+	app, ctx := platformFixture(t)
+	if _, err := demoactions.Install(ctx, app, "default", []string{"E0001"}, false); err != nil {
+		t.Fatal(err)
+	}
+	d, err := app.Catalog.Get("default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Actions[0].Script = `function run(){return {legacy:true}}`
+	d.Actions[0].Title = "Keep customized title"
+	no := false
+	d.Actions[0].Published = &no
+	d.Actions[0].Confirm = false
+	d.ActionLibraries[0].Title = "Keep library metadata"
+	d.ActionLibraries[0].Script += "\nexports.legacy=true;"
+	d.WriteEnabled = false
+	d.MCPEnabled = false
+	if err = app.Catalog.Save(ctx, *d); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := app.Catalog.Get("default")
+	account, _ := app.Management.BusinessAccount(ctx, "default", "E0001")
+	checked, err := demoactions.MigrateScripts(ctx, app, "default", true)
+	if err != nil || !checked.ConfigChanged {
+		t.Fatal(checked, err)
+	}
+	unchanged, _ := app.Catalog.Get("default")
+	if unchanged.Revision != before.Revision || unchanged.Actions[0].Script != before.Actions[0].Script {
+		t.Fatal("check mutated installed scripts")
+	}
+	migrated, err := demoactions.MigrateScripts(ctx, app, "default", false)
+	if err != nil || !migrated.ConfigChanged || migrated.ActionCount != 18 || migrated.Revision != before.Revision+1 {
+		t.Fatal(migrated, err)
+	}
+	after, _ := app.Catalog.Get("default")
+	bundle, _ := demoactions.Load()
+	for i := range after.Actions {
+		if after.Actions[i].Script != bundle.Actions[i].Script {
+			t.Fatal("installed Action not migrated", after.Actions[i].Name)
+		}
+		before.Actions[i].Script = after.Actions[i].Script
+	}
+	for i := range after.ActionLibraries {
+		before.ActionLibraries[i].Script = after.ActionLibraries[i].Script
+	}
+	if !demoactions.EqualJSON(before.Actions, after.Actions) || !demoactions.EqualJSON(before.ActionLibraries, after.ActionLibraries) || after.WriteEnabled || after.MCPEnabled {
+		t.Fatal("migration changed metadata or switches")
+	}
+	afterAccount, _ := app.Management.BusinessAccount(ctx, "default", "E0001")
+	if !demoactions.EqualJSON(account, afterAccount) {
+		t.Fatal("migration changed account authorization")
+	}
+	again, err := demoactions.MigrateScripts(ctx, app, "default", false)
+	if err != nil || again.ConfigChanged || again.Revision != migrated.Revision {
+		t.Fatal("migration is not idempotent", again, err)
+	}
+}
 func TestCashTransferFailureAfterDebitRollsBack(t *testing.T) {
 	_, db, st, rw := fixture(t)
 	bundle, e := demoactions.Load()

@@ -26,6 +26,8 @@ Use the table data page to browse and filter stored records with full query acce
 
 ## Action configuration and script reference
 
+New actions default to `main(params, context)`. Obtain the current database connection with `db.session()`, read with `conn.query` / `conn.queryOne`, and write with `conn.update`, using literal SQL and `:name` parameters. Queries do not automatically apply normal query permissions: scripts must check record ownership using `context.userId` and verify `result.rowsAffected` after writes. Export shared functions with `exports.fn` and load them with `require("./library")`. The following reference describes the compatible `run(args, ctx)` template; do not mix the two script APIs.
+
 Create an action with a name, description and typed parameters. Implement the synchronous entry point `function run(args, ctx)`. Declare id as an integer and value as a string for the example below. Configure a write connection and enable writes before testing the action.
 
 | Interface | Behavior |

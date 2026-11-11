@@ -7,11 +7,11 @@ import (
 )
 
 func TestOptionalSchemaAndExplicitScopeConfiguration(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			c := validConnection(driver)
 			c.Schema = ""
-			if driver == "mysql" {
+			if (driver == "mysql" || driver == "oceanbase") {
 				c.Database = ""
 			}
 			c.AllowedSchemas = []string{"A", "B"}
@@ -19,7 +19,7 @@ func TestOptionalSchemaAndExplicitScopeConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			c.Schema = "A"
-			if driver == "mysql" {
+			if (driver == "mysql" || driver == "oceanbase") {
 				c.Database = "A"
 			}
 			if err := ValidateConnection(driver, &c); err != nil {
