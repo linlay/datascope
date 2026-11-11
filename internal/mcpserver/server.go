@@ -303,7 +303,7 @@ func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryI
 	}
 	viewID := in.ViewID
 	if h.opts.Catalog != nil {
-		d, err := h.opts.Catalog.Get(h.opts.DatabaseID)
+		d, err := h.opts.Catalog.GetContext(ctx, h.opts.DatabaseID)
 		if err != nil {
 			return nil, nil, err
 		}
