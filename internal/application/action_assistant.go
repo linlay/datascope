@@ -305,11 +305,15 @@ func (s *Service) assistAction(ctx context.Context, in Input) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		text, err := ai.NormalizeJSONObject(res.Text)
+		if err != nil {
+			return nil, err
+		}
 		out = ActionSuggestion{}
-		dec := json.NewDecoder(strings.NewReader(res.Text))
+		dec := json.NewDecoder(strings.NewReader(text))
 		dec.DisallowUnknownFields()
-		if !json.Valid([]byte(res.Text)) || dec.Decode(&out) != nil {
-			return nil, ai.Invalid
+		if dec.Decode(&out) != nil {
+			return nil, ai.InvalidResponse("action suggestion has unknown fields or incorrect field types")
 		}
 		if a.Mode == "draft" && out.Question == "" && out.Parameters != nil && strings.TrimSpace(out.Script) != "" {
 			candidate := action.Definition{Name: "proposal", Title: "proposal", Description: "proposal", Parameters: out.Parameters, Script: out.Script}
@@ -335,19 +339,19 @@ func (s *Service) assistAction(ctx context.Context, in Input) (any, error) {
 	switch a.Mode {
 	case "draft":
 		if out.Parameters == nil || strings.TrimSpace(out.Script) == "" {
-			return nil, ai.Invalid
+			return nil, ai.InvalidResponse("draft suggestion must include parameters and a non-empty script, or a clarification question")
 		}
 		candidate := action.Definition{Name: "proposal", Title: "proposal", Description: "proposal", Parameters: out.Parameters, Script: out.Script}
 		reads, err := candidate.PrivilegedReads(d.ActionLibraries...)
 		if err != nil {
-			return nil, ai.Invalid
+			return nil, ai.InvalidResponse("could not analyze suggested script reads")
 		}
 		if len(reads) > 0 {
 			existing := map[string]bool{}
 			if saved.Script != "" {
 				existing, err = saved.PrivilegedReads(d.ActionLibraries...)
 				if err != nil {
-					return nil, ai.Invalid
+					return nil, ai.InvalidResponse("could not analyze saved script reads")
 				}
 			}
 			for query := range reads {
@@ -359,7 +363,7 @@ func (s *Service) assistAction(ctx context.Context, in Input) (any, error) {
 		return map[string]any{"script": out.Script, "parameters": out.Parameters, "summary": out.Summary, "explanation": out.Explanation}, nil
 	case "test":
 		if out.Arguments == nil || out.Expected == "" {
-			return nil, ai.Invalid
+			return nil, ai.InvalidResponse("test suggestion must include arguments and expected outcome")
 		}
 		for name, p := range def.Parameters {
 			choice, present := out.Arguments[name]
@@ -368,17 +372,17 @@ func (s *Service) assistAction(ctx context.Context, in Input) (any, error) {
 			}
 			index, ok := choice.(float64)
 			if !ok || index < 0 || index >= float64(len(p.Enum)) || index != float64(int(index)) {
-				return nil, ai.Invalid
+				return nil, ai.InvalidResponse("test suggestion enum choice must be a valid zero-based index")
 			}
 			out.Arguments[name] = p.Enum[int(index)]
 		}
 		if _, e = def.Arguments(out.Arguments); e != nil {
-			return nil, ai.Invalid
+			return nil, ai.InvalidResponse("generated test arguments do not satisfy parameter constraints")
 		}
 		return map[string]any{"arguments": out.Arguments, "expected": out.Expected}, nil
 	default:
 		if out.Explanation == "" {
-			return nil, ai.Invalid
+			return nil, ai.InvalidResponse("diagnosis must include a non-empty explanation")
 		}
 		repair := ""
 		if slices.Contains([]string{"unknown_table_or_column", "undefined_javascript_reference", "javascript_type_error"}, status) {

@@ -150,9 +150,9 @@ func (c *ChatClient) Complete(parent context.Context, r Request) (out Response, 
 		return out, err
 	}
 	if r.JSONObject {
-		var obj map[string]json.RawMessage
-		if json.Unmarshal([]byte(out.Text), &obj) != nil || obj == nil {
-			return out, Invalid
+		out.Text, err = NormalizeJSONObject(out.Text)
+		if err != nil {
+			return out, err
 		}
 	}
 
@@ -172,13 +172,22 @@ func readCompletion(body io.Reader) (out Response, err error) {
 		}
 		Usage *Usage
 	}
-	if len(raw) > limit || json.Unmarshal(raw, &result) != nil || len(result.Choices) != 1 {
-		return out, Invalid
+	if len(raw) > limit {
+		return out, InvalidResponse("provider response exceeds 1 MiB")
+	}
+	if json.Unmarshal(raw, &result) != nil {
+		return out, InvalidResponse("malformed Chat Completions response envelope")
+	}
+	if len(result.Choices) != 1 {
+		return out, InvalidResponse("expected exactly one completion choice")
 	}
 	choice := result.Choices[0]
 	out.Usage = result.Usage
-	if strings.TrimSpace(choice.Message.Content) == "" || (choice.Finish != "" && choice.Finish != "stop") {
-		return out, Invalid
+	if choice.Finish != "" && choice.Finish != "stop" {
+		return out, finishError(choice.Finish)
+	}
+	if strings.TrimSpace(choice.Message.Content) == "" {
+		return out, InvalidResponse("model returned no answer content")
 	}
 	out.Text = choice.Message.Content
 	return out, nil

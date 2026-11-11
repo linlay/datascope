@@ -22,6 +22,7 @@ func TestCompletions(t *testing.T) {
 		want   error
 	}{
 		{"ok", 200, `{"choices":[{"message":{"role":"assistant","content":"{\"terms\":[\"margin\"]}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":5,"total_tokens":11}}`, nil},
+		{"fenced JSON", 200, "{\"choices\": [{\"message\": {\"content\": \"```json\\n{\\\"terms\\\":[\\\"margin\\\"]}\\n```\"}, \"finish_reason\": \"stop\"}], \"usage\": {\"total_tokens\": 11}}", nil},
 		{"broken envelope", 200, "{", ai.Invalid}, {"no choices", 200, "{}", ai.Invalid},
 		{"broken JSON content", 200, `{"choices":[{"message":{"content":"oops"}}]}`, ai.Invalid},
 		{"truncated", 200, `{"choices":[{"message":{"content":"{}"},"finish_reason":"length"}]}`, ai.Invalid},
