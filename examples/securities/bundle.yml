@@ -1,0 +1,59 @@
+accounts:
+    - businessUserId: 1
+      name: E0001 演示员工
+      permissions:
+        - query
+        - knowledge.read
+        - action
+      username: E0001
+    - businessUserId: 121
+      name: E0121 演示员工
+      permissions:
+        - query
+        - knowledge.read
+        - action
+      username: E0121
+    - businessUserId: 175
+      name: E0175 演示员工
+      permissions:
+        - query
+        - knowledge.read
+        - action
+      username: E0175
+actionsFile: actions.yml
+database:
+    queryViewId: query
+    writeEnabled: true
+    authentication:
+        type: local
+        employeeDirectory: true
+        source: DATABASE
+        provider:
+            id: securities-accounts
+            name: 本库业务账号
+            type: DEMO_OAUTH
+            enabled: true
+        access:
+            id: database-auth
+            name: 本库账号 OAuth
+            mode: OAUTH
+            providerId: securities-accounts
+    id: securities_demo
+    name: 证券演示库
+    driver: sqlite
+    path: ../../data/securities_demo.sqlite3
+    mcpEnabled: true
+    mcpPath: securities_demo
+    tools:
+        - list_tables
+        - describe_table
+        - query
+        - search_knowledge
+        - read_knowledge
+        - list_actions
+        - describe_action
+        - invoke_action
+policyFile: rewrite.yml
+sqlExamplesFile: sql-examples.yml
+version: 1
+viewsFile: views.yml

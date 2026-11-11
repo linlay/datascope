@@ -15,7 +15,6 @@ import (
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
 	"datascope-server/internal/mcpserver"
-	"datascope-server/internal/platform"
 	"datascope-server/internal/store"
 )
 
@@ -37,7 +36,6 @@ func TestEmptyCatalogCanStartAndManageConnections(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatal("demo source unexpectedly imported")
 	}
-	must(t, platform.InitializeDemoRealm(ctx, c, ""))
 	app := &application.Service{Management: m, Catalog: c}
 	h := adminapi.PlatformHandler(app, adminapi.ManagedHandler(c, &adminapi.Inspector{Endpoint: "http://127.0.0.1:8080/mcp"}))
 	srv := httptest.NewServer(h)

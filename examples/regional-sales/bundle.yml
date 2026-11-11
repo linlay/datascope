@@ -1,0 +1,71 @@
+accounts:
+    - businessUserId: 1
+      name: S0001 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0001
+    - businessUserId: 2
+      name: S0002 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0002
+    - businessUserId: 3
+      name: S0003 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0003
+    - businessUserId: 9
+      name: S0009 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0009
+    - businessUserId: 39
+      name: S0039 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0039
+    - businessUserId: 69
+      name: S0069 演示员工
+      permissions:
+        - query
+        - knowledge.read
+      username: S0069
+database:
+    authentication:
+        type: local
+        source: DATABASE
+        provider:
+            id: regional-accounts
+            name: 本库业务账号
+            type: DEMO_OAUTH
+            enabled: true
+        access:
+            id: database-auth
+            name: 本库账号 OAuth
+            mode: OAUTH
+            providerId: regional-accounts
+    id: regional_sales_demo
+    name: 分地区销售演示库
+    driver: sqlite
+    path: ../../data/regional_sales_demo.sqlite3
+    mcpEnabled: true
+    mcpPath: regional_sales_demo
+    tools:
+        - list_tables
+        - describe_table
+        - query
+        - search_knowledge
+        - read_knowledge
+knowledge:
+    - description: 表关系、业务统计口径和四级行权限
+      file: guide.md
+      id: regional-sales-guide
+      name: 地区销售数据字典与统计口径
+policyFile: rewrite.yml
+sqlExamplesFile: sql-examples.yml
+version: 1

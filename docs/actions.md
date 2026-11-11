@@ -102,13 +102,7 @@ function main(params, context) {
 
 已有 `run(args, ctx)`、ES Modules 和 `db.one/db.all/db.exec`、`my.one/my.all` SQL 标签模板继续通过旧路径执行；`my.*` 仅在旧路径继续应用原查询策略。新 `main` 脚本及其库使用 CommonJS，不能混用两套契约。
 
-证券案例包全部 18 个 Action、3 个公共库已采用新契约。已有安装可仅升级脚本，保留参数、确认开关、发布状态、视图、写入开关、MCP 配置与账号授权：
-
-```sh
-# 加载与服务相同的环境变量后执行
- go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts -check
- go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts
-```
+证券案例包的 18 个 Action 和 3 个公共库保存在 `examples/securities/actions.yml`。新库使用通用配置导入器，已有库通过管理界面或管理 MCP 更新相应 Action 与公共库；更新提高配置 revision 并使旧预览失效。
 
 实际迁移前会备份逐库管理配置，通过 revision 检查一次保存全部脚本；重复迁移无变更。不提交证券业务数据，不重装视图或重新授权账号。源码升级后需构建并重启 API/MCP 服务，使新脚本由新执行器运行。
 
@@ -150,7 +144,7 @@ MCP 进程持有唯一内存缓存，API 的确认页和平台试运行通过权
 
 SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络库使用共享连接和 AST 编译，并有各驱动 SQL 编译/绑定测试。接入真实 MySQL、PostgreSQL、Oracle、达梦写账号后，仍需在目标库验收其账号权限、字段精度、锁和超时行为；测试未配置实际写账号时不代表已做真实库写入验收。
 
-证券演示库已提供可显式安装的 18 个操作，见 [完整案例](securities-actions.md)；涉及的结构、状态值和发布步骤见 [发布清单](securities-actions-release.md)。
+证券演示库已提供可显式安装的 18 个操作，见 [完整案例](../examples/securities/docs/actions.md)；涉及的结构、状态值和发布步骤见 [发布清单](../examples/securities/docs/actions-release.md)。
 
 ## 工作台正式调用
 

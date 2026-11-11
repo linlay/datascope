@@ -28,7 +28,7 @@ type Inspector struct {
 	AuthMode      string
 	Endpoint      string
 	Service       *service.QueryService
-	FixturesDir   string // permission_cases.json and rewrite_cases.json; optional
+	FixturesDir   string // Dataset verification profile and cases; required only by Verify.
 	// UserHeader is the header the MCP server trusts for identity; the
 	// inspector sets it the way a gateway would.
 	UserHeader       string
@@ -67,7 +67,11 @@ func (in *Inspector) connect(ctx context.Context, userID int64) (*mcp.ClientSess
 	if in.Token != nil && userID == 0 {
 		userID = in.CurrentUserID
 		if userID == 0 {
-			userID = superAdminID
+			profile, err := in.verificationProfile()
+			if err != nil {
+				return nil, err
+			}
+			userID = profile.AdminID
 		}
 	}
 	if userID != 0 {
@@ -242,30 +246,35 @@ func (r *Report) expectRejected(group, name string, res *mcp.CallToolResult, err
 	}
 }
 
-const superAdminID = 175
-
 var (
 	coreTools  = []string{"describe_table", "list_tables", "query"}
 	debugTools = []string{"customer_scope", "raw_query"}
 )
 
-var sampleQueries = []struct{ name, sql string }{
-	{"客户总数", "SELECT COUNT(*) AS n FROM customers"},
-	{"各营业部客户数", "SELECT department_code,COUNT(DISTINCT customer_no) AS n FROM fund_accounts GROUP BY department_code ORDER BY department_code"},
-	{"证券成交 JOIN", "SELECT t.id,c.name,s.code,t.amount_cents FROM trades t JOIN customers c ON c.customer_no=t.customer_no JOIN securities s ON s.code=t.security_code ORDER BY t.id LIMIT 20"},
-	{"CTE 资金汇总", "WITH s AS (SELECT customer_no,SUM(amount_cents) AS total FROM cash_flows GROUP BY customer_no) SELECT * FROM s ORDER BY customer_no LIMIT 10"},
-	{"员工范围", "SELECT employee_id,emp_no,name,status FROM employees ORDER BY employee_id"},
+type verificationQuery struct {
+	Name string `json:"name"`
+	SQL  string `json:"sql"`
 }
 
-var forbiddenQueries = []struct{ name, sql string }{
-	{"拒绝 DELETE", "DELETE FROM customers"},
-	{"拒绝 PRAGMA", "PRAGMA writable_schema=ON"},
-	{"拒绝多语句", "SELECT 1; DROP TABLE users"},
-	{"拒绝 CTE 写入", "WITH x AS (SELECT 1) DELETE FROM customers"},
-	{"拒绝表值函数", "SELECT * FROM pragma_table_info('users')"},
-	{"拒绝 IN 表名", "SELECT 1 WHERE 1 IN customers"},
-	{"拒绝 schema 限定", "SELECT * FROM main.customers"},
-	{"拒绝 CTE 覆盖表名", "WITH customers AS (SELECT 1 AS id) SELECT * FROM customers"},
+type verificationProfile struct {
+	AdminID          int64               `json:"adminId"`
+	IdentityColumn   string              `json:"identityColumn"`
+	PermissionQuery  string              `json:"permissionQuery"`
+	IdentityProbe    string              `json:"identityProbe"`
+	WriteProbe       string              `json:"writeProbe"`
+	SampleQueries    []verificationQuery `json:"sampleQueries"`
+	ForbiddenQueries []verificationQuery `json:"forbiddenQueries"`
+}
+
+func (in *Inspector) verificationProfile() (verificationProfile, error) {
+	var profile verificationProfile
+	if err := in.readFixture("verification-profile.json", &profile); err != nil {
+		return profile, err
+	}
+	if profile.AdminID <= 0 || profile.IdentityColumn == "" || profile.PermissionQuery == "" || profile.IdentityProbe == "" || profile.WriteProbe == "" || len(profile.SampleQueries) == 0 || len(profile.ForbiddenQueries) == 0 {
+		return profile, fmt.Errorf("验证配置缺少身份、查询或安全探测定义")
+	}
+	return profile, nil
 }
 
 // sessions caches one MCP session per identity during a verification run.
@@ -315,6 +324,10 @@ func (s *sessions) structured(userID int64, name string, args map[string]any) (a
 // Verify connects to the MCP server and checks protocol, tool catalog, data
 // consistency, permission rewriting and read-only enforcement.
 func (in *Inspector) Verify(ctx context.Context) (*Report, error) {
+	profile, err := in.verificationProfile()
+	if err != nil {
+		return nil, fmt.Errorf("请配置待验证数据集的验证模板: %w", err)
+	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
@@ -406,36 +419,36 @@ func (in *Inspector) Verify(ctx context.Context) (*Report, error) {
 
 	// raw_query and super-admin query both see everything, so both must equal
 	// a direct read.
-	for _, q := range sampleQueries {
-		expected, err := st.RawQuery(ctx, q.sql, store.HardMaxRows)
+	for _, q := range profile.SampleQueries {
+		expected, err := st.RawQuery(ctx, q.SQL, store.HardMaxRows)
 		if err != nil {
 			return nil, err
 		}
 		if debug {
-			actual, err := ss.structured(superAdminID, "raw_query", map[string]any{"sql": q.sql, "max_rows": store.HardMaxRows})
-			report.compare("原始查询", "raw_query："+q.name, expected, actual, err, fmt.Sprintf("%d 行一致", expected.RowCount))
+			actual, err := ss.structured(profile.AdminID, "raw_query", map[string]any{"sql": q.SQL, "max_rows": store.HardMaxRows})
+			report.compare("原始查询", "raw_query："+q.Name, expected, actual, err, fmt.Sprintf("%d 行一致", expected.RowCount))
 		} else {
-			report.add(Check{Group: "原始查询", Name: "raw_query：" + q.name, Status: StatusSkip, Detail: "MCP server 未开启调试模式"})
+			report.add(Check{Group: "原始查询", Name: "raw_query：" + q.Name, Status: StatusSkip, Detail: "MCP server 未开启调试模式"})
 		}
-		actual, err := ss.structured(superAdminID, "query", map[string]any{"sql": q.sql, "max_rows": store.HardMaxRows})
+		actual, err := ss.structured(profile.AdminID, "query", map[string]any{"sql": q.SQL, "max_rows": store.HardMaxRows})
 		var rows any
 		if m, ok := actual.(map[string]any); ok {
 			rows = map[string]any{"columns": m["columns"], "rows": m["rows"], "row_count": m["row_count"], "truncated": m["truncated"]}
 		}
-		report.compare("权限改写", "超级管理员 query = 原始数据："+q.name, expected, rows, err, fmt.Sprintf("%d 行一致", expected.RowCount))
+		report.compare("权限改写", "超级管理员 query = 原始数据："+q.Name, expected, rows, err, fmt.Sprintf("%d 行一致", expected.RowCount))
 	}
 
-	if err := in.verifyRewriteCases(ss, report); err != nil {
+	if err := in.verifyRewriteCases(ss, report, profile); err != nil {
 		return nil, err
 	}
-	if err := in.verifyPermissionCases(ss, report); err != nil {
+	if err := in.verifyPermissionCases(ss, report, profile); err != nil {
 		return nil, err
 	}
 
 	// Safety.
-	for _, q := range forbiddenQueries {
-		res, err := ss.call(superAdminID, "query", map[string]any{"sql": q.sql})
-		report.expectRejected("只读安全", "query "+q.name, res, err)
+	for _, q := range profile.ForbiddenQueries {
+		res, err := ss.call(profile.AdminID, "query", map[string]any{"sql": q.SQL})
+		report.expectRejected("只读安全", "query "+q.Name, res, err)
 	}
 	if in.Token != nil {
 		req, _ := http.NewRequestWithContext(ctx, "POST", in.Endpoint, nil)
@@ -452,7 +465,7 @@ func (in *Inspector) Verify(ctx context.Context) (*Report, error) {
 			}
 		}
 	} else {
-		res, err := ss.call(0, "query", map[string]any{"sql": "SELECT customer_no FROM customers"})
+		res, err := ss.call(0, "query", map[string]any{"sql": profile.IdentityProbe})
 		switch {
 		case err != nil:
 			report.add(Check{Group: "只读安全", Name: "缺少身份请求头时拒绝 query", Status: StatusFail, Detail: err.Error()})
@@ -464,7 +477,7 @@ func (in *Inspector) Verify(ctx context.Context) (*Report, error) {
 	}
 
 	if debug {
-		res, err := ss.call(superAdminID, "raw_query", map[string]any{"sql": "DELETE FROM customers"})
+		res, err := ss.call(profile.AdminID, "raw_query", map[string]any{"sql": profile.WriteProbe})
 		report.expectRejected("只读安全", "raw_query 无法写入（只读连接）", res, err)
 	}
 
@@ -480,7 +493,7 @@ func (in *Inspector) readFixture(name string, v any) error {
 	return json.Unmarshal(raw, v)
 }
 
-func customerIDColumn(out any) any {
+func identityColumn(out any, column string) any {
 	m, ok := out.(map[string]any)
 	if !ok {
 		return nil
@@ -489,19 +502,19 @@ func customerIDColumn(out any) any {
 	ids := []any{}
 	for _, row := range rows {
 		if r, ok := row.(map[string]any); ok {
-			ids = append(ids, r["customer_no"])
+			ids = append(ids, r[column])
 		}
 	}
 	return ids
 }
 
 // verifyRewriteCases runs fixtures/rewrite_cases.json through MCP query.
-func (in *Inspector) verifyRewriteCases(ss *sessions, report *Report) error {
+func (in *Inspector) verifyRewriteCases(ss *sessions, report *Report, profile verificationProfile) error {
 	var cases []struct {
 		ID           string           `json:"id"`
 		UserID       int64            `json:"user_id"`
 		SQL          string           `json:"sql"`
-		ExpectedIDs  []string         `json:"expected_customer_ids"`
+		ExpectedIDs  []string         `json:"expected_ids"`
 		ExpectedRows []map[string]any `json:"expected_rows"`
 		ExpectedErr  string           `json:"expected_error"`
 		ExpectedRule string           `json:"expected_rule"`
@@ -531,7 +544,7 @@ func (in *Inspector) verifyRewriteCases(ss *sessions, report *Report) error {
 			report.compare("改写验收", name, c.ExpectedRows, rows, err, c.SQL)
 		default:
 			out, err := ss.structured(c.UserID, "query", args)
-			report.compare("改写验收", name, c.ExpectedIDs, customerIDColumn(out), err, c.SQL)
+			report.compare("改写验收", name, c.ExpectedIDs, identityColumn(out, profile.IdentityColumn), err, c.SQL)
 		}
 	}
 	return nil
@@ -539,11 +552,11 @@ func (in *Inspector) verifyRewriteCases(ss *sessions, report *Report) error {
 
 // verifyPermissionCases checks MCP query against the hand-written expected
 // customer ids, which are independent of the Go and SQL implementations.
-func (in *Inspector) verifyPermissionCases(ss *sessions, report *Report) error {
+func (in *Inspector) verifyPermissionCases(ss *sessions, report *Report, profile verificationProfile) error {
 	var cases []struct {
 		ID          string   `json:"id"`
 		UserID      int64    `json:"user_id"`
-		Expected    []string `json:"expected_customer_ids"`
+		Expected    []string `json:"expected_ids"`
 		Description string   `json:"description"`
 	}
 	if err := in.readFixture("permission_cases.json", &cases); err != nil {
@@ -554,8 +567,8 @@ func (in *Inspector) verifyPermissionCases(ss *sessions, report *Report) error {
 		if in.checkInactiveIdentity(ss.ctx, report, "权限案例", c.ID, c.UserID) {
 			continue
 		}
-		out, err := ss.structured(c.UserID, "query", map[string]any{"sql": "SELECT customer_no FROM customers ORDER BY customer_no", "max_rows": store.HardMaxRows})
-		report.compare("权限案例", fmt.Sprintf("%s（用户 %d）", c.ID, c.UserID), c.Expected, customerIDColumn(out), err, c.Description)
+		out, err := ss.structured(c.UserID, "query", map[string]any{"sql": profile.PermissionQuery, "max_rows": store.HardMaxRows})
+		report.compare("权限案例", fmt.Sprintf("%s（用户 %d）", c.ID, c.UserID), c.Expected, identityColumn(out, profile.IdentityColumn), err, c.Description)
 	}
 	return nil
 }

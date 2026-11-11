@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
+	"datascope-server/internal/rewrite"
+	"datascope-server/internal/store"
+	"datascope-server/tests/testutil"
+	"datascope-server/tests/testutil/securities/permissions"
 	"fmt"
 	"path/filepath"
 	"slices"
-	"datascope-server/internal/rewrite"
-	"datascope-server/internal/store"
-	"datascope-server/internal/testutil"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func newService(t *testing.T) *QueryService {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { st.Close() })
-	cfg, e := rewrite.LoadConfig(filepath.Join("../../config/rewrite.yml"))
+	cfg, e := rewrite.LoadConfig(filepath.Join("../../examples/securities/rewrite.yml"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -35,7 +36,7 @@ func TestEveryEmployeeMatchesIndependentOracle(t *testing.T) {
 	for _, date := range []string{"2026-09-30", "2026-10-01", "2026-10-21", "2026-11-01"} {
 		s.AsOf, _ = time.Parse("2006-01-02", date)
 		for uid := int64(1); uid <= 179; uid++ {
-			want, e := s.Store.VisibleCustomerIDs(ctx, uid, s.AsOf)
+			want, e := permissions.VisibleCustomerIDs(ctx, s.Store.Path(), uid, s.AsOf)
 			if e != nil {
 				t.Fatal(e)
 			}

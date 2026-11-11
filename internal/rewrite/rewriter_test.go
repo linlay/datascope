@@ -8,7 +8,7 @@ import (
 
 func loadConfig(t *testing.T) *Config {
 	t.Helper()
-	cfg, err := LoadConfig(filepath.Join("..", "..", "config", "rewrite.yml"))
+	cfg, err := LoadConfig(filepath.Join("..", "..", "examples", "securities", "rewrite.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}

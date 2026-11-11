@@ -1,6 +1,6 @@
 # HTML 视图配置与证券案例
 
-左侧「视图配置」位于「知识配置」与「MCP 配置」之间。视图是完整 HTML，可内嵌 CSS 和 JavaScript；每个数据库独立保存，类型固定为 `view`。支持新增、复制、通用模板、编辑、发布、隔离预览和真实业务预览。「复制视图」将当前已保存视图复制为未发布的新草稿，自动生成不重复的标识，保存后才新增。「通用模板」仅提供不绑定业务表、账号或动作名的查询与动作界面；证券账户详情属于演示案例，仅由显式演示安装器安装，不列入通用模板。
+左侧「视图配置」位于「知识配置」与「MCP 配置」之间。视图是完整 HTML，可内嵌 CSS 和 JavaScript；每个数据库独立保存，类型固定为 `view`。支持新增、复制、通用模板、编辑、发布、隔离预览和真实业务预览。「复制视图」将当前已保存视图复制为未发布的新草稿，自动生成不重复的标识，保存后才新增。「通用模板」仅提供不绑定业务表、账号或动作名的查询与动作界面；证券账户详情属于演示配置，仅在显式导入新库时安装，不列入通用模板。
 
 工具区提供独立「视图工作台」，与视图配置使用相同的 `config.read`、`view.write` 权限。配置页的工作台图标直接定位当前视图，工作台的编辑图标返回对应配置。
 
@@ -78,13 +78,13 @@ const result = await datascope.callTool('query', {
 ## 安装证券完整案例
 
 ```sh
-make install-demo-actions
+make import-example EXAMPLE=securities
 ```
 
 安装器现同时安装六个已发布视图：`query`（通用查询）、`action`（动作预览与结果）、`securities_account`（证券账户详情）、`securities_customers`（客户列表）、`securities_rankings`（客户多项排名）、`securities_customer`（客户详情）。未配置默认查询视图时设置为 `query`，18 个演示 Action 关联 `action`。重装幂等；已修改同名视图默认拒绝覆盖，`-replace` 才替换。现有密码、查询权限和自定义动作保留。若只需补充案例且不追加业务账号能力：
 
 ```sh
-go run ./cmd/install-demo-actions -accounts ''
+make check-example EXAMPLE=securities
 ```
 
 新环境先按照 README 初始化完整证券库。单独从模板创建证券 HTML 不会安装 Action 或授予业务能力。
@@ -115,8 +115,8 @@ E0121 的查询范围更广，但不能直接修改其他经理账户。无 acti
 
 ```sh
 set -a; . ./.env; set +a
-go run ./cmd/install-demo-views -database securities_demo -check
-go run ./cmd/install-demo-views -database securities_demo
+make check-example EXAMPLE=securities
+make import-example EXAMPLE=securities
 ```
 
 仅显式指定 `-replace` 才更新已有同名证券视图。安装后刷新控制台即可加载新配置，无需重新登录。

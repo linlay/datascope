@@ -8,9 +8,8 @@ Go + React 实现的数据库访问平台，支持 SQLite、MySQL、PostgreSQL�
 
 ```sh
 cp .env.example .env
-# 设置 ADMIN_PASSWORD（至少 6 字符），首次初始化平台管理员。
-# 设置 OAUTH_DEMO_PASSWORD（至少 6 字符），首次初始化证券 demo 员工模拟账号。
-make init          # 已有演示业务库时跳过；不会覆盖已有文件
+# 设置 ADMIN_PASSWORD（建议至少 12 字符），首次初始化平台管理员。
+# 默认空数据源启动，示例使用方式见 examples/README.md。
 make web-install
 make build
 make run-api       # 终端一，默认 8081；发布 OAuth 和管理 MCP
@@ -28,7 +27,6 @@ docker run -d --name datascope \
   -p 8080:8080 \
   -v datascope-data:/app/data \
   -e ADMIN_PASSWORD='change-this-admin-password' \
-  -e OAUTH_DEMO_PASSWORD='change-this-demo-password' \
   -e OAUTH_ISSUER='http://localhost:8080' \
   -e MCP_RESOURCE_URL='http://localhost:8080/mcp' \
   datascope:latest
@@ -57,7 +55,7 @@ docker run -d --name datascope \
   datascope:latest
 ```
 
-`ADMIN_PASSWORD` 和 `OAUTH_DEMO_PASSWORD` 首次初始化时至少 12 个字符。生产环境应把 `OAUTH_ISSUER` 与 `MCP_RESOURCE_URL` 改为实际 HTTPS 地址，并设置 `SESSION_COOKIE_SECURE=true`。若挂载自己的业务库，将文件置于 `/app/data`，设置 `SQLITE_PATH` 指向该文件，并设置 `INITIALIZE_DEMO_DATA=false`，避免自动生成演示库。
+首次初始化需要设置 `ADMIN_PASSWORD`。镜像默认空数据源启动，不携带示例数据或生成器。可以将已有业务库放在 `/app/data` 后从控制台添加。生产环境使用实际 HTTPS 地址配置 `OAUTH_ISSUER`、`MCP_RESOURCE_URL` 和 `SESSION_COOKIE_SECURE=true`。
 
 首次使用 `ADMIN_USERNAME`（默认 `admin`）与配置的 `ADMIN_PASSWORD` 登录。密码使用带随机盐的 PBKDF2-SHA256 保存。初始化完成后，这两个环境变量不会覆盖已有账号；密码通过用户管理重置。后台会话使用 HttpOnly、SameSite Cookie，密码重置和用户禁用会撤销会话，旧 OAuth JWT 也会失效。
 
@@ -184,9 +182,7 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 ### 证券演示库脱敏示例
 
-已登记的 `securities_demo` 可运行 `make install-demo-masking`，为六个字段补充查询脱敏示例：客户姓名保留首字、客户手机号保留前 3 后 4、客户证件号使用 HMAC、客户出生日期不返回、员工姓名保留首字、员工手机号全部遮盖。仅新增没有规则的字段，重复运行不覆盖已有配置，并将旧示例的“预先脱敏”字段说明改为普通业务说明；保留其他人工说明，不修改业务原始数据、行字段权限或 Action。生成器已有的带星号合成数据继续保留，查询脱敏是在此基础上的平台处理。
-
-默认数据库 ID 为 `default`。指定其他已登记证券库可加载与服务相同的环境配置后运行 `go run ./cmd/install-demo-masking -database <ID>`；加 `-check` 只检查并列出待添加规则。安装通过管理动作保存，产生新 revision 和审计记录；服务器启动不会自动重新安装，因此管理员可以继续在字段界面调整或移除这些示例。HMAC 依赖前述逐库密钥备份。
+演示库的脱敏规则通过同一字段配置界面设置，规则与业务库原始数据分别保存。已有配置、HMAC 密钥和账号按逐库备份保留；示例导入不会覆盖已有数据源。
 
 ## 每个数据库独立的业务认证
 
@@ -209,7 +205,7 @@ OneID 验签支持 JWKS 地址或直接导入／粘贴 RSA `publickey.pem`，两
 
 令牌绑定精确 MCP resource、数据库账号域、账号版本和认证配置版本；密码重置、账号停用、业务能力或身份变更、认证设置变更都会使旧令牌和刷新凭据失效。修改认证设置后需在客户端重新授权连接器。相同工号可以存在于两个数据库甚至平台用户中，三个账号分别认证。
 
-首次启动新版服务时，若初始业务库包含证券 demo 员工目录且尚未配置认证来源，设置 `OAUTH_DEMO_PASSWORD`（至少 6 字符），服务会一次性为目录员工建立证券库的独立模拟账号并启用目录校验。E0001 对应业务身份 1。此密码仅用于首次创建，不覆盖已有业务密码；以后在当前数据库的业务账号列表中重置。新增其他业务数据库会拥有另一套空的模拟账号域，不复制证券库员工或密码。平台账号仅用于管理后台和管理 MCP；业务 MCP 不接受平台账号或平台令牌。企业账号接口和企业 OAuth 的字段映射、回调及密钥配置见上述改造文档。
+服务启动不创建演示员工账号。业务账号通过管理控制台、管理 MCP 或显式的声明式配置导入创建。平台账号仅用于管理后台和管理 MCP；业务 MCP 不接受平台账号或平台令牌。
 
 ## 两类 MCP
 
@@ -263,7 +259,7 @@ SELECT 直接调用 query，使用当前数据库的表、字段与行权限。�
 
 ## 业务操作 Action
 
-「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `list_actions` / `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、运行期内存幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券演示库可运行 `make install-demo-actions` 安装 18 种现成操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](docs/securities-actions.md)，数据库结构和发布方式见 [发布清单](docs/securities-actions-release.md)。
+「MCP 配置」中新增业务操作编辑与始终回滚的试运行；显式启用写入后，业务账号可通过 `list_actions` / `describe_action` / `invoke_action` 使用受控 JavaScript 操作。框架负责 SQL 参数绑定、权限查询、事务、超时、运行期内存幂等、预览、本人登录确认及审计。配置、完整示例和故障恢复见 [业务操作 Action](docs/actions.md)。证券示例的 `actions.yml` 提供 18 种可显式导入的操作；覆盖表、37 个正常/拒绝案例及账号说明见 [证券 Action 案例](examples/securities/docs/actions.md)，数据库结构和发布方式见 [发布清单](examples/securities/docs/actions-release.md)。
 
 ## 业务知识与渐进式披露
 
@@ -298,11 +294,15 @@ API 与 MCP 在同机共享目录，读写使用文件锁；配置提交通过�
 
 ## 业务演示与验证
 
-证券演示库仍支持客户、资金账户、证券账户、交易与持仓等权限改写。结构和说明见 [DDL](sql/schema.sqlite.sql)、[数据字典](docs/data-dictionary.md)、[业务权限说明](docs/permissions.md)。`make init-shop` 可生成三张表的小型商店库。
+业务演示源码、安装工具和模板统一位于 [examples/](examples/README.md)；`internal/` 保留通用技术实现，跨包测试辅助代码位于 `tests/testutil/`。
+
+证券演示库仍支持客户、资金账户、证券账户、交易与持仓等权限改写。结构和说明见 [DDL](examples/securities/schema.sqlite.sql)、[数据字典](examples/securities/docs/data-dictionary.md)、[业务权限说明](examples/securities/docs/permissions.md)。`make init-shop` 可生成三张表的小型商店库。
+
+分地区销售示例提供 26 张业务表及中文注释，覆盖 7 个大区、24 个月、5 万订单与 15 万条订单明细。`make init-regional-sales` 用 Python 生成 SQLite；设置 `DATASCOPE_EXAMPLE_PASSWORD` 后运行 `make check-example EXAMPLE=regional-sales`、`make import-example EXAMPLE=regional-sales`，由通用导入器加载静态 YAML 配置。完整说明见 [地区销售示例](examples/regional-sales/README.md)。
 
 ```sh
 make test          # 连接器 VIEW 回归测试 + Go 全部测试 + 前端 TypeScript 检查
-make build         # 两个服务器、数据生成器与前端构建
+make build         # 服务、通用配置导入器、迁移工具与前端构建
 ```
 
 新增集成测试使用隔离临时库，覆盖后台登录、越权与身份冒用、跨资源令牌、权限即时撤销、密码重置撤销 JWT、真实管理 MCP、业务工具参数注入、知识描述与全文披露、并发版本冲突、内部库隔离、逐库迁移、企业认证、内存运行状态与审计故障隔离。旧证券演示验收通过独立测试运行，不作为后台公共接口开放。

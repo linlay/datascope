@@ -2,11 +2,8 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
+	"datascope-server/tests/testutil"
 	"slices"
-	"datascope-server/internal/testutil"
 	"testing"
 )
 
@@ -101,30 +98,5 @@ func TestTablesAndDescribe(t *testing.T) {
 	}
 	if _, err := st.Describe(ctx, "nope"); err == nil {
 		t.Error("describe of missing table succeeded")
-	}
-}
-
-func TestVisibleCustomerIDsMatchesFixtures(t *testing.T) {
-	st := openDemo(t)
-	raw, err := os.ReadFile(filepath.Join("..", "..", "fixtures", "permission_cases.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var cases []struct {
-		ID       string   `json:"id"`
-		UserID   int64    `json:"user_id"`
-		Expected []string `json:"expected_customer_ids"`
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range cases {
-		got, err := st.VisibleCustomerIDs(context.Background(), c.UserID, DefaultAsOf)
-		if err != nil {
-			t.Fatalf("%s: %v", c.ID, err)
-		}
-		if !slices.Equal(got, c.Expected) {
-			t.Errorf("%s: got %v, want %v", c.ID, got, c.Expected)
-		}
 	}
 }

@@ -22,7 +22,6 @@ import (
 	"datascope-server/internal/managementmcp"
 	"datascope-server/internal/mcpserver"
 	"datascope-server/internal/oauth"
-	"datascope-server/internal/platform"
 	"datascope-server/internal/rewrite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -365,7 +364,7 @@ func TestBusinessMCPRejectsPlatformAuthentication(t *testing.T) {
 	}
 }
 
-func TestDemoRealmInitializationAndEmployeeDirectory(t *testing.T) {
+func TestBusinessEmployeeDirectoryValidation(t *testing.T) {
 	f := setup(t)
 	db, e := sql.Open("sqlite", f.st.Path())
 	must(t, e)
@@ -378,11 +377,15 @@ func TestDemoRealmInitializationAndEmployeeDirectory(t *testing.T) {
 	configured, e := f.c.Get("default")
 	must(t, e)
 	configured.Config.Tables = append(configured.Config.Tables, &rewrite.Policy{Table: "roles", Scheme: "CUSTOM", Passthrough: true}, &rewrite.Policy{Table: "employees", Scheme: "CUSTOM", Passthrough: true})
+	configured.Authentication = &catalog.Authentication{Type: "local", EmployeeDirectory: true}
 	must(t, f.c.Save(f.ctx, *configured))
-	if e = platform.InitializeDemoRealm(f.ctx, f.c, ""); e == nil {
-		t.Fatal("empty demo password accepted")
+	for _, account := range []management.BusinessAccount{
+		{DatabaseID: "default", Username: "E0001", Name: "在职员工", BusinessUserID: 1, Active: true, Permissions: []string{"query"}},
+		{DatabaseID: "default", Username: "E0002", Name: "离职员工", BusinessUserID: 2, Active: false, Permissions: []string{"query"}},
+	} {
+		_, e = f.m.SaveBusinessAccount(f.ctx, account, "initial-employee-password", 0)
+		must(t, e)
 	}
-	must(t, platform.InitializeDemoRealm(f.ctx, f.c, "initial-employee-password"))
 	d, e := f.c.Get("default")
 	must(t, e)
 	if !d.LocalAuthentication() || !d.Authentication.EmployeeDirectory {
@@ -405,7 +408,6 @@ func TestDemoRealmInitializationAndEmployeeDirectory(t *testing.T) {
 	}
 	_, e = f.m.SaveBusinessAccount(f.ctx, a, "changed-employee-password", a.AuthVersion)
 	must(t, e)
-	must(t, platform.InitializeDemoRealm(f.ctx, f.c, "different-startup-password"))
 	_, e = f.m.AuthenticateBusiness(f.ctx, "default", "E0001", "changed-employee-password")
 	must(t, e)
 	_, e = db.Exec("UPDATE employees SET status='resigned' WHERE employee_id=1")

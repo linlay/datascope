@@ -34,7 +34,7 @@ func main() {
 }
 
 func run() error {
-	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", "data/securities_demo.sqlite3"), "可选初始 SQLite 路径；空值禁用演示库导入")
+	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", ""), "可选初始 SQLite 路径；空值禁用演示库导入")
 	databaseID := flag.String("database", envflag.String("MCP_DATABASE", "default"), "stdio 连接的数据库 ID")
 	transport := flag.String("transport", envflag.String("MCP_TRANSPORT", "http"), "传输方式：http（Streamable HTTP）或 stdio")
 	addr := flag.String("addr", envflag.String("SERVER_ADDR", "127.0.0.1:8080"), "HTTP 监听地址")
@@ -44,7 +44,7 @@ func run() error {
 	userHeader := flag.String("user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "网关传入可信用户编号的请求头")
 	defaultUserID := flag.Int64("default-user-id", envflag.Int64("MCP_DEFAULT_USER_ID", 0), "请求头缺失时使用的用户编号（stdio 或本地调试）；0 表示拒绝")
 	debug := flag.Bool("debug", envflag.Bool("MCP_DEBUG", false), "query 返回改写 SQL；管理模式工具启停由逐库配置控制")
-	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", "config/rewrite.yml"), "SQL 改写规则配置文件")
+	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", ""), "SQL 改写规则配置文件")
 	asOf := flag.String("as-of", envflag.String("REWRITE_AS_OF", store.DefaultAsOf.Format(time.RFC3339)), "授权过期判断的参考时间（RFC 3339）")
 	authMode := envflag.String("MCP_AUTH_MODE", "oauth")
 	issuer := envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081")
@@ -85,9 +85,6 @@ func run() error {
 	defer manager.Audit.Close()
 	catalogue, err := catalog.BootstrapManaged(context.Background(), manager, envflag.String("DATABASE_CONFIG_DIR", "config/databases"), st, *rewriteConfig, asOfTime, *queryTimeout, envflag.String("DATABASE_CATALOG", "data/databases.json"))
 	if err != nil {
-		return err
-	}
-	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
 		return err
 	}
 

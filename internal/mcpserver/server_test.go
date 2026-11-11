@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"datascope-server/internal/catalog"
-	"datascope-server/internal/testutil"
+	"datascope-server/tests/testutil"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +19,7 @@ import (
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
+	"datascope-server/tests/testutil/securities/permissions"
 )
 
 // userTransport plays the gateway: it stamps the trusted user header.
@@ -39,7 +40,7 @@ func startServer(t *testing.T, opts Options) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	cfg, err := rewrite.LoadConfig(filepath.Join("..", "..", "config", "rewrite.yml"))
+	cfg, err := rewrite.LoadConfig(filepath.Join("..", "..", "examples", "securities", "rewrite.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +48,7 @@ func startServer(t *testing.T, opts Options) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	opts.ReferenceScope = permissions.VisibleCustomerIDs
 	server := New(svc, opts)
 	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true}))
 	t.Cleanup(httpServer.Close)
@@ -145,9 +147,9 @@ func TestRewrittenQueryOverHTTP(t *testing.T) {
 			call(t, session, "query", map[string]any{"sql": "SELECT customer_no FROM customers ORDER BY customer_no"}, &result)
 			var fixtures []struct {
 				UserID int64    `json:"user_id"`
-				IDs    []string `json:"expected_customer_ids"`
+				IDs    []string `json:"expected_ids"`
 			}
-			raw, _ := os.ReadFile("../../fixtures/permission_cases.json")
+			raw, _ := os.ReadFile("../../tests/fixtures/securities/permission_cases.json")
 			json.Unmarshal(raw, &fixtures)
 			if !slices.Equal(customerIDs(result), fixtures[0].IDs) {
 				t.Fatalf("manager scope mismatch")
@@ -245,7 +247,7 @@ func TestManagedRawQueryUsesSelectedDatabaseAndSharedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer identity.Close()
-	cfg, err := rewrite.LoadConfig("../../config/rewrite.yml")
+	cfg, err := rewrite.LoadConfig("../../examples/securities/rewrite.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

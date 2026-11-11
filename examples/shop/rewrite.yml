@@ -1,0 +1,21 @@
+version: 1
+schemes:
+  - scheme: CUSTOM
+    name: 本人客户与订单
+    description: 按可信业务身份过滤客户和订单，商品目录全员可读。
+tables:
+  - table: customers
+    scheme: CUSTOM
+    columns: [id, name, email, owner_employee_id]
+    reason: 仅本人客户
+    sql: SELECT id, name, email, owner_employee_id FROM main.customers WHERE owner_employee_id=${userId}
+  - table: products
+    scheme: CUSTOM
+    columns: [id, sku, name, price_cents, stock_quantity]
+    reason: 公开商品目录，隐藏成本
+    sql: SELECT id, sku, name, price_cents, stock_quantity FROM main.products
+  - table: orders
+    scheme: CUSTOM
+    columns: [id, order_no, customer_id, product_id, quantity, unit_price_cents, created_at, status]
+    reason: 本人客户的订单
+    sql: SELECT id, order_no, customer_id, product_id, quantity, unit_price_cents, created_at, status FROM main.orders WHERE customer_id IN (SELECT id FROM main.customers WHERE owner_employee_id=${userId})

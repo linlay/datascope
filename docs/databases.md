@@ -127,7 +127,7 @@ sqlExamples:
 
 选择示例只填入编辑区，不自动执行；`sqlExamples: []` 表示不提供示例。YAML 使用 `sqlExamples`，管理 API 仍使用 `sql_examples`，修改需要 `config.write` 权限。`database.yml` 不再保存 SQL 示例。旧版内嵌示例可继续读取，下一次配置保存会原子拆分；升级已有配置可在停止 API/MCP 后运行 `make migrate-state`，迁移会备份原文件并保留 revision。
 
-证券库的恢复模板同样位于该库的管理目录结构中：`fixtures/databases/securities_demo/management/sql-examples.yml`，仅供显式安装，不作为运行时回退。执行 `make install-demo-sql-examples` 可补齐已登记证券库的缺失示例，保留已有自定义语句；加 `-check` 只检查。
+证券库的恢复模板同样位于该库的管理目录结构中：`examples/securities/sql-examples.yml`，仅供显式安装，不作为运行时回退。新库可通过 `import-config -file examples/securities/bundle.yml` 一次性导入，已有库通过管理控制台维护；导入器不会覆盖已有自定义配置。
 
 数据库目录使用内部 ID。证券演示库 ID 为 `securities_demo` 时，示例路径为 `data/databases/securities_demo/management/sql-examples.yml`；安装命令默认读取 `MCP_DATABASE`，也可用 `-database securities_demo` 显式指定。
 
@@ -167,7 +167,7 @@ make build-linux
 
 当前 Linux 发布目标为 x86_64（amd64）。输出位于 `bin/linux-amd64/`，包含 admin-api 与 mcp-server；前端位于 `web/dist/`。两个进程继续共享同机的管理库和审计库，按照原部署方式配置前端与反向代理。
 
-仅使用网络数据库时，在两个进程设置 `SQLITE_PATH=`，或传 `-db ''`。首次启动可保持空数据源列表，再从控制台登记。后续启动不要求存在 default 数据源或证券演示文件。首次初始化仍须配置 ADMIN_PASSWORD；仅证券演示库初始化才需要 OAUTH_DEMO_PASSWORD。
+仅使用网络数据库时，在两个进程设置 `SQLITE_PATH=`，或传 `-db ''`。首次启动可保持空数据源列表，再从控制台登记。后续启动不要求存在 default 数据源或证券演示文件。首次初始化仍须配置 ADMIN_PASSWORD；示例账号只在显式导入时读取 DATASCOPE_EXAMPLE_PASSWORD。
 
 ## 真实数据库验收
 

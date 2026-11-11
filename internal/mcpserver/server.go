@@ -30,10 +30,12 @@ const (
 
 // Options configures identity and debug tools.
 type Options struct {
-	Catalog     *catalog.Catalog
-	Application *application.Service
-	Management  *management.Store
-	DatabaseID  string
+	// ReferenceScope optionally supplies a dataset-specific debug comparison.
+	ReferenceScope func(context.Context, string, int64, time.Time) ([]string, error)
+	Catalog        *catalog.Catalog
+	Application    *application.Service
+	Management     *management.Store
+	DatabaseID     string
 	// DatabaseDriver provides the dialect without opening a query connection.
 	DatabaseDriver string
 	AuthMode       string
@@ -52,17 +54,12 @@ type Options struct {
 	Debug bool
 }
 
-const instructions = `证券经纪业务样例库（SQLite 方言，全部为合成数据，金额单位为整数分，日期为 YYYY-MM-DD，交易时间为中国时区 RFC3339）。
-建议流程：先 list_tables 了解表、中文注释和访问方案，再 describe_table 查看字段和外键，最后用 query 执行 SELECT。
-query 会按当前用户的权限自动改写 SQL：FROM / JOIN 中的每张表都会被替换为该用户可见数据的子查询，因此直接写标准 SQL 即可，无需自行添加权限过滤。
-访问方案为 RESTRICTED 的表（管理范围）仅超级管理员可查询。`
-
 // New builds an MCP server backed by svc.
 func New(svc *service.QueryService, opts Options) *mcp.Server {
 	if opts.UserHeader == "" {
 		opts.UserHeader = DefaultUserHeader
 	}
-	title, guidance := "证券业务 SQL 查询（权限改写）", instructions
+	title, guidance := "SQL 数据库代理", "先通过 list_tables 了解表及访问方案，再通过 describe_table 查看字段，最后用 query 执行只读 SQL。服务端按可信身份应用已配置的表、字段和行权限。"
 	dialectLabel := "SQLite 方言"
 	driver := opts.DatabaseDriver
 	if svc != nil {
@@ -141,7 +138,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 			Name:  "customer_scope",
 			Title: "计算客户可见范围（调试）",
 			Description: "调试专用：按参考权限规则计算任意用户可见的客户编号，用于核对 query 的改写结果。" +
-				"规则：在职员工的名下客户，加上生效管理范围内客户；管理员可见全部。",
+				"参考计算器由部署入口提供，未配置时拒绝执行。",
 			Annotations: readOnly("计算客户可见范围（调试）"),
 		}, h.customerScope)
 	}
@@ -347,7 +344,7 @@ func (h handlers) rawQuery(ctx context.Context, req *mcp.CallToolRequest, in raw
 }
 
 type customerScopeInput struct {
-	UserID int64  `json:"user_id" jsonschema:"系统用户编号，例如 1（客户经理）、121（营业部主管）、175（管理员）"`
+	UserID int64  `json:"user_id" jsonschema:"需要核对的业务用户编号"`
 	AsOf   string `json:"as_of,omitempty" jsonschema:"参考时间，RFC 3339 格式，默认与改写使用的参考时间相同"`
 }
 
@@ -370,7 +367,10 @@ func (h handlers) customerScope(ctx context.Context, req *mcp.CallToolRequest, i
 		}
 		asOf = parsed
 	}
-	ids, err := h.svc.Store.VisibleCustomerIDs(ctx, in.UserID, asOf)
+	if h.opts.ReferenceScope == nil || h.svc.Store.Driver() != "sqlite" {
+		return nil, customerScopeOutput{}, fmt.Errorf("未配置当前数据库的参考权限计算器")
+	}
+	ids, err := h.opts.ReferenceScope(ctx, h.svc.Store.Path(), in.UserID, asOf)
 	if err != nil {
 		return nil, customerScopeOutput{}, err
 	}

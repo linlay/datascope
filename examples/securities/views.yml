@@ -1,0 +1,1274 @@
+views:
+    - id: query
+      name: 通用查询视图
+      description: 使用绑定参数执行只读 SQL，展示结果表格并重新查询。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>通用查询视图</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script></head><body>
+        <div class="top"><div><div class="eyebrow">DATASCOPE / QUERY</div><h1>通用查询</h1><span class="muted">按当前业务身份查询</span></div><span class="tag">只读</span></div>
+        <section class="card"><label for="sql">SQL</label><textarea id="sql" aria-label="SQL" rows="6" placeholder="SELECT … WHERE … = :arg_value"></textarea><label for="parameters">绑定参数 JSON</label><textarea id="parameters" aria-label="绑定参数 JSON" rows="2">{}</textarea><div class="toolbar"><label for="limit">最多返回</label><input id="limit" type="number" min="1" max="1000" value="200"><button id="run" class="primary">查询</button></div><div id="status" role="status"></div></section>
+        <section class="card"><h2>查询结果</h2><div id="result" class="scroll"><div class="empty">执行后在这里查看结果</div></div></section>
+        <script>
+        const ds = window.datascope, byID = id => document.getElementById(id);
+        ds.onData(data => { const input = data.input || {}; byID('sql').value = input.sql || ''; byID('parameters').value = JSON.stringify(input.parameters || {}, null, 2); byID('limit').value = input.max_rows || 200; if (data.result) ds.table(byID('result'), data.result); });
+        byID('run').onclick = async () => {
+         const button = byID('run'); if (button.disabled) return; button.disabled = true;
+         try { const parameters = JSON.parse(byID('parameters').value); if (!parameters || Array.isArray(parameters) || typeof parameters !== 'object') throw new Error('绑定参数必须是 JSON 对象'); const result = await ds.callTool('query', { sql: byID('sql').value, parameters, max_rows: Number(byID('limit').value) }); ds.table(byID('result'), result); ds.notice(byID('status'), `返回 ${result.row_count} 行${result.truncated ? '，结果已截断' : ''}`); }
+         catch(e) { byID('result').replaceChildren(); ds.notice(byID('status'), e.message, true); } finally { button.disabled = false; }
+        };
+        </script></body></html>
+      published: true
+    - id: action
+      name: 动作预览与结果
+      description: 根据动作参数生成表单，展示真实预览、本人确认链接和请求回执。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>动作预览与结果</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script></head><body>
+        <div class="top"><div><div class="eyebrow">DATASCOPE / ACTION</div><h1>动作预览与结果</h1><span class="muted">读取动作参数 → 获取真实预览 → 本人确认 → 查询回执</span></div><span class="tag">本人确认</span></div>
+        <section class="card"><div class="toolbar"><label for="name">动作名称</label><input id="name" placeholder="请输入动作名称"><button id="load" class="primary">读取参数</button></div><div id="status" role="status"></div></section><section class="card" id="action"></section>
+        <script>
+        const ds = window.datascope, form = ds.actionForm(document.getElementById('action'));
+        document.getElementById('load').onclick = () => form.open(document.getElementById('name').value);
+        ds.onData(data => { const input = data.input || {}; if (input.name) { document.getElementById('name').value = input.name; form.open(input.name, input.arguments || {}, { request_id: input.request_id, response: data.result }); } });
+        </script></body></html>
+      published: true
+    - id: securities_account
+      name: 证券账户详情
+      description: 按资金账号查看客户、资金、持仓、委托和流水，发起客户资料、账户及委托动作。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>证券账户详情</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script></head><body>
+        <div class="top"><div><div class="eyebrow">DATASCOPE / SECURITIES</div><h1>证券账户详情</h1><span class="muted">客户资料、资产与委托</span></div><span class="tag">合成演示数据</span></div>
+        <section class="card"><div class="toolbar"><label for="account">资金账号</label><input id="account" value="880000000079" maxlength="32"><button id="load" class="primary">查询账户</button></div><div id="status" role="status"></div></section>
+        <section id="account-detail" hidden><section class="card"><div class="top"><h2>客户与账户</h2><span id="account-status" class="tag"></span></div><div class="details" id="customer"></div><div class="metrics" id="metrics"></div><p id="date" class="muted"></p><div class="toolbar" id="account-actions"></div></section>
+        <section class="card"><div class="toolbar tabs" role="tablist" aria-label="账户记录"><button data-tab="positions" role="tab">持仓</button><button data-tab="orders" role="tab">委托</button><button data-tab="flows" role="tab">资金流水</button></div><div id="records-status" role="status"></div><div id="records" class="scroll"></div></section></section>
+        <dialog id="dialog"><div class="toolbar"><button id="close">关闭</button></div><div id="action"></div></dialog>
+        <script>
+        const ds = window.datascope, byID = id => document.getElementById(id);
+        let account, allowed = new Set(), tab = 'positions', stamp = 0, recordsStamp = 0;
+        const actionForm = ds.actionForm(byID('action'), async () => { byID('dialog').close(); await load(); });
+        const query = (sql, parameters) => ds.callTool('query', {sql, parameters, max_rows:200});
+        async function action(name, defaults) { byID('dialog').showModal(); await actionForm.open(name, defaults); }
+        function addAction(target, name, label, defaults) { if (allowed.has(name)) target.append(ds.button(label, () => action(name, defaults))); }
+        function detail(label, value) { const div = ds.el('div'); div.append(ds.el('span', label), ds.el('strong', String(value ?? '—'))); return div; }
+        async function load() {
+         const token = ++stamp; ++recordsStamp; const number = byID('account').value.trim();
+         account = undefined; byID('account-detail').hidden = true; ds.notice(byID('status'), '正在查询…'); byID('load').disabled = true;
+         try {
+          const result = await query('SELECT f.fund_account_no, f.customer_no, f.status AS account_status, f.currency, f.manager_id, c.name AS customer_name, c.mobile, c.risk_level, c.investor_type FROM fund_accounts f JOIN customers c ON c.customer_no = f.customer_no WHERE f.fund_account_no = :arg_account', {arg_account:number});
+          if (token !== stamp) return;
+          account = result.rows[0]; if (!account) { ds.notice(byID('status'), '没有可见的账户记录。'); return; }
+          allowed = new Set();
+          try { const list = await ds.callTool('list_actions'); if (token !== stamp) return; allowed = new Set(list.actions.map(a => a.name)); } catch { /* Query-only users can still read the account. */ }
+          const customer = byID('customer'); customer.replaceChildren();
+          for (const [label,key] of [['客户编号','customer_no'],['客户姓名','customer_name'],['手机号','mobile'],['风险等级','risk_level'],['投资者类型','investor_type'],['资金账号','fund_account_no']]) customer.append(detail(label, account[key]));
+          byID('account-status').textContent = account.account_status === 'active' ? '正常' : account.account_status === 'frozen' ? '冻结' : account.account_status;
+          byID('account-detail').hidden = false; ds.notice(byID('status'), '');
+          const actions = byID('account-actions'); actions.replaceChildren(); const accountArgs = {fund_account_no:account.fund_account_no}, customerArgs = {customer_no:account.customer_no};
+          addAction(actions,'update_customer_mobile','修改手机号',{...customerArgs,mobile:account.mobile});
+          addAction(actions,'update_customer_risk_level','调整风险等级',{...customerArgs,risk_level:account.risk_level});
+          addAction(actions, account.account_status === 'frozen' ? 'unfreeze_fund_account' : 'freeze_fund_account', account.account_status === 'frozen' ? '解冻账户' : '冻结账户',accountArgs);
+          if (account.account_status === 'active') { addAction(actions,'deposit_demo_cash','演示入金',accountArgs); addAction(actions,'withdraw_demo_cash','演示出金',accountArgs); }
+          byID('metrics').replaceChildren(); byID('date').textContent = '正在读取最新可见账期…';
+          try {
+           const balance = await query('SELECT trade_date, closing_balance, available_balance, withdrawable_balance FROM daily_balances WHERE fund_account_no = :arg_account ORDER BY trade_date DESC LIMIT 1', {arg_account:number});
+           const holdings = await query('SELECT trade_date, SUM(market_value_cents) AS market_value FROM positions WHERE fund_account_no = :arg_account GROUP BY trade_date ORDER BY trade_date DESC LIMIT 1', {arg_account:number});
+           if (token !== stamp) return;
+           const b = balance.rows[0], h = holdings.rows[0];
+           for (const [label,value] of [['资金余额',b?.closing_balance],['可用余额',b?.available_balance],['可取余额',b?.withdrawable_balance],['持仓市值',h?.market_value]]) { const card=ds.el('div',undefined,'metric'); card.append(ds.el('span',label),ds.el('strong',value === undefined ? '—' : ds.money(value))); byID('metrics').append(card); }
+           byID('date').textContent = `币种 ${account.currency} · 资金账期 ${b?.trade_date || '无记录'} · 持仓日期 ${h?.trade_date || '无记录'}`;
+          } catch(e) { if (token === stamp) byID('date').textContent = '资金或持仓读取失败：' + e.message; }
+          await records();
+         } catch(e) { if (token === stamp) { account = undefined; byID('account-detail').hidden = true; ds.notice(byID('status'), e.message, true); } }
+         finally { if (token === stamp) byID('load').disabled = false; }
+        }
+        async function records() {
+         if (!account) return;
+         const token = ++recordsStamp, accountToken = stamp, selected = tab, number = account.fund_account_no;
+         document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected',String(b.dataset.tab === selected)));
+         ds.notice(byID('records-status'),'正在查询…'); byID('records').replaceChildren();
+         const sql = {
+          positions:'SELECT security_code, trade_date, quantity, available_quantity, cost_cents, close_price, market_value_cents FROM positions WHERE fund_account_no = :arg_account AND trade_date = (SELECT MAX(trade_date) FROM positions WHERE fund_account_no = :arg_account) ORDER BY security_code',
+          orders:'SELECT order_no, trade_date, security_code, side, quantity, filled_quantity, status, channel FROM orders WHERE fund_account_no = :arg_account ORDER BY trade_date DESC, order_no DESC',
+          flows:'SELECT trade_date, flow_type, amount_cents, balance_after FROM cash_flows WHERE fund_account_no = :arg_account ORDER BY id DESC'
+         }[selected];
+         try { const result=await query(sql,{arg_account:number}); if (token !== recordsStamp || accountToken !== stamp) return;
+         const labels={security_code:'证券代码',trade_date:'交易日期',quantity:'数量',available_quantity:'可用数量',cost_cents:'成本（元）',close_price:'收盘价（元）',market_value_cents:'持仓市值（元）',order_no:'委托编号',side:'方向',filled_quantity:'成交数量',status:'委托状态',channel:'来源渠道',flow_type:'流水类型',amount_cents:'金额（元）',balance_after:'流水后余额（元）'};
+         const money=new Set(['cost_cents','close_price','market_value_cents','amount_cents','balance_after']);
+         const values={BUY:'买入',SELL:'卖出',PARTIAL:'部分成交',FILLED:'全部成交',CANCELLED:'已撤销',PART_CANCELLED:'部分成交后撤销',REJECTED:'已拒绝',DEPOSIT:'入金',WITHDRAWAL:'出金'};
+         const shown={...result,columns:result.columns.map(k=>labels[k]||k),rows:result.rows.map(row=>{const out={...row};for(const k of result.columns)out[labels[k]||k]=money.has(k)?ds.money(row[k]):values[row[k]]||row[k];return out;})};
+         ds.table(byID('records'),shown,selected === 'orders' ? (td,row) => { if (Number(row.quantity) > Number(row.filled_quantity) && !['CANCELLED','PART_CANCELLED','FILLED','REJECTED'].includes(row.status)) addAction(td,'cancel_order_remainder','撤销剩余委托',{order_no:row.order_no}); } : undefined); ds.notice(byID('records-status'), '金额和价格已由分转换为元。' + (result.truncated ? '结果已截断，请缩小范围。' : '')); }
+         catch(e) { if (token === recordsStamp && accountToken === stamp) ds.notice(byID('records-status'),e.message,true); }
+        }
+        byID('load').onclick=load; byID('close').onclick=()=>byID('dialog').close();
+        document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;records()});
+        ds.onData(data => { const input = data.input || {}; const number = input.fund_account_no || input.parameters?.arg_account || data.result?.rows?.[0]?.fund_account_no; if (number) byID('account').value=number; load(); });
+        </script></body></html>
+      published: true
+    - id: securities_customers
+      name: 客户列表
+      description: 按姓名或编号搜索客户，筛选客户类型与风险等级，分页查看并打开客户详情。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>客户列表</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script><style>.toolbar label{margin:0;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0}.toolbar input{min-width:120px}.pager{justify-content:flex-end;margin-top:20px}.details{margin:20px 0}.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.rank-number{display:inline-flex;justify-content:center;align-items:center;min-width:28px;height:28px;background:#e2eee7;color:#285d45;border-radius:8px}.metric-heading{font-size:12px;color:#6b807b}td:last-child button{white-space:nowrap}[hidden]{display:none!important}@media(max-width:650px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar label{flex-wrap:wrap}}
+        </style><script id="securities-queries" type="application/json">{
+          "customers": "SELECT c.customer_no, c.name, c.customer_type, c.risk_level, c.investor_type, c.open_date, c.status, COALESCE(a.account_count, 0) AS account_count FROM customers c LEFT JOIN (SELECT customer_no, COUNT(*) AS account_count FROM fund_accounts GROUP BY customer_no) a ON a.customer_no = c.customer_no WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type) ORDER BY c.customer_no LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_count": "SELECT COUNT(*) AS total FROM customers c WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type)",
+          "dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances",
+          "customer_dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances WHERE customer_no = :arg_customer",
+          "customer": "SELECT customer_no, name, customer_type, mobile, risk_level, investor_type, open_date, status FROM customers WHERE customer_no = :arg_customer",
+          "accounts": "SELECT fund_account_no, currency, status, department_code, manager_id FROM fund_accounts WHERE customer_no = :arg_customer ORDER BY fund_account_no",
+          "customer_cash": "SELECT SUM(closing_balance) AS cash, SUM(available_balance) AS available, SUM(withdrawable_balance) AS withdrawable FROM daily_balances WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_holdings": "SELECT SUM(market_value_cents) AS holdings FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_activity": "SELECT COUNT(*) AS trade_count, SUM(amount_cents) AS turnover, SUM(fee_cents) AS fees FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "positions": "SELECT fund_account_no, security_code, quantity, available_quantity, cost_cents, market_value_cents FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY fund_account_no, security_code LIMIT :arg_limit OFFSET :arg_offset",
+          "positions_count": "SELECT COUNT(*) AS total FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_trades": "SELECT trade_no, fund_account_no, trade_date, security_code, side, price, quantity, amount_cents, fee_cents FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_trades_count": "SELECT COUNT(*) AS total FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "flows": "SELECT fund_account_no, trade_date, flow_type, amount_cents, fee_cents, balance_after FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "flows_count": "SELECT COUNT(*) AS total FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "assets": "WITH cash AS (SELECT customer_no, SUM(closing_balance) AS cash_value FROM daily_balances WHERE trade_date = :arg_date GROUP BY customer_no), holdings AS (SELECT customer_no, SUM(market_value_cents) AS holdings_value FROM positions WHERE trade_date = :arg_date GROUP BY customer_no) SELECT c.customer_no, c.name, COALESCE(cash.cash_value, 0) + COALESCE(holdings.holdings_value, 0) AS metric FROM customers c LEFT JOIN cash ON cash.customer_no = c.customer_no LEFT JOIN holdings ON holdings.customer_no = c.customer_no WHERE cash.customer_no IS NOT NULL OR holdings.customer_no IS NOT NULL ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "cash": "SELECT c.customer_no, c.name, SUM(b.closing_balance) AS metric FROM daily_balances b JOIN customers c ON c.customer_no = b.customer_no WHERE b.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "holdings": "SELECT c.customer_no, c.name, SUM(p.market_value_cents) AS metric FROM positions p JOIN customers c ON c.customer_no = p.customer_no WHERE p.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "turnover": "SELECT c.customer_no, c.name, SUM(t.amount_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "trade_count": "SELECT c.customer_no, c.name, COUNT(*) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "fees": "SELECT c.customer_no, c.name, SUM(t.fee_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "net_deposit": "SELECT c.customer_no, c.name, SUM(CASE WHEN f.flow_type = 'DEPOSIT' THEN f.amount_cents WHEN f.flow_type = 'WITHDRAWAL' THEN -ABS(f.amount_cents) ELSE 0 END) AS metric FROM cash_flows f JOIN customers c ON c.customer_no = f.customer_no WHERE f.trade_date BETWEEN :arg_start AND :arg_end AND f.flow_type IN ('DEPOSIT', 'WITHDRAWAL') GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit"
+        }
+        </script><script>// Securities-only screens. All reads go through the host's permission-aware query tool.
+        (() => {
+         'use strict';
+         const ds = window.datascope;
+         const queries = JSON.parse(document.getElementById('securities-queries').textContent);
+         const labels = {customer_no:'客户编号',name:'客户姓名',customer_type:'客户类型',risk_level:'风险等级',investor_type:'投资者类型',open_date:'开户日期',status:'状态',account_count:'资金账户数',fund_account_no:'资金账号',currency:'币种',department_code:'营业部编号',manager_id:'客户经理编号',security_code:'证券代码',quantity:'数量',available_quantity:'可用数量',cost_cents:'持仓成本（元）',market_value_cents:'持仓市值（元）',trade_no:'成交编号',trade_date:'交易日期',side:'方向',price:'价格（元）',amount_cents:'金额（元）',fee_cents:'费用（元）',flow_type:'流水类型',balance_after:'流水后余额（元）'};
+         const values = {INDIVIDUAL:'个人',CORPORATE:'机构',active:'正常',frozen:'冻结',closed:'已关闭',BUY:'买入',SELL:'卖出',DEPOSIT:'入金',WITHDRAWAL:'出金'};
+         const monetary = new Set(['cost_cents','market_value_cents','price','amount_cents','fee_cents','balance_after']);
+         const money = value => value === null || value === undefined ? '—' : ds.money(value);
+         const query = (key, parameters = {}, max_rows = 200) => {
+          // Send only parameters used by this statement; identifiers never come from input.
+          const binds = {}; for (const name of new Set(queries[key].match(/:arg_[a-z_]+/g) || [])) binds[name.slice(1)] = parameters[name.slice(1)];
+          return ds.callTool('query', {sql:queries[key],parameters:binds,max_rows});
+         };
+         const text = (target, value) => { target.textContent = value; };
+         function showTable(target, result, actions) {
+          ds.table(target, {...result,columns:result.columns.map(k=>labels[k]||k),rows:result.rows.map(row=>{
+           const shown={...row};for(const k of result.columns) shown[labels[k]||k]=monetary.has(k)?money(row[k]):values[row[k]]||row[k];return shown;
+          })}, actions);
+         }
+         function field(target, label, value) {
+          const item=ds.el('div');item.append(ds.el('span',label),ds.el('strong',values[value]||String(value??'—')));target.append(item);
+         }
+         function metric(target, label, value) {
+          const card=ds.el('div',undefined,'metric');card.append(ds.el('span',label),ds.el('strong',value));target.append(card);
+         }
+         const isoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+         function customerPanel(root) {
+          let generation=0;
+          return async (customerNo) => {
+           const stamp=++generation;root.hidden=false;root.replaceChildren();
+           const heading=ds.el('div',undefined,'top'), title=ds.el('h2','客户详情'), close=ds.button('收起详情',()=>{generation++;root.hidden=true;root.replaceChildren();});heading.append(title,close);root.append(heading);
+           const status=ds.el('div');status.setAttribute('role','status');root.append(status);ds.notice(status,'正在读取客户资料…');
+           try {
+            const params={arg_customer:customerNo};
+            const customer=await query('customer',params);if(stamp!==generation)return;
+            const c=customer.rows[0];if(!c){ds.notice(status,'没有可见的客户记录。');return;}
+            title.textContent=`${c.name} · 客户详情`;
+            const details=ds.el('div',undefined,'details');
+            for(const [label,key] of [['客户编号','customer_no'],['客户姓名','name'],['客户类型','customer_type'],['手机号','mobile'],['风险等级','risk_level'],['投资者类型','investor_type'],['开户日期','open_date'],['客户状态','status']])field(details,label,c[key]);
+            root.append(details);ds.notice(status,'');
+            const accountTitle=ds.el('h2','资金账户'),accounts=ds.el('div',undefined,'scroll');root.append(accountTitle,accounts);
+            const dates=await query('customer_dates',params);if(stamp!==generation)return;
+            const date=ds.el('input');date.type='date';date.setAttribute('aria-label','客户资产日期');date.value=dates.rows[0]?.last_date||'';
+            const toolbar=ds.el('div',undefined,'toolbar'), dateLabel=ds.el('label','资产与记录日期');dateLabel.append(date);const refresh=ds.button('刷新客户数据',()=>loadDate());toolbar.append(dateLabel,refresh);root.append(toolbar);
+            const metrics=ds.el('div',undefined,'metrics');root.append(metrics);
+            const tabs=ds.el('div',undefined,'toolbar tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','客户记录');root.append(tabs);
+            const recordStatus=ds.el('div'),records=ds.el('div',undefined,'scroll'),pager=ds.el('div',undefined,'toolbar pager'),pageInfo=ds.el('span',undefined,'muted');recordStatus.setAttribute('role','status');
+            let tab='positions',page=0,recordStamp=0,dateStamp=0;
+            const previous=ds.button('上一页',()=>{page--;loadRecords();}),next=ds.button('下一页',()=>{page++;loadRecords();});pager.append(previous,pageInfo,next);root.append(recordStatus,records,pager);
+            const tabButtons=[];for(const [key,label] of [['positions','持仓'],['customer_trades','成交'],['flows','资金流水']]){const button=ds.button(label,()=>{tab=key;page=0;loadRecords();});button.setAttribute('role','tab');tabButtons.push([button,key]);tabs.append(button);}
+            const rows=await query('accounts',params);if(stamp!==generation)return;showTable(accounts,rows);
+            async function loadRecords() {
+             const ticket=++recordStamp,selected=tab;records.replaceChildren();previous.disabled=next.disabled=true;pageInfo.textContent='';
+             tabButtons.forEach(([b,key])=>b.setAttribute('aria-selected',String(key===selected)));
+             if(!isoDate(date.value)){ds.notice(recordStatus,'请选择有效的记录日期。',true);return;}
+             ds.notice(recordStatus,'正在读取记录…');
+             try {
+              const bind={...params,arg_date:date.value,arg_limit:20,arg_offset:page*20};
+              const [count,result]=await Promise.all([query(selected+'_count',bind),query(selected,bind)]);
+              if(stamp!==generation||ticket!==recordStamp)return;
+              showTable(records,result);const total=Number(count.rows[0]?.total||0);pageInfo.textContent=`共 ${total} 条 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`;previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(recordStatus,'');
+             }catch(e){if(stamp===generation&&ticket===recordStamp)ds.notice(recordStatus,e.message,true);}
+            }
+            async function loadDate() {
+             const ticket=++dateStamp;++recordStamp;metrics.replaceChildren();records.replaceChildren();previous.disabled=next.disabled=true;refresh.disabled=true;page=0;
+             if(!isoDate(date.value)){ds.notice(status,'没有可见的资金账期，请选择有效日期。',true);refresh.disabled=false;return;}
+             ds.notice(status,'正在汇总客户资产…');
+             try {
+              const bind={...params,arg_date:date.value};
+              const [cash,holdings,activity]=await Promise.all([query('customer_cash',bind),query('customer_holdings',bind),query('customer_activity',bind)]);
+              if(stamp!==generation||ticket!==dateStamp)return;
+              const b=cash.rows[0]||{},h=holdings.rows[0]||{},a=activity.rows[0]||{};
+              const total=b.cash==null&&h.holdings==null?null:Number(b.cash||0)+Number(h.holdings||0);
+              for(const [label,value] of [['总资产（元）',money(total)],['资金余额（元）',money(b.cash)],['持仓市值（元）',money(h.holdings)],['可用资金（元）',money(b.available)],['当日成交额（元）',money(a.turnover)],['当日成交笔数',String(a.trade_count??'—')]])metric(metrics,label,value);
+              ds.notice(status,'');await loadRecords();
+             }catch(e){if(stamp===generation&&ticket===dateStamp)ds.notice(status,e.message,true);}
+             finally{if(stamp===generation&&ticket===dateStamp)refresh.disabled=false;}
+            }
+            date.onchange=()=>loadDate();await loadDate();
+           }catch(e){if(stamp===generation)ds.notice(status,e.message,true);}
+          };
+         }
+         function start(view) {
+          const byID=id=>document.getElementById(id),detail=customerPanel(byID('customer-detail'));
+          let epoch=0;
+          const detailButton=(td,row)=>td.append(ds.button('客户详情',()=>{detail(row.customer_no);byID('customer-detail').scrollIntoView({behavior:'smooth',block:'start'});}));
+          const form=byID('filters'),status=byID('status'),submit=form.querySelector('button');
+          // Sandboxed views intentionally have no allow-forms capability. Handle clicks
+          // and Enter directly instead of attempting native form submission.
+          let submitForm=()=>{};submit.type='button';submit.onclick=()=>submitForm();
+          form.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();submitForm();}};
+          const customers=view==='securities_customers',rankings=view==='securities_rankings';
+          if(customers){
+           let page=0,filter={arg_keyword:'',arg_like:'%',arg_risk:'',arg_type:''};
+           const previous=byID('previous'),next=byID('next');
+           async function load(){
+            const ticket=++epoch;submit.disabled=previous.disabled=next.disabled=true;byID('results').replaceChildren();byID('page-info').textContent='';ds.notice(status,'正在查询客户…');
+            try{const bind={...filter,arg_limit:20,arg_offset:page*20};const [count,result]=await Promise.all([query('customer_count',bind),query('customers',bind)]);if(ticket!==epoch)return;
+             showTable(byID('results'),result,detailButton);const total=Number(count.rows[0]?.total||0);text(byID('page-info'),`当前可见客户 ${total} 位 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`);previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           submitForm=()=>{page=0;filter={arg_keyword:byID('keyword').value.trim(),arg_like:`%${byID('keyword').value.trim()}%`,arg_risk:byID('risk').value,arg_type:byID('type').value};load();};previous.onclick=()=>{page--;load();};next.onclick=()=>{page++;load();};
+           ds.onData(data=>{if(data.input?.keyword!==undefined)byID('keyword').value=String(data.input.keyword);submitForm();});
+          }else if(rankings){
+           const names={assets:'总资产',cash:'资金余额',holdings:'持仓市值',turnover:'成交额',trade_count:'成交笔数',net_deposit:'净入金',fees:'手续费'};
+           function period(){const value=byID('metric').value;const historical=['turnover','trade_count','net_deposit','fees'].includes(value);byID('snapshot-label').hidden=historical;byID('start-label').hidden=byID('end-label').hidden=!historical;byID('snapshot').required=!historical;byID('start').required=byID('end').required=historical;return historical;}
+           async function load(){const ticket=++epoch;submit.disabled=true;byID('results').replaceChildren();ds.notice(status,'正在计算客户排名…');
+            try{const selected=byID('metric').value,historical=period(),bind={arg_date:byID('snapshot').value,arg_start:byID('start').value,arg_end:byID('end').value,arg_limit:Number(byID('top').value)};
+             if(historical?(!isoDate(bind.arg_start)||!isoDate(bind.arg_end)||bind.arg_start>bind.arg_end):!isoDate(bind.arg_date))throw new Error('请选择有效日期，开始日期不能晚于结束日期。');
+             text(byID('basis'),`当前身份可见客户 · ${names[selected]}降序 Top ${bind.arg_limit} · ${historical?bind.arg_start+' 至 '+bind.arg_end:bind.arg_date}${selected==='assets'?' · 总资产 = 当日资金余额 + 当日持仓市值':''} · 金额单位：元`);
+             const result=await query(selected,bind);if(ticket!==epoch)return;
+             const rows=result.rows.map((r,i)=>({...r,'排名':i+1,'客户编号':r.customer_no,'客户姓名':r.name,[names[selected]+(selected==='trade_count'?'（笔）':'（元）')]:selected==='trade_count'?r.metric:money(r.metric)}));
+             ds.table(byID('results'),{...result,rows,columns:['排名','客户编号','客户姓名',names[selected]+(selected==='trade_count'?'（笔）':'（元）')]},detailButton);ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           byID('metric').onchange=()=>{period();submitForm();};submitForm=()=>{load();};
+           ds.onData(async data=>{const ticket=++epoch;submit.disabled=true;ds.notice(status,'正在读取可见数据日期…');
+            try{const result=await query('dates');if(ticket!==epoch)return;const dates=result.rows[0]||{},input=data.input||{};byID('snapshot').value=input.date||dates.last_date||'';byID('start').value=input.start_date||dates.first_date||'';byID('end').value=input.end_date||dates.last_date||'';if(Object.hasOwn(names,input.metric))byID('metric').value=input.metric;await load();}
+            catch(e){if(ticket===epoch){submit.disabled=false;ds.notice(status,e.message,true);}}
+           });
+          }else{
+           submitForm=()=>{if(!form.reportValidity())return;ds.notice(status,'');detail(byID('customer-number').value.trim());};
+           ds.onData(data=>{const no=data.input?.customer_no||data.result?.rows?.[0]?.customer_no;if(no){byID('customer-number').value=String(no);submitForm();}else ds.notice(status,'输入客户编号，或从客户列表、客户排名中查看客户详情。');});
+          }
+         }
+         window.securitiesViews={start};
+        })();
+        </script></head><body data-view="securities_customers">
+        <div class="top"><div><div class="eyebrow">DATASCOPE / SECURITIES</div><h1>客户列表</h1><span class="muted">搜索客户、查看资料与账户</span></div><span class="tag">合成演示数据 · 按权限查询</span></div>
+        <section class="card"><form id="filters" class="toolbar"><label>客户搜索 <input id="keyword" placeholder="客户编号或姓名" maxlength="80"></label><label>客户类型 <select id="type"><option value="">全部</option><option value="INDIVIDUAL">个人</option><option value="CORPORATE">机构</option></select></label><label>风险等级 <select id="risk"><option value="">全部</option><option>C1</option><option>C2</option><option>C3</option><option>C4</option><option>C5</option></select></label><button class="primary">查询客户</button></form><div id="status" role="status"></div><div id="results" class="scroll"></div><div class="toolbar pager"><button id="previous">上一页</button><span id="page-info" class="muted"></span><button id="next">下一页</button></div></section><section id="customer-detail" class="card" hidden></section>
+        <script>window.securitiesViews.start(document.body.dataset.view);</script></body></html>
+      published: true
+    - id: securities_rankings
+      name: 客户多项排名
+      description: 按当前可见客户范围，查看总资产、资金余额、持仓市值、成交额、成交笔数、净入金与手续费排名。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>客户多项排名</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script><style>.toolbar label{margin:0;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0}.toolbar input{min-width:120px}.pager{justify-content:flex-end;margin-top:20px}.details{margin:20px 0}.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.rank-number{display:inline-flex;justify-content:center;align-items:center;min-width:28px;height:28px;background:#e2eee7;color:#285d45;border-radius:8px}.metric-heading{font-size:12px;color:#6b807b}td:last-child button{white-space:nowrap}[hidden]{display:none!important}@media(max-width:650px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar label{flex-wrap:wrap}}
+        </style><script id="securities-queries" type="application/json">{
+          "customers": "SELECT c.customer_no, c.name, c.customer_type, c.risk_level, c.investor_type, c.open_date, c.status, COALESCE(a.account_count, 0) AS account_count FROM customers c LEFT JOIN (SELECT customer_no, COUNT(*) AS account_count FROM fund_accounts GROUP BY customer_no) a ON a.customer_no = c.customer_no WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type) ORDER BY c.customer_no LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_count": "SELECT COUNT(*) AS total FROM customers c WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type)",
+          "dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances",
+          "customer_dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances WHERE customer_no = :arg_customer",
+          "customer": "SELECT customer_no, name, customer_type, mobile, risk_level, investor_type, open_date, status FROM customers WHERE customer_no = :arg_customer",
+          "accounts": "SELECT fund_account_no, currency, status, department_code, manager_id FROM fund_accounts WHERE customer_no = :arg_customer ORDER BY fund_account_no",
+          "customer_cash": "SELECT SUM(closing_balance) AS cash, SUM(available_balance) AS available, SUM(withdrawable_balance) AS withdrawable FROM daily_balances WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_holdings": "SELECT SUM(market_value_cents) AS holdings FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_activity": "SELECT COUNT(*) AS trade_count, SUM(amount_cents) AS turnover, SUM(fee_cents) AS fees FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "positions": "SELECT fund_account_no, security_code, quantity, available_quantity, cost_cents, market_value_cents FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY fund_account_no, security_code LIMIT :arg_limit OFFSET :arg_offset",
+          "positions_count": "SELECT COUNT(*) AS total FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_trades": "SELECT trade_no, fund_account_no, trade_date, security_code, side, price, quantity, amount_cents, fee_cents FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_trades_count": "SELECT COUNT(*) AS total FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "flows": "SELECT fund_account_no, trade_date, flow_type, amount_cents, fee_cents, balance_after FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "flows_count": "SELECT COUNT(*) AS total FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "assets": "WITH cash AS (SELECT customer_no, SUM(closing_balance) AS cash_value FROM daily_balances WHERE trade_date = :arg_date GROUP BY customer_no), holdings AS (SELECT customer_no, SUM(market_value_cents) AS holdings_value FROM positions WHERE trade_date = :arg_date GROUP BY customer_no) SELECT c.customer_no, c.name, COALESCE(cash.cash_value, 0) + COALESCE(holdings.holdings_value, 0) AS metric FROM customers c LEFT JOIN cash ON cash.customer_no = c.customer_no LEFT JOIN holdings ON holdings.customer_no = c.customer_no WHERE cash.customer_no IS NOT NULL OR holdings.customer_no IS NOT NULL ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "cash": "SELECT c.customer_no, c.name, SUM(b.closing_balance) AS metric FROM daily_balances b JOIN customers c ON c.customer_no = b.customer_no WHERE b.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "holdings": "SELECT c.customer_no, c.name, SUM(p.market_value_cents) AS metric FROM positions p JOIN customers c ON c.customer_no = p.customer_no WHERE p.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "turnover": "SELECT c.customer_no, c.name, SUM(t.amount_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "trade_count": "SELECT c.customer_no, c.name, COUNT(*) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "fees": "SELECT c.customer_no, c.name, SUM(t.fee_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "net_deposit": "SELECT c.customer_no, c.name, SUM(CASE WHEN f.flow_type = 'DEPOSIT' THEN f.amount_cents WHEN f.flow_type = 'WITHDRAWAL' THEN -ABS(f.amount_cents) ELSE 0 END) AS metric FROM cash_flows f JOIN customers c ON c.customer_no = f.customer_no WHERE f.trade_date BETWEEN :arg_start AND :arg_end AND f.flow_type IN ('DEPOSIT', 'WITHDRAWAL') GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit"
+        }
+        </script><script>// Securities-only screens. All reads go through the host's permission-aware query tool.
+        (() => {
+         'use strict';
+         const ds = window.datascope;
+         const queries = JSON.parse(document.getElementById('securities-queries').textContent);
+         const labels = {customer_no:'客户编号',name:'客户姓名',customer_type:'客户类型',risk_level:'风险等级',investor_type:'投资者类型',open_date:'开户日期',status:'状态',account_count:'资金账户数',fund_account_no:'资金账号',currency:'币种',department_code:'营业部编号',manager_id:'客户经理编号',security_code:'证券代码',quantity:'数量',available_quantity:'可用数量',cost_cents:'持仓成本（元）',market_value_cents:'持仓市值（元）',trade_no:'成交编号',trade_date:'交易日期',side:'方向',price:'价格（元）',amount_cents:'金额（元）',fee_cents:'费用（元）',flow_type:'流水类型',balance_after:'流水后余额（元）'};
+         const values = {INDIVIDUAL:'个人',CORPORATE:'机构',active:'正常',frozen:'冻结',closed:'已关闭',BUY:'买入',SELL:'卖出',DEPOSIT:'入金',WITHDRAWAL:'出金'};
+         const monetary = new Set(['cost_cents','market_value_cents','price','amount_cents','fee_cents','balance_after']);
+         const money = value => value === null || value === undefined ? '—' : ds.money(value);
+         const query = (key, parameters = {}, max_rows = 200) => {
+          // Send only parameters used by this statement; identifiers never come from input.
+          const binds = {}; for (const name of new Set(queries[key].match(/:arg_[a-z_]+/g) || [])) binds[name.slice(1)] = parameters[name.slice(1)];
+          return ds.callTool('query', {sql:queries[key],parameters:binds,max_rows});
+         };
+         const text = (target, value) => { target.textContent = value; };
+         function showTable(target, result, actions) {
+          ds.table(target, {...result,columns:result.columns.map(k=>labels[k]||k),rows:result.rows.map(row=>{
+           const shown={...row};for(const k of result.columns) shown[labels[k]||k]=monetary.has(k)?money(row[k]):values[row[k]]||row[k];return shown;
+          })}, actions);
+         }
+         function field(target, label, value) {
+          const item=ds.el('div');item.append(ds.el('span',label),ds.el('strong',values[value]||String(value??'—')));target.append(item);
+         }
+         function metric(target, label, value) {
+          const card=ds.el('div',undefined,'metric');card.append(ds.el('span',label),ds.el('strong',value));target.append(card);
+         }
+         const isoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+         function customerPanel(root) {
+          let generation=0;
+          return async (customerNo) => {
+           const stamp=++generation;root.hidden=false;root.replaceChildren();
+           const heading=ds.el('div',undefined,'top'), title=ds.el('h2','客户详情'), close=ds.button('收起详情',()=>{generation++;root.hidden=true;root.replaceChildren();});heading.append(title,close);root.append(heading);
+           const status=ds.el('div');status.setAttribute('role','status');root.append(status);ds.notice(status,'正在读取客户资料…');
+           try {
+            const params={arg_customer:customerNo};
+            const customer=await query('customer',params);if(stamp!==generation)return;
+            const c=customer.rows[0];if(!c){ds.notice(status,'没有可见的客户记录。');return;}
+            title.textContent=`${c.name} · 客户详情`;
+            const details=ds.el('div',undefined,'details');
+            for(const [label,key] of [['客户编号','customer_no'],['客户姓名','name'],['客户类型','customer_type'],['手机号','mobile'],['风险等级','risk_level'],['投资者类型','investor_type'],['开户日期','open_date'],['客户状态','status']])field(details,label,c[key]);
+            root.append(details);ds.notice(status,'');
+            const accountTitle=ds.el('h2','资金账户'),accounts=ds.el('div',undefined,'scroll');root.append(accountTitle,accounts);
+            const dates=await query('customer_dates',params);if(stamp!==generation)return;
+            const date=ds.el('input');date.type='date';date.setAttribute('aria-label','客户资产日期');date.value=dates.rows[0]?.last_date||'';
+            const toolbar=ds.el('div',undefined,'toolbar'), dateLabel=ds.el('label','资产与记录日期');dateLabel.append(date);const refresh=ds.button('刷新客户数据',()=>loadDate());toolbar.append(dateLabel,refresh);root.append(toolbar);
+            const metrics=ds.el('div',undefined,'metrics');root.append(metrics);
+            const tabs=ds.el('div',undefined,'toolbar tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','客户记录');root.append(tabs);
+            const recordStatus=ds.el('div'),records=ds.el('div',undefined,'scroll'),pager=ds.el('div',undefined,'toolbar pager'),pageInfo=ds.el('span',undefined,'muted');recordStatus.setAttribute('role','status');
+            let tab='positions',page=0,recordStamp=0,dateStamp=0;
+            const previous=ds.button('上一页',()=>{page--;loadRecords();}),next=ds.button('下一页',()=>{page++;loadRecords();});pager.append(previous,pageInfo,next);root.append(recordStatus,records,pager);
+            const tabButtons=[];for(const [key,label] of [['positions','持仓'],['customer_trades','成交'],['flows','资金流水']]){const button=ds.button(label,()=>{tab=key;page=0;loadRecords();});button.setAttribute('role','tab');tabButtons.push([button,key]);tabs.append(button);}
+            const rows=await query('accounts',params);if(stamp!==generation)return;showTable(accounts,rows);
+            async function loadRecords() {
+             const ticket=++recordStamp,selected=tab;records.replaceChildren();previous.disabled=next.disabled=true;pageInfo.textContent='';
+             tabButtons.forEach(([b,key])=>b.setAttribute('aria-selected',String(key===selected)));
+             if(!isoDate(date.value)){ds.notice(recordStatus,'请选择有效的记录日期。',true);return;}
+             ds.notice(recordStatus,'正在读取记录…');
+             try {
+              const bind={...params,arg_date:date.value,arg_limit:20,arg_offset:page*20};
+              const [count,result]=await Promise.all([query(selected+'_count',bind),query(selected,bind)]);
+              if(stamp!==generation||ticket!==recordStamp)return;
+              showTable(records,result);const total=Number(count.rows[0]?.total||0);pageInfo.textContent=`共 ${total} 条 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`;previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(recordStatus,'');
+             }catch(e){if(stamp===generation&&ticket===recordStamp)ds.notice(recordStatus,e.message,true);}
+            }
+            async function loadDate() {
+             const ticket=++dateStamp;++recordStamp;metrics.replaceChildren();records.replaceChildren();previous.disabled=next.disabled=true;refresh.disabled=true;page=0;
+             if(!isoDate(date.value)){ds.notice(status,'没有可见的资金账期，请选择有效日期。',true);refresh.disabled=false;return;}
+             ds.notice(status,'正在汇总客户资产…');
+             try {
+              const bind={...params,arg_date:date.value};
+              const [cash,holdings,activity]=await Promise.all([query('customer_cash',bind),query('customer_holdings',bind),query('customer_activity',bind)]);
+              if(stamp!==generation||ticket!==dateStamp)return;
+              const b=cash.rows[0]||{},h=holdings.rows[0]||{},a=activity.rows[0]||{};
+              const total=b.cash==null&&h.holdings==null?null:Number(b.cash||0)+Number(h.holdings||0);
+              for(const [label,value] of [['总资产（元）',money(total)],['资金余额（元）',money(b.cash)],['持仓市值（元）',money(h.holdings)],['可用资金（元）',money(b.available)],['当日成交额（元）',money(a.turnover)],['当日成交笔数',String(a.trade_count??'—')]])metric(metrics,label,value);
+              ds.notice(status,'');await loadRecords();
+             }catch(e){if(stamp===generation&&ticket===dateStamp)ds.notice(status,e.message,true);}
+             finally{if(stamp===generation&&ticket===dateStamp)refresh.disabled=false;}
+            }
+            date.onchange=()=>loadDate();await loadDate();
+           }catch(e){if(stamp===generation)ds.notice(status,e.message,true);}
+          };
+         }
+         function start(view) {
+          const byID=id=>document.getElementById(id),detail=customerPanel(byID('customer-detail'));
+          let epoch=0;
+          const detailButton=(td,row)=>td.append(ds.button('客户详情',()=>{detail(row.customer_no);byID('customer-detail').scrollIntoView({behavior:'smooth',block:'start'});}));
+          const form=byID('filters'),status=byID('status'),submit=form.querySelector('button');
+          // Sandboxed views intentionally have no allow-forms capability. Handle clicks
+          // and Enter directly instead of attempting native form submission.
+          let submitForm=()=>{};submit.type='button';submit.onclick=()=>submitForm();
+          form.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();submitForm();}};
+          const customers=view==='securities_customers',rankings=view==='securities_rankings';
+          if(customers){
+           let page=0,filter={arg_keyword:'',arg_like:'%',arg_risk:'',arg_type:''};
+           const previous=byID('previous'),next=byID('next');
+           async function load(){
+            const ticket=++epoch;submit.disabled=previous.disabled=next.disabled=true;byID('results').replaceChildren();byID('page-info').textContent='';ds.notice(status,'正在查询客户…');
+            try{const bind={...filter,arg_limit:20,arg_offset:page*20};const [count,result]=await Promise.all([query('customer_count',bind),query('customers',bind)]);if(ticket!==epoch)return;
+             showTable(byID('results'),result,detailButton);const total=Number(count.rows[0]?.total||0);text(byID('page-info'),`当前可见客户 ${total} 位 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`);previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           submitForm=()=>{page=0;filter={arg_keyword:byID('keyword').value.trim(),arg_like:`%${byID('keyword').value.trim()}%`,arg_risk:byID('risk').value,arg_type:byID('type').value};load();};previous.onclick=()=>{page--;load();};next.onclick=()=>{page++;load();};
+           ds.onData(data=>{if(data.input?.keyword!==undefined)byID('keyword').value=String(data.input.keyword);submitForm();});
+          }else if(rankings){
+           const names={assets:'总资产',cash:'资金余额',holdings:'持仓市值',turnover:'成交额',trade_count:'成交笔数',net_deposit:'净入金',fees:'手续费'};
+           function period(){const value=byID('metric').value;const historical=['turnover','trade_count','net_deposit','fees'].includes(value);byID('snapshot-label').hidden=historical;byID('start-label').hidden=byID('end-label').hidden=!historical;byID('snapshot').required=!historical;byID('start').required=byID('end').required=historical;return historical;}
+           async function load(){const ticket=++epoch;submit.disabled=true;byID('results').replaceChildren();ds.notice(status,'正在计算客户排名…');
+            try{const selected=byID('metric').value,historical=period(),bind={arg_date:byID('snapshot').value,arg_start:byID('start').value,arg_end:byID('end').value,arg_limit:Number(byID('top').value)};
+             if(historical?(!isoDate(bind.arg_start)||!isoDate(bind.arg_end)||bind.arg_start>bind.arg_end):!isoDate(bind.arg_date))throw new Error('请选择有效日期，开始日期不能晚于结束日期。');
+             text(byID('basis'),`当前身份可见客户 · ${names[selected]}降序 Top ${bind.arg_limit} · ${historical?bind.arg_start+' 至 '+bind.arg_end:bind.arg_date}${selected==='assets'?' · 总资产 = 当日资金余额 + 当日持仓市值':''} · 金额单位：元`);
+             const result=await query(selected,bind);if(ticket!==epoch)return;
+             const rows=result.rows.map((r,i)=>({...r,'排名':i+1,'客户编号':r.customer_no,'客户姓名':r.name,[names[selected]+(selected==='trade_count'?'（笔）':'（元）')]:selected==='trade_count'?r.metric:money(r.metric)}));
+             ds.table(byID('results'),{...result,rows,columns:['排名','客户编号','客户姓名',names[selected]+(selected==='trade_count'?'（笔）':'（元）')]},detailButton);ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           byID('metric').onchange=()=>{period();submitForm();};submitForm=()=>{load();};
+           ds.onData(async data=>{const ticket=++epoch;submit.disabled=true;ds.notice(status,'正在读取可见数据日期…');
+            try{const result=await query('dates');if(ticket!==epoch)return;const dates=result.rows[0]||{},input=data.input||{};byID('snapshot').value=input.date||dates.last_date||'';byID('start').value=input.start_date||dates.first_date||'';byID('end').value=input.end_date||dates.last_date||'';if(Object.hasOwn(names,input.metric))byID('metric').value=input.metric;await load();}
+            catch(e){if(ticket===epoch){submit.disabled=false;ds.notice(status,e.message,true);}}
+           });
+          }else{
+           submitForm=()=>{if(!form.reportValidity())return;ds.notice(status,'');detail(byID('customer-number').value.trim());};
+           ds.onData(data=>{const no=data.input?.customer_no||data.result?.rows?.[0]?.customer_no;if(no){byID('customer-number').value=String(no);submitForm();}else ds.notice(status,'输入客户编号，或从客户列表、客户排名中查看客户详情。');});
+          }
+         }
+         window.securitiesViews={start};
+        })();
+        </script></head><body data-view="securities_rankings">
+        <div class="top"><div><div class="eyebrow">DATASCOPE / SECURITIES</div><h1>客户多项排名</h1><span class="muted">按当前身份可见范围汇总客户指标</span></div><span class="tag">合成演示数据 · 按权限查询</span></div>
+        <section class="card"><form id="filters" class="toolbar"><label>排名指标 <select id="metric"><option value="assets">总资产</option><option value="cash">资金余额</option><option value="holdings">持仓市值</option><option value="turnover">成交额</option><option value="trade_count">成交笔数</option><option value="net_deposit">净入金</option><option value="fees">手续费</option></select></label><label id="snapshot-label">资产日期 <input id="snapshot" type="date" required></label><label id="start-label" hidden>开始日期 <input id="start" type="date"></label><label id="end-label" hidden>结束日期 <input id="end" type="date"></label><label>排名数量 <select id="top"><option>10</option><option selected>20</option><option>50</option><option>100</option></select></label><button class="primary">查看排名</button></form><p id="basis" class="muted"></p><div id="status" role="status"></div><div id="results" class="scroll"></div></section><section id="customer-detail" class="card" hidden></section>
+        <script>window.securitiesViews.start(document.body.dataset.view);</script></body></html>
+      published: true
+    - id: securities_customer
+      name: 客户详情
+      description: 按客户编号查看客户资料、多资金账户、指定日期资产汇总、持仓、成交与资金流水。
+      type: view
+      html: |
+        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>客户详情</title><style>:root{font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:#213b39;background:#f4f7f6;font-size:14px;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;padding:28px}h1{font-size:25px;letter-spacing:-.6px;margin:4px 0 8px}h2{font-size:17px;margin:0 0 16px}p{line-height:1.7}.muted{color:#6b807b}.eyebrow{font-size:11px;letter-spacing:2px;color:#35806d;font-weight:700}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;margin-bottom:24px}.card{background:#fff;border:1px solid #dce5e1;border-radius:14px;padding:22px;margin-bottom:18px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}.metric{border-radius:12px;background:#eaf1ed;padding:18px}.metric strong{font-size:23px;display:block;margin-top:10px;font-variant-numeric:tabular-nums}.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.tabs{margin:20px 0}.tabs button[aria-selected=true]{background:#214f43;color:white}button,input,select,textarea{font:inherit;border:1px solid #c7d6d0;border-radius:7px;padding:9px 12px}input,select,textarea{color:inherit;background:#fff}textarea{width:100%;min-height:100px;font-family:ui-monospace,monospace}button{cursor:pointer;background:#fff;color:#254b3e}button.primary{background:#225c49;border-color:#225c49;color:#fff}button:disabled{opacity:.5;cursor:default}button:hover:not(:disabled){filter:brightness(.94)}label{display:block;margin:14px 0 6px;font-weight:500}form input,form select{width:100%}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:13px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #e7eeea}th{font-size:12px;color:#62776e;font-weight:500;background:#f5f8f6}td{font-variant-numeric:tabular-nums}td.money{text-align:right}.notice{padding:12px 15px;border-radius:8px;background:#e9f1ed;line-height:1.6;margin:12px 0;white-space:pre-wrap}.notice.error{color:#9c3030;background:#fff0ed}.tag{font-size:12px;border-radius:5px;background:#e2eee7;color:#285d45;padding:4px 9px}pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;background:#f3f6f4;padding:14px;border-radius:8px}dialog{border:1px solid #cfddd6;border-radius:16px;max-width:720px;width:calc(100% - 36px);max-height:90vh;padding:26px;background:white;color:inherit}dialog::backdrop{background:#183a3055}.details{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.details span{display:block;color:#6a8076;font-size:12px;margin-bottom:6px}.details strong{font-weight:500}a{color:#226b51}.empty{padding:34px;text-align:center;color:#6b807b}.status{min-height:24px}#action-receipt{margin-top:16px}@media(max-width:650px){body{padding:14px}.metrics,.details{grid-template-columns:repeat(2,minmax(0,1fr))}.metric strong{font-size:19px}.card{padding:16px}}@media(prefers-color-scheme:dark){:root{background:#172721;color:#e1eae4}.card,dialog{background:#20332b;border-color:#3a5045}input,select,textarea,button{background:#263e32;color:#e1eae4;border-color:#4b6858}.metric,.notice,pre,th{background:#2a4335}.muted,.details span,th{color:#a3b8a9}td,th{border-color:#3b5145}.tag{background:#345a41;color:#d0e9d6}.notice.error{background:#4e302b;color:#ffc4b7}a{color:#9bd6b0}}
+        </style><script>// DataScope HTML bridge v1. The host holds credentials; the frame receives data only.
+        (() => {
+         'use strict';
+         let lastData = '';
+         let channel = '', listener = () => {}, current, sequence = 0;
+         const pending = new Map();
+         function rpc(method, params) {
+          if (!channel) return Promise.reject(new Error('请在支持 DataScope 视图的宿主中打开。'));
+          const id = ++sequence;
+          return new Promise((resolve, reject) => {
+           const timer = setTimeout(() => { pending.delete(id); reject(new Error('调用超时；写入结果未知时请仅查询原请求回执。')); }, 45000);
+           pending.set(id, { resolve, reject, timer });
+           parent.postMessage({ type: 'datascope:view:request', channel, id, method, params }, '*');
+          });
+         }
+         addEventListener('message', event => {
+          if (event.source !== parent) return;
+          const m = event.data;
+          if (m?.type === 'datascope:view:init' && (!channel || channel === m.channel)) {
+           channel = m.channel; const json = JSON.stringify(m.data || {}); if (json !== lastData) { lastData = json; current = m.data || {}; listener(current); } return;
+          }
+          if (m?.type !== 'datascope:view:response' || m.channel !== channel) return;
+          const item = pending.get(m.id); if (!item) return;
+          clearTimeout(item.timer); pending.delete(m.id);
+          if (m.error) item.reject(new Error(m.error)); else item.resolve(m.result);
+         });
+         const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+         function table(target, result, rowActions) {
+          target.replaceChildren();
+          if (!result?.rows?.length) { target.append(el('div', '暂无可见记录', 'empty')); return; }
+          const t = el('table'), head = el('tr');
+          for (const key of result.columns) head.append(el('th', key));
+          if (rowActions) head.append(el('th', '操作'));
+          t.append(head);
+          for (const row of result.rows) {
+           const tr = el('tr');
+           for (const key of result.columns) tr.append(el('td', row[key] === null ? '—' : String(row[key] ?? '')));
+           if (rowActions) { const td = el('td'); rowActions(td, row); tr.append(td); }
+           t.append(tr);
+          }
+          target.append(t);
+          if (result.truncated) target.append(el('p', '结果已截断，请缩小查询范围。', 'muted'));
+         }
+         function button(text, action) { const b = el('button', text); b.type = 'button'; b.onclick = action; return b; }
+         function notice(target, text, error = false) { target.textContent = text; target.className = text ? 'notice' + (error ? ' error' : '') : 'status'; }
+         function ask(text) { return new Promise(resolve => { const dialog = el('dialog'), p = el('p',text), buttons = el('div',undefined,'toolbar'); const done = value => {dialog.close();dialog.remove();resolve(value);}; buttons.append(button('取消',()=>done(false)),button('确认',()=>done(true)));dialog.append(p,buttons);dialog.addEventListener('cancel',e=>{e.preventDefault();done(false);},{once:true});document.body.append(dialog);dialog.showModal(); }); }
+         const ds = window.datascope = {
+          onData(fn) { listener = fn; if (current) fn(current); },
+          callTool(name, args = {}) { return rpc('tools/call', { name, arguments: args }); },
+          openLink(url) { return rpc('openLink', { url }); },
+          el, table, button, notice,
+          money(value) { return (Number(value || 0) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+         };
+         // A shared action form is UI only: the server validates schema, ownership and writes.
+         ds.actionForm = (root, onCommitted = () => {}) => {
+          let name = '', args = {}, requestID = '', attempted = false, busy = false, controls = {}, description;
+          const heading = el('h2', '业务操作'), form = el('form'), status = el('div'), preview = el('pre'), links = el('div', undefined, 'toolbar');
+          const submit = button('获取操作预览', async () => {
+           if (attempted || busy || !form.reportValidity()) return;
+           args = {};
+           for (const [key, control] of Object.entries(controls)) {
+            const field = description.parameters.properties[key];
+            if (!control.value && !description.parameters.required.includes(key)) continue;
+            args[key] = field.type === 'boolean' ? control.value === 'true' : ['integer', 'number'].includes(field.type) ? Number(control.value) : control.value;
+           }
+           // Keep the original ID even on transport failure. Never automatically replay writes.
+           attempted = true; requestID = crypto.randomUUID(); await invoke(false);
+          });
+          const lookup = button('查询同一请求结果', () => invoke(true));
+          const reset = button('新请求', async () => { if (busy || !await ask('请先核对上一请求结果。确定开始新请求？')) return; attempted = false; requestID = ''; links.replaceChildren(); preview.textContent = ''; notice(status, ''); update(); });
+          const actions = el('div', undefined, 'toolbar'); actions.append(submit, lookup, reset);
+          root.append(heading, form, status, preview, links, actions);
+          function update() { submit.disabled = busy || attempted || !description; lookup.disabled = busy || !attempted; reset.disabled = busy; for (const c of Object.values(controls)) c.disabled = busy || attempted; }
+          async function invoke(resultOnly) {
+           if (busy || resultOnly && !attempted) return;
+           busy = true; update(); notice(status, '正在读取结果…');
+           try {
+            const out = await ds.callTool('invoke_action', { name, arguments: resultOnly ? {} : args, request_id: requestID, ...(resultOnly ? { result_only: true } : {}) });
+            render(out);
+            if (out.status === 'done') await onCommitted();
+           } catch (e) { notice(status, e.message + '\nrequest_id: ' + requestID, true); }
+           finally { busy = false; update(); }
+          }
+          function render(out) {
+           links.replaceChildren(); preview.textContent = JSON.stringify(out.preview || out.result || out, null, 2);
+           notice(status, out.status + (out.message ? ' · ' + out.message : '') + '\nrequest_id: ' + requestID, ['denied', 'failed', 'unknown'].includes(out.status));
+           if (out.status === 'confirm_required' && out.confirmation_url) links.append(button('打开本人确认页', () => ds.openLink(out.confirmation_url).catch(e => notice(status, e.message, true))));
+          }
+          return {
+           async open(actionName, defaults = {}, existing) {
+            if (attempted && !await ask('请先核对上一请求的结果。切换操作后请保留原 request_id 以查询回执。')) return false;
+            busy = true; description = undefined; update(); form.replaceChildren(); links.replaceChildren(); preview.textContent = ''; notice(status, '正在读取动作参数…');
+            try {
+             description = await ds.callTool('describe_action', { name: actionName }); name = actionName; heading.textContent = description.title; controls = {}; attempted = false; requestID = '';
+             for (const [key, field] of Object.entries(description.parameters.properties)) {
+              const label = el('label', field.description || key); let c;
+              if (field.enum || field.type === 'boolean') {
+               c = el('select'); if (!description.parameters.required.includes(key)) c.append(el('option', ''));
+               for (const value of field.enum || [false, true]) { const option = el('option', String(value)); option.value = String(value); c.append(option); }
+              } else { c = el('input'); c.type = ['integer', 'number'].includes(field.type) ? 'number' : 'text'; if (c.type === 'number') { c.step = field.type === 'integer' ? '1' : 'any'; if (field.minimum !== undefined) c.min = String(field.minimum); if (field.maximum !== undefined) c.max = String(field.maximum); } if (field.maxLength !== undefined) c.maxLength = field.maxLength; /* Patterns use the server regexp dialect and are validated there. */ }
+              c.name = key; c.required = description.parameters.required.includes(key); c.value = defaults[key] === undefined ? c.value : String(defaults[key]); label.append(c); form.append(label); controls[key] = c;
+             }
+             notice(status, description.description);
+             if (existing?.request_id) { requestID = existing.request_id; attempted = true; args = defaults; if (existing.response) render(existing.response); }
+             return true;
+            } catch (e) { notice(status, e.message, true); return false; }
+            finally { busy = false; update(); }
+           }
+          };
+         };
+         addEventListener('DOMContentLoaded', () => parent.postMessage({ type: 'datascope:view:ready' }, '*'));
+        })();
+        </script><style>.toolbar label{margin:0;display:flex;align-items:center;gap:8px;white-space:nowrap;flex-shrink:0}.toolbar input{min-width:120px}.pager{justify-content:flex-end;margin-top:20px}.details{margin:20px 0}.metrics{grid-template-columns:repeat(3,minmax(0,1fr))}.rank-number{display:inline-flex;justify-content:center;align-items:center;min-width:28px;height:28px;background:#e2eee7;color:#285d45;border-radius:8px}.metric-heading{font-size:12px;color:#6b807b}td:last-child button{white-space:nowrap}[hidden]{display:none!important}@media(max-width:650px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar label{flex-wrap:wrap}}
+        </style><script id="securities-queries" type="application/json">{
+          "customers": "SELECT c.customer_no, c.name, c.customer_type, c.risk_level, c.investor_type, c.open_date, c.status, COALESCE(a.account_count, 0) AS account_count FROM customers c LEFT JOIN (SELECT customer_no, COUNT(*) AS account_count FROM fund_accounts GROUP BY customer_no) a ON a.customer_no = c.customer_no WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type) ORDER BY c.customer_no LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_count": "SELECT COUNT(*) AS total FROM customers c WHERE (:arg_keyword = '' OR c.customer_no LIKE :arg_like OR c.name LIKE :arg_like) AND (:arg_risk = '' OR c.risk_level = :arg_risk) AND (:arg_type = '' OR c.customer_type = :arg_type)",
+          "dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances",
+          "customer_dates": "SELECT MIN(trade_date) AS first_date, MAX(trade_date) AS last_date FROM daily_balances WHERE customer_no = :arg_customer",
+          "customer": "SELECT customer_no, name, customer_type, mobile, risk_level, investor_type, open_date, status FROM customers WHERE customer_no = :arg_customer",
+          "accounts": "SELECT fund_account_no, currency, status, department_code, manager_id FROM fund_accounts WHERE customer_no = :arg_customer ORDER BY fund_account_no",
+          "customer_cash": "SELECT SUM(closing_balance) AS cash, SUM(available_balance) AS available, SUM(withdrawable_balance) AS withdrawable FROM daily_balances WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_holdings": "SELECT SUM(market_value_cents) AS holdings FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_activity": "SELECT COUNT(*) AS trade_count, SUM(amount_cents) AS turnover, SUM(fee_cents) AS fees FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "positions": "SELECT fund_account_no, security_code, quantity, available_quantity, cost_cents, market_value_cents FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY fund_account_no, security_code LIMIT :arg_limit OFFSET :arg_offset",
+          "positions_count": "SELECT COUNT(*) AS total FROM positions WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "customer_trades": "SELECT trade_no, fund_account_no, trade_date, security_code, side, price, quantity, amount_cents, fee_cents FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "customer_trades_count": "SELECT COUNT(*) AS total FROM trades WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "flows": "SELECT fund_account_no, trade_date, flow_type, amount_cents, fee_cents, balance_after FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date ORDER BY id DESC LIMIT :arg_limit OFFSET :arg_offset",
+          "flows_count": "SELECT COUNT(*) AS total FROM cash_flows WHERE customer_no = :arg_customer AND trade_date = :arg_date",
+          "assets": "WITH cash AS (SELECT customer_no, SUM(closing_balance) AS cash_value FROM daily_balances WHERE trade_date = :arg_date GROUP BY customer_no), holdings AS (SELECT customer_no, SUM(market_value_cents) AS holdings_value FROM positions WHERE trade_date = :arg_date GROUP BY customer_no) SELECT c.customer_no, c.name, COALESCE(cash.cash_value, 0) + COALESCE(holdings.holdings_value, 0) AS metric FROM customers c LEFT JOIN cash ON cash.customer_no = c.customer_no LEFT JOIN holdings ON holdings.customer_no = c.customer_no WHERE cash.customer_no IS NOT NULL OR holdings.customer_no IS NOT NULL ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "cash": "SELECT c.customer_no, c.name, SUM(b.closing_balance) AS metric FROM daily_balances b JOIN customers c ON c.customer_no = b.customer_no WHERE b.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "holdings": "SELECT c.customer_no, c.name, SUM(p.market_value_cents) AS metric FROM positions p JOIN customers c ON c.customer_no = p.customer_no WHERE p.trade_date = :arg_date GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "turnover": "SELECT c.customer_no, c.name, SUM(t.amount_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "trade_count": "SELECT c.customer_no, c.name, COUNT(*) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "fees": "SELECT c.customer_no, c.name, SUM(t.fee_cents) AS metric FROM trades t JOIN customers c ON c.customer_no = t.customer_no WHERE t.trade_date BETWEEN :arg_start AND :arg_end GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit",
+          "net_deposit": "SELECT c.customer_no, c.name, SUM(CASE WHEN f.flow_type = 'DEPOSIT' THEN f.amount_cents WHEN f.flow_type = 'WITHDRAWAL' THEN -ABS(f.amount_cents) ELSE 0 END) AS metric FROM cash_flows f JOIN customers c ON c.customer_no = f.customer_no WHERE f.trade_date BETWEEN :arg_start AND :arg_end AND f.flow_type IN ('DEPOSIT', 'WITHDRAWAL') GROUP BY c.customer_no, c.name ORDER BY metric DESC, c.customer_no LIMIT :arg_limit"
+        }
+        </script><script>// Securities-only screens. All reads go through the host's permission-aware query tool.
+        (() => {
+         'use strict';
+         const ds = window.datascope;
+         const queries = JSON.parse(document.getElementById('securities-queries').textContent);
+         const labels = {customer_no:'客户编号',name:'客户姓名',customer_type:'客户类型',risk_level:'风险等级',investor_type:'投资者类型',open_date:'开户日期',status:'状态',account_count:'资金账户数',fund_account_no:'资金账号',currency:'币种',department_code:'营业部编号',manager_id:'客户经理编号',security_code:'证券代码',quantity:'数量',available_quantity:'可用数量',cost_cents:'持仓成本（元）',market_value_cents:'持仓市值（元）',trade_no:'成交编号',trade_date:'交易日期',side:'方向',price:'价格（元）',amount_cents:'金额（元）',fee_cents:'费用（元）',flow_type:'流水类型',balance_after:'流水后余额（元）'};
+         const values = {INDIVIDUAL:'个人',CORPORATE:'机构',active:'正常',frozen:'冻结',closed:'已关闭',BUY:'买入',SELL:'卖出',DEPOSIT:'入金',WITHDRAWAL:'出金'};
+         const monetary = new Set(['cost_cents','market_value_cents','price','amount_cents','fee_cents','balance_after']);
+         const money = value => value === null || value === undefined ? '—' : ds.money(value);
+         const query = (key, parameters = {}, max_rows = 200) => {
+          // Send only parameters used by this statement; identifiers never come from input.
+          const binds = {}; for (const name of new Set(queries[key].match(/:arg_[a-z_]+/g) || [])) binds[name.slice(1)] = parameters[name.slice(1)];
+          return ds.callTool('query', {sql:queries[key],parameters:binds,max_rows});
+         };
+         const text = (target, value) => { target.textContent = value; };
+         function showTable(target, result, actions) {
+          ds.table(target, {...result,columns:result.columns.map(k=>labels[k]||k),rows:result.rows.map(row=>{
+           const shown={...row};for(const k of result.columns) shown[labels[k]||k]=monetary.has(k)?money(row[k]):values[row[k]]||row[k];return shown;
+          })}, actions);
+         }
+         function field(target, label, value) {
+          const item=ds.el('div');item.append(ds.el('span',label),ds.el('strong',values[value]||String(value??'—')));target.append(item);
+         }
+         function metric(target, label, value) {
+          const card=ds.el('div',undefined,'metric');card.append(ds.el('span',label),ds.el('strong',value));target.append(card);
+         }
+         const isoDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+         function customerPanel(root) {
+          let generation=0;
+          return async (customerNo) => {
+           const stamp=++generation;root.hidden=false;root.replaceChildren();
+           const heading=ds.el('div',undefined,'top'), title=ds.el('h2','客户详情'), close=ds.button('收起详情',()=>{generation++;root.hidden=true;root.replaceChildren();});heading.append(title,close);root.append(heading);
+           const status=ds.el('div');status.setAttribute('role','status');root.append(status);ds.notice(status,'正在读取客户资料…');
+           try {
+            const params={arg_customer:customerNo};
+            const customer=await query('customer',params);if(stamp!==generation)return;
+            const c=customer.rows[0];if(!c){ds.notice(status,'没有可见的客户记录。');return;}
+            title.textContent=`${c.name} · 客户详情`;
+            const details=ds.el('div',undefined,'details');
+            for(const [label,key] of [['客户编号','customer_no'],['客户姓名','name'],['客户类型','customer_type'],['手机号','mobile'],['风险等级','risk_level'],['投资者类型','investor_type'],['开户日期','open_date'],['客户状态','status']])field(details,label,c[key]);
+            root.append(details);ds.notice(status,'');
+            const accountTitle=ds.el('h2','资金账户'),accounts=ds.el('div',undefined,'scroll');root.append(accountTitle,accounts);
+            const dates=await query('customer_dates',params);if(stamp!==generation)return;
+            const date=ds.el('input');date.type='date';date.setAttribute('aria-label','客户资产日期');date.value=dates.rows[0]?.last_date||'';
+            const toolbar=ds.el('div',undefined,'toolbar'), dateLabel=ds.el('label','资产与记录日期');dateLabel.append(date);const refresh=ds.button('刷新客户数据',()=>loadDate());toolbar.append(dateLabel,refresh);root.append(toolbar);
+            const metrics=ds.el('div',undefined,'metrics');root.append(metrics);
+            const tabs=ds.el('div',undefined,'toolbar tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','客户记录');root.append(tabs);
+            const recordStatus=ds.el('div'),records=ds.el('div',undefined,'scroll'),pager=ds.el('div',undefined,'toolbar pager'),pageInfo=ds.el('span',undefined,'muted');recordStatus.setAttribute('role','status');
+            let tab='positions',page=0,recordStamp=0,dateStamp=0;
+            const previous=ds.button('上一页',()=>{page--;loadRecords();}),next=ds.button('下一页',()=>{page++;loadRecords();});pager.append(previous,pageInfo,next);root.append(recordStatus,records,pager);
+            const tabButtons=[];for(const [key,label] of [['positions','持仓'],['customer_trades','成交'],['flows','资金流水']]){const button=ds.button(label,()=>{tab=key;page=0;loadRecords();});button.setAttribute('role','tab');tabButtons.push([button,key]);tabs.append(button);}
+            const rows=await query('accounts',params);if(stamp!==generation)return;showTable(accounts,rows);
+            async function loadRecords() {
+             const ticket=++recordStamp,selected=tab;records.replaceChildren();previous.disabled=next.disabled=true;pageInfo.textContent='';
+             tabButtons.forEach(([b,key])=>b.setAttribute('aria-selected',String(key===selected)));
+             if(!isoDate(date.value)){ds.notice(recordStatus,'请选择有效的记录日期。',true);return;}
+             ds.notice(recordStatus,'正在读取记录…');
+             try {
+              const bind={...params,arg_date:date.value,arg_limit:20,arg_offset:page*20};
+              const [count,result]=await Promise.all([query(selected+'_count',bind),query(selected,bind)]);
+              if(stamp!==generation||ticket!==recordStamp)return;
+              showTable(records,result);const total=Number(count.rows[0]?.total||0);pageInfo.textContent=`共 ${total} 条 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`;previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(recordStatus,'');
+             }catch(e){if(stamp===generation&&ticket===recordStamp)ds.notice(recordStatus,e.message,true);}
+            }
+            async function loadDate() {
+             const ticket=++dateStamp;++recordStamp;metrics.replaceChildren();records.replaceChildren();previous.disabled=next.disabled=true;refresh.disabled=true;page=0;
+             if(!isoDate(date.value)){ds.notice(status,'没有可见的资金账期，请选择有效日期。',true);refresh.disabled=false;return;}
+             ds.notice(status,'正在汇总客户资产…');
+             try {
+              const bind={...params,arg_date:date.value};
+              const [cash,holdings,activity]=await Promise.all([query('customer_cash',bind),query('customer_holdings',bind),query('customer_activity',bind)]);
+              if(stamp!==generation||ticket!==dateStamp)return;
+              const b=cash.rows[0]||{},h=holdings.rows[0]||{},a=activity.rows[0]||{};
+              const total=b.cash==null&&h.holdings==null?null:Number(b.cash||0)+Number(h.holdings||0);
+              for(const [label,value] of [['总资产（元）',money(total)],['资金余额（元）',money(b.cash)],['持仓市值（元）',money(h.holdings)],['可用资金（元）',money(b.available)],['当日成交额（元）',money(a.turnover)],['当日成交笔数',String(a.trade_count??'—')]])metric(metrics,label,value);
+              ds.notice(status,'');await loadRecords();
+             }catch(e){if(stamp===generation&&ticket===dateStamp)ds.notice(status,e.message,true);}
+             finally{if(stamp===generation&&ticket===dateStamp)refresh.disabled=false;}
+            }
+            date.onchange=()=>loadDate();await loadDate();
+           }catch(e){if(stamp===generation)ds.notice(status,e.message,true);}
+          };
+         }
+         function start(view) {
+          const byID=id=>document.getElementById(id),detail=customerPanel(byID('customer-detail'));
+          let epoch=0;
+          const detailButton=(td,row)=>td.append(ds.button('客户详情',()=>{detail(row.customer_no);byID('customer-detail').scrollIntoView({behavior:'smooth',block:'start'});}));
+          const form=byID('filters'),status=byID('status'),submit=form.querySelector('button');
+          // Sandboxed views intentionally have no allow-forms capability. Handle clicks
+          // and Enter directly instead of attempting native form submission.
+          let submitForm=()=>{};submit.type='button';submit.onclick=()=>submitForm();
+          form.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();submitForm();}};
+          const customers=view==='securities_customers',rankings=view==='securities_rankings';
+          if(customers){
+           let page=0,filter={arg_keyword:'',arg_like:'%',arg_risk:'',arg_type:''};
+           const previous=byID('previous'),next=byID('next');
+           async function load(){
+            const ticket=++epoch;submit.disabled=previous.disabled=next.disabled=true;byID('results').replaceChildren();byID('page-info').textContent='';ds.notice(status,'正在查询客户…');
+            try{const bind={...filter,arg_limit:20,arg_offset:page*20};const [count,result]=await Promise.all([query('customer_count',bind),query('customers',bind)]);if(ticket!==epoch)return;
+             showTable(byID('results'),result,detailButton);const total=Number(count.rows[0]?.total||0);text(byID('page-info'),`当前可见客户 ${total} 位 · 第 ${page+1} / ${Math.max(1,Math.ceil(total/20))} 页`);previous.disabled=page===0;next.disabled=(page+1)*20>=total;ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           submitForm=()=>{page=0;filter={arg_keyword:byID('keyword').value.trim(),arg_like:`%${byID('keyword').value.trim()}%`,arg_risk:byID('risk').value,arg_type:byID('type').value};load();};previous.onclick=()=>{page--;load();};next.onclick=()=>{page++;load();};
+           ds.onData(data=>{if(data.input?.keyword!==undefined)byID('keyword').value=String(data.input.keyword);submitForm();});
+          }else if(rankings){
+           const names={assets:'总资产',cash:'资金余额',holdings:'持仓市值',turnover:'成交额',trade_count:'成交笔数',net_deposit:'净入金',fees:'手续费'};
+           function period(){const value=byID('metric').value;const historical=['turnover','trade_count','net_deposit','fees'].includes(value);byID('snapshot-label').hidden=historical;byID('start-label').hidden=byID('end-label').hidden=!historical;byID('snapshot').required=!historical;byID('start').required=byID('end').required=historical;return historical;}
+           async function load(){const ticket=++epoch;submit.disabled=true;byID('results').replaceChildren();ds.notice(status,'正在计算客户排名…');
+            try{const selected=byID('metric').value,historical=period(),bind={arg_date:byID('snapshot').value,arg_start:byID('start').value,arg_end:byID('end').value,arg_limit:Number(byID('top').value)};
+             if(historical?(!isoDate(bind.arg_start)||!isoDate(bind.arg_end)||bind.arg_start>bind.arg_end):!isoDate(bind.arg_date))throw new Error('请选择有效日期，开始日期不能晚于结束日期。');
+             text(byID('basis'),`当前身份可见客户 · ${names[selected]}降序 Top ${bind.arg_limit} · ${historical?bind.arg_start+' 至 '+bind.arg_end:bind.arg_date}${selected==='assets'?' · 总资产 = 当日资金余额 + 当日持仓市值':''} · 金额单位：元`);
+             const result=await query(selected,bind);if(ticket!==epoch)return;
+             const rows=result.rows.map((r,i)=>({...r,'排名':i+1,'客户编号':r.customer_no,'客户姓名':r.name,[names[selected]+(selected==='trade_count'?'（笔）':'（元）')]:selected==='trade_count'?r.metric:money(r.metric)}));
+             ds.table(byID('results'),{...result,rows,columns:['排名','客户编号','客户姓名',names[selected]+(selected==='trade_count'?'（笔）':'（元）')]},detailButton);ds.notice(status,'');
+            }catch(e){if(ticket===epoch)ds.notice(status,e.message,true);}finally{if(ticket===epoch)submit.disabled=false;}
+           }
+           byID('metric').onchange=()=>{period();submitForm();};submitForm=()=>{load();};
+           ds.onData(async data=>{const ticket=++epoch;submit.disabled=true;ds.notice(status,'正在读取可见数据日期…');
+            try{const result=await query('dates');if(ticket!==epoch)return;const dates=result.rows[0]||{},input=data.input||{};byID('snapshot').value=input.date||dates.last_date||'';byID('start').value=input.start_date||dates.first_date||'';byID('end').value=input.end_date||dates.last_date||'';if(Object.hasOwn(names,input.metric))byID('metric').value=input.metric;await load();}
+            catch(e){if(ticket===epoch){submit.disabled=false;ds.notice(status,e.message,true);}}
+           });
+          }else{
+           submitForm=()=>{if(!form.reportValidity())return;ds.notice(status,'');detail(byID('customer-number').value.trim());};
+           ds.onData(data=>{const no=data.input?.customer_no||data.result?.rows?.[0]?.customer_no;if(no){byID('customer-number').value=String(no);submitForm();}else ds.notice(status,'输入客户编号，或从客户列表、客户排名中查看客户详情。');});
+          }
+         }
+         window.securitiesViews={start};
+        })();
+        </script></head><body data-view="securities_customer">
+        <div class="top"><div><div class="eyebrow">DATASCOPE / SECURITIES</div><h1>客户详情</h1><span class="muted">客户资料、账户资产与交易记录</span></div><span class="tag">合成演示数据 · 按权限查询</span></div>
+        <section class="card"><form id="filters" class="toolbar"><label>客户编号 <input id="customer-number" placeholder="请输入客户编号" maxlength="32" required></label><button class="primary">查询客户</button></form><div id="status" role="status"></div></section><section id="customer-detail" class="card" hidden></section>
+        <script>window.securitiesViews.start(document.body.dataset.view);</script></body></html>
+      published: true

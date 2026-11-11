@@ -1,0 +1,34 @@
+accounts:
+    - businessUserId: 1
+      name: 商店查询员
+      permissions:
+        - query
+      username: SHOP001
+database:
+    authentication:
+        type: local
+        source: DATABASE
+        provider:
+            id: shop-accounts
+            name: 本库业务账号
+            type: DEMO_OAUTH
+            enabled: true
+        access:
+            id: database-auth
+            name: 本库账号 OAuth
+            mode: OAUTH
+            providerId: shop-accounts
+    id: shop_demo
+    name: 商店演示库
+    driver: sqlite
+    path: ../../data/shop_demo.sqlite3
+    mcpEnabled: true
+    mcpPath: shop_demo
+    tools:
+        - list_tables
+        - describe_table
+        - query
+        - search_knowledge
+        - read_knowledge
+policyFile: rewrite.yml
+version: 1

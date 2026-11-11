@@ -16,7 +16,7 @@ import (
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
-	"datascope-server/internal/testutil"
+	"datascope-server/tests/testutil"
 )
 
 func newAPI(t *testing.T, opts mcpserver.Options) *httptest.Server {
@@ -26,7 +26,7 @@ func newAPI(t *testing.T, opts mcpserver.Options) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	cfg, err := rewrite.LoadConfig(filepath.Join("..", "..", "config", "rewrite.yml"))
+	cfg, err := rewrite.LoadConfig(filepath.Join("..", "..", "examples", "securities", "rewrite.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func newAPI(t *testing.T, opts mcpserver.Options) *httptest.Server {
 	api := httptest.NewServer(Handler(svc, &Inspector{
 		Endpoint:    mcpHTTP.URL,
 		Service:     svc,
-		FixturesDir: filepath.Join("..", "..", "fixtures"),
+		FixturesDir: filepath.Join("..", "..", "tests", "fixtures", "securities"),
 	}))
 	t.Cleanup(api.Close)
 	return api
