@@ -104,9 +104,13 @@ HTTP MCP 在单次请求内复用已校验的配置快照与认证策略，避�
 
 在「操作日志」选择目标数据库或平台日志，按请求 ID、操作用户、业务身份或工具定位记录。排查一次调用时，先核对数据库和身份，再看工具、策略版本及执行结果。
 
-排查 HTTP MCP 的 `ping` 或公共路径延迟时，由运维在 MCP 进程的环境中设置 `DATASCOPE_MCP_TIMING=1` 并重启服务；默认关闭，排查完成后移除变量并重启。在服务进程日志中搜索 `mcp.request.timing`，按 `request_id` 与操作日志关联。每个 POST 请求输出一条汇总，包含 `method`、HTTP `status`、`total_ms`、`first_write_ms`、`stages_ms` 和 `stage_counts`，不记录请求头、令牌、SQL 或业务结果。`first_write_ms` 是应用首次写响应头的时间，不是客户端首字节时间；未写响应时为 null。认证前失败且未解析方法的请求，`method` 可能为空。
+排查 HTTP MCP 的 `ping` 或公共路径延迟时，由运维在 MCP 进程的环境中设置 `DATASCOPE_MCP_TIMING=1` 并重启服务；默认关闭，排查完成后移除变量并重启。在服务进程日志中搜索 `mcp.request.timing`，按 `request_id` 与操作日志关联。每个 POST 请求输出一条汇总，包含 `method`、`tool`、`query_cache_hit`、HTTP `status`、`total_ms`、`first_write_ms`、`stages_ms` 和 `stage_counts`，不记录请求头、令牌、SQL 或业务结果。`first_write_ms` 是应用首次写响应头的时间，不是客户端首字节时间；未写响应时为 null。认证前失败且未解析方法的请求，`method` 可能为空。
 
 `route_lookup` 表示端点配置查找，`resolve_auth` 表示认证策略解析，`handler_build` 表示协议处理器构建，`verify_token` 表示令牌校验，`middleware_get` 表示协议中间件再次读取配置，`business_get` 表示业务权限中间件读取配置；`config_state`、`read_state`、`lock_wait` 和 `lock_hold` 分别表示配置操作、配置文件读取、文件锁等待和持锁耗时。OneID 另记录 `jwks_lock_wait`，公钥缓存未命中时记录 `jwks_fetch`。阶段单位均为毫秒，同名阶段累计，调用次数见 `stage_counts`；阶段会嵌套，不能直接相加。对照串行和 4 并发的 `ping`：若 `lock_wait` 明显增加，优先检查配置锁竞争；若应用总耗时很低而客户端耗时高，对照应用内部端口与公网入口定位网关或网络等待。计时只用于诊断，不改变鉴权、缓存或锁策略。
+
+工具初始化另记录 `query_initialize`，包含查询服务缓存获取或新建。`query_cache_hit=true` 表示复用查询服务，false 表示未复用（元数据工具目前每次新建），null（文本日志可能显示 `<nil>`）表示本次请求未执行该初始化步骤；`tool` 用于区分 `query`、`list_tables`、`describe_table` 等。新建时的 `store_open` 包含凭据读取、连接打开及存储配置，`service_initialize` 表示查询规则和服务初始化。网络数据库的 `connection_open` 进一步包含 `connection_ping`（连通性检查）、`connection_readonly`（建立并回滚只读事务）和 `connection_table_names`（连接初始化时读取表目录）；这些子阶段不能与父阶段重复相加，失败时仅记录实际执行到的阶段。
+
+`metadata_tables`、`metadata_describe` 分别记录表清单和表结构读取，可能同时出现在服务初始化与工具执行中，需结合调用次数和父阶段判断。`query_execute` 记录数据库执行路径，包括连接/事务获取、查询和结果读取等，并非数据库纯 SQL 执行时间。排查首次查询或元数据接口偏慢时，先比较 `query_initialize`，再看 `store_open`、`connection_open`、`service_initialize` 与元数据读取；缓存命中的查询通常不会出现新建阶段。`query_release` 记录服务租约释放或连接关闭耗时。
 
 - **找不到菜单**：核对顶部数据库和平台账号的库级授权。
 - **查询返回空结果**：核对参数值、业务身份和行过滤条件；在查询工作台查看改写后的 SQL。

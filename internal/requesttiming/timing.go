@@ -11,10 +11,12 @@ type key struct{}
 
 // Trace is shared by request contexts, including nested configuration reads.
 type Trace struct {
-	mu     sync.Mutex
-	stages map[string]float64
-	counts map[string]int
-	method string
+	mu       sync.Mutex
+	stages   map[string]float64
+	counts   map[string]int
+	method   string
+	tool     string
+	cacheHit *bool
 }
 
 func New(ctx context.Context) (context.Context, *Trace) {
@@ -44,6 +46,33 @@ func Method(ctx context.Context, method string) {
 		defer t.mu.Unlock()
 		t.method = method
 	}
+}
+
+func Tool(ctx context.Context, name string) {
+	if t, _ := ctx.Value(key{}).(*Trace); t != nil {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		t.tool = name
+	}
+}
+
+func QueryCache(ctx context.Context, hit bool) {
+	if t, _ := ctx.Value(key{}).(*Trace); t != nil {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		t.cacheHit = &hit
+	}
+}
+
+// Details returns copies; nil means query-service initialization was not run.
+func (t *Trace) Details() (string, *bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cacheHit == nil {
+		return t.tool, nil
+	}
+	hit := *t.cacheHit
+	return t.tool, &hit
 }
 
 func (t *Trace) Snapshot() (string, map[string]float64, map[string]int) {

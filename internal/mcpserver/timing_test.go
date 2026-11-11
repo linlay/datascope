@@ -22,6 +22,8 @@ func TestTimingHandlerPreservesSSEAndRequestIdentity(t *testing.T) {
 	h := timingHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID = audit.From(r.Context()).RequestID
 		requesttiming.Method(r.Context(), "ping")
+		requesttiming.Tool(r.Context(), "query")
+		requesttiming.QueryCache(r.Context(), false)
 		defer requesttiming.Start(r.Context(), "verify_token")()
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Write([]byte("event: message\ndata: {}\n\n"))
@@ -45,6 +47,9 @@ func TestTimingHandlerPreservesSSEAndRequestIdentity(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "private-") {
 		t.Fatal("request contents leaked")
+	}
+	if record["tool"] != "query" || record["query_cache_hit"] != false {
+		t.Fatalf("missing tool/cache details: %v", record)
 	}
 	logs.Reset()
 	t.Setenv("DATASCOPE_MCP_TIMING", "0")

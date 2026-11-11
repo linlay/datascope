@@ -24,6 +24,11 @@ func timingHandler(next http.Handler) http.Handler {
 		defer func() {
 			elapsed := time.Since(start)
 			method, stages, counts := trace.Snapshot()
+			tool, cacheHit := trace.Details()
+			var cache any
+			if cacheHit != nil {
+				cache = *cacheHit
+			}
 			status := out.status
 			if status == 0 {
 				status = http.StatusOK
@@ -33,7 +38,7 @@ func timingHandler(next http.Handler) http.Handler {
 				first = float64(out.first.Sub(start)) / float64(time.Millisecond)
 			}
 			slog.InfoContext(ctx, "mcp.request.timing", "request_id", audit.From(ctx).RequestID,
-				"method", method, "status", status, "total_ms", float64(elapsed)/float64(time.Millisecond),
+				"method", method, "tool", tool, "query_cache_hit", cache, "status", status, "total_ms", float64(elapsed)/float64(time.Millisecond),
 				"first_write_ms", first, "stages_ms", stages, "stage_counts", counts)
 		}()
 		next.ServeHTTP(out, r.WithContext(ctx))

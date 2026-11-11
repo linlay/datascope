@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
+	"datascope-server/internal/requesttiming"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -327,7 +328,9 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	if err != nil {
 		return nil, err
 	}
+	serviceDone := requesttiming.Start(ctx, "service_initialize")
 	svc, err := service.New(ctx, st, &cfg, c.AsOf)
+	serviceDone()
 	if err != nil {
 		st.Close()
 		return nil, err

@@ -41,6 +41,14 @@ func TestMCPRequestSnapshotReadsOnceAndObservesChanges(t *testing.T) {
 			t.Fatalf("row permissions changed: %s", w.Body.String())
 		}
 		_, _, counts := trace.Snapshot()
+		tool, cacheHit := trace.Details()
+		if counts["query_initialize"] == 1 {
+			if tool == "" || cacheHit == nil || *cacheHit != (counts["store_open"] == 0) || counts["query_release"] != 1 {
+				t.Fatalf("initialization details/release do not match stages: tool=%s hit=%v counts=%v", tool, cacheHit, counts)
+			}
+		} else if cacheHit != nil {
+			t.Fatal("non-query request reported a cache result")
+		}
 		return counts
 	}
 	ping := func(path string, status int) map[string]int {
@@ -51,14 +59,29 @@ func TestMCPRequestSnapshotReadsOnceAndObservesChanges(t *testing.T) {
 		t.Fatalf("HTTP ping reloads configuration: %v", counts)
 	}
 	query := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT id FROM items ORDER BY id"}}}`
-	call("/mcp/default", 200, query) // Warm query-service initialization.
 	counts = call("/mcp/default", 200, query)
+	if counts["query_initialize"] != 1 || counts["store_open"] != 1 || counts["service_initialize"] != 1 || counts["query_execute"] != 1 {
+		t.Fatalf("missing cold-query timing: %v", counts)
+	}
+	counts = call("/mcp/default", 200, query)
+	if counts["query_initialize"] != 1 || counts["store_open"] != 0 || counts["service_initialize"] != 0 || counts["query_execute"] != 1 {
+		t.Fatalf("warm-query timing did not preserve reuse: %v", counts)
+	}
 	if counts["read_state"] != 1 || counts["resolve_auth"] != 1 || counts["business_get"] != 1 || counts["config_state"] != 5 {
 		t.Fatalf("query view lookup escaped the request snapshot: %v", counts)
 	}
 	counts = call("/mcp/default", 200, `{"jsonrpc":"2.0","id":3,"method":"resources/templates/list"}`)
 	if counts["read_state"] != 1 || counts["config_state"] != 5 {
 		t.Fatalf("resource lookup escaped the request snapshot: %v", counts)
+	}
+	for _, tc := range []struct{ body, stage string }{
+		{`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_tables","arguments":{}}}`, "metadata_tables"},
+		{`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"describe_table","arguments":{"table":"items"}}}`, "metadata_describe"},
+	} {
+		counts = call("/mcp/default", 200, tc.body)
+		if counts["query_initialize"] != 1 || counts["store_open"] != 1 || counts["service_initialize"] != 1 || counts[tc.stage] < 1 {
+			t.Fatalf("missing metadata initialization/timing: %v", counts)
+		}
 	}
 	// The same handler must observe disabling, re-enabling and route changes on
 	// the next HTTP request, rather than retaining configuration across requests.

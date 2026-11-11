@@ -170,6 +170,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				return list, nil
 			case "tools/call":
 				call := req.(*mcp.CallToolRequest)
+				requesttiming.Tool(ctx, call.Params.Name)
 				if !enabled(call.Params.Name) {
 					return nil, fmt.Errorf("该数据库未开启接口 %s", call.Params.Name)
 				}
@@ -185,6 +186,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 					auditor = c.Management.AuditFor(d.ID)
 				}
 				event, _ := auditor.Start(ctx, "query.initialize", "")
+				initializeDone := requesttiming.Start(ctx, "query_initialize")
 				var current *service.QueryService
 				var release func()
 				var hit bool
@@ -196,6 +198,8 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 						release = func() { current.Store.Close() }
 					}
 				}
+				initializeDone()
+				requesttiming.QueryCache(ctx, hit)
 				if event != nil {
 					event.Detail = map[string]any{"cache_hit": hit}
 				}
@@ -203,7 +207,10 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				if err != nil {
 					return nil, err
 				}
-				defer release()
+				defer func() {
+					defer requesttiming.Start(ctx, "query_release")()
+					release()
+				}()
 				ctx = context.WithValue(ctx, serviceContextKey{}, current)
 			}
 			return next(ctx, method, req)

@@ -8,6 +8,7 @@ import (
 	"datascope-server/internal/audit"
 	"datascope-server/internal/dialect"
 	"datascope-server/internal/queryparams"
+	"datascope-server/internal/requesttiming"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -253,6 +254,7 @@ func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any
 
 // native is reserved for server-generated browsing SQL with validated identifiers.
 func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native bool, args ...any) (out *QueryResult, err error) {
+	defer requesttiming.Start(ctx, "query_execute")()
 	original, rewritten := audit.SQL(ctx)
 	if original == "" {
 		original = query
@@ -410,6 +412,7 @@ type Table struct {
 
 // Tables lists user tables with their Chinese comments and row counts.
 func (s *Store) Tables(ctx context.Context) ([]Table, error) {
+	defer requesttiming.Start(ctx, "metadata_tables")()
 	tables, err := s.sourceTables(ctx)
 	if err == nil && s.engine != nil && s.RegisteredSchema != nil {
 		tables = []Table{}
@@ -501,6 +504,7 @@ var ErrTableNotFound = errors.New("表不存在")
 
 // Describe returns columns, foreign keys, indexes and comments for table.
 func (s *Store) Describe(ctx context.Context, table string) (*TableSchema, error) {
+	defer requesttiming.Start(ctx, "metadata_describe")()
 	out, err := s.sourceDescribe(ctx, table)
 	if err == nil {
 		s.applySchema(out)

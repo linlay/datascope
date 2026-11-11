@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"datascope-server/internal/requesttiming"
 	"errors"
 	"fmt"
 	"net"
@@ -152,6 +153,7 @@ func OpenConnection(ctx context.Context, driver, path string, c *Connection, tim
 // OpenConnectionWithPassword uses a request-scoped password. It never persists
 // it or includes it in connection errors. The reference is validated separately.
 func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Connection, password string, timeout time.Duration) (*Store, error) {
+	defer requesttiming.Start(ctx, "connection_open")()
 	if err := ValidateConnection(driver, c); err != nil {
 		return nil, err
 	}
@@ -181,7 +183,10 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	db.SetConnMaxLifetime(5 * time.Minute)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if err = db.PingContext(ctx); err != nil {
+	pingDone := requesttiming.Start(ctx, "connection_ping")
+	err = db.PingContext(ctx)
+	pingDone()
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("%s 连接失败（请检查地址、凭据和网络）", driver)
 	}
@@ -195,16 +200,23 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	// Verify that a read-only session can actually be established. In particular,
 	// go-ora does not implement driver.TxOptions.ReadOnly; DM ignores errors
 	// from its session-readonly toggle. Both use a checked SQL transaction setup.
+	readonlyDone := requesttiming.Start(ctx, "connection_readonly")
 	tx, err := s.beginReadOnly(ctx)
 	if err != nil {
 		db.Close()
+		readonlyDone()
 		return nil, fmt.Errorf("%s 无法建立只读事务", driver)
 	}
-	if err = tx.Rollback(); err != nil {
+	err = tx.Rollback()
+	readonlyDone()
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("%s 无法结束只读事务", driver)
 	}
-	if _, err = s.TableNames(ctx); err != nil {
+	namesDone := requesttiming.Start(ctx, "connection_table_names")
+	_, err = s.TableNames(ctx)
+	namesDone()
+	if err != nil {
 		db.Close()
 		return nil, err
 	}

@@ -25,3 +25,26 @@ func TestConcurrentStagesAndIndependentSnapshots(t *testing.T) {
 		t.Fatal("snapshot changed trace")
 	}
 }
+
+func TestToolAndCacheDetails(t *testing.T) {
+	ctx, trace := New(context.Background())
+	if _, hit := trace.Details(); hit != nil {
+		t.Fatal("uninitialized cache reported a hit/miss")
+	}
+	Tool(ctx, "query")
+	QueryCache(ctx, false)
+	name, hit := trace.Details()
+	if name != "query" || hit == nil || *hit {
+		t.Fatal("cold cache details lost")
+	}
+	*hit = true
+	_, hit = trace.Details()
+	if *hit {
+		t.Fatal("details exposed mutable state")
+	}
+	QueryCache(ctx, true)
+	_, hit = trace.Details()
+	if !*hit {
+		t.Fatal("warm cache details lost")
+	}
+}
