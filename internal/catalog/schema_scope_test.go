@@ -5,12 +5,68 @@ import (
 	"datascope-server/internal/management"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/store"
 )
+
+func TestWriterFollowsSchemaScopeEdit(t *testing.T) {
+	for _, scope := range []struct {
+		name    string
+		schema  string
+		allowed []string
+	}{
+		{"change default", "sales", []string{"sales"}},
+		{"multiple schemas", "", []string{"public", "sales"}},
+		{"empty scope", "", []string{}},
+		{"legacy scope", "public", nil},
+	} {
+		t.Run(scope.name, func(t *testing.T) {
+			read := &store.Connection{Host: "localhost", Port: 5432, Database: "business", Schema: "public", AllowedSchemas: []string{"public"}, Username: "reader", PasswordEnv: "DATASCOPE_DB_READ", TLSMode: "require"}
+			writer := *read
+			writer.Username, writer.PasswordEnv = "writer", "DATASCOPE_DB_WRITE"
+			old := Database{Driver: "postgresql", Connection: read, WriteConnection: &writer, WriteEnabled: true}
+			next := old
+			connection := *read
+			connection.Schema, connection.AllowedSchemas = scope.schema, scope.allowed
+			next.Connection = &connection
+			syncWriterSchemaScope(&next, old)
+			if err := validateActions(next); err != nil {
+				t.Fatal(err)
+			}
+			if next.WriteConnection.Schema != scope.schema || !reflect.DeepEqual(next.WriteConnection.AllowedSchemas, scope.allowed) {
+				t.Fatal("writer retained stale scope")
+			}
+			if next.WriteConnection.Username != "writer" || next.WriteConnection.PasswordEnv != "DATASCOPE_DB_WRITE" || old.WriteConnection.Schema != "public" || !reflect.DeepEqual(old.WriteConnection.AllowedSchemas, []string{"public"}) {
+				t.Fatal("scope edit changed credentials or saved record")
+			}
+			// Explicit target changes cannot be hidden by synchronization.
+			for _, field := range []string{"host", "database", "schema", "tls"} {
+				bad := next
+				changed := *next.WriteConnection
+				switch field {
+				case "host":
+					changed.Host = "other"
+				case "database":
+					changed.Database = "other"
+				case "schema":
+					changed.Schema = "other"
+					changed.AllowedSchemas = nil
+				case "tls":
+					changed.TLSMode = "disable"
+				}
+				bad.WriteConnection = &changed
+				syncWriterSchemaScope(&bad, old)
+				if err := validateActions(bad); err == nil {
+					t.Fatalf("accepted mismatched %s", field)
+				}
+			}
+		})
+	}
+}
 
 func TestSchemaIdentityMigrationPreservesAccessAnnotationsAndMasking(t *testing.T) {
 	yes := true

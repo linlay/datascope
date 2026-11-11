@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rqlite/sql"
+	"reflect"
 	"strings"
 )
 
@@ -59,6 +60,27 @@ func migrateSchemaIdentity(d *Database) {
 	}
 	d.SchemaIdentityVersion = 1
 }
+
+// A scope edit carries the saved writer forward. Only synchronize that unchanged
+// writer; explicit writer edits must still pass the normal target validation.
+func syncWriterSchemaScope(d *Database, old Database) {
+	if d.Connection == nil || old.Connection == nil || d.WriteConnection == nil ||
+		!reflect.DeepEqual(d.WriteConnection, old.WriteConnection) ||
+		reflect.DeepEqual(d.Connection, old.Connection) {
+		return
+	}
+	writer := *d.WriteConnection
+	writer.Schema = d.Connection.Schema
+	writer.AllowedSchemas = nil
+	if d.Connection.AllowedSchemas != nil {
+		writer.AllowedSchemas = append([]string{}, d.Connection.AllowedSchemas...)
+	}
+	if dialect.Family(d.Driver) == "mysql" {
+		writer.Database = d.Connection.Database
+	}
+	d.WriteConnection = &writer
+}
+
 func pruneSchemaScope(d *Database) {
 	if d.Connection == nil {
 		return

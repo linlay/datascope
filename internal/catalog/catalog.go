@@ -550,6 +550,7 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				if d.Driver != old.Driver || d.Path != old.Path || !store.SameConnectionTarget(d.Driver, d.Connection, old.Connection) {
 					return fmt.Errorf("连接目标登记后固定，请新建数据源")
 				}
+				syncWriterSchemaScope(&d, old)
 				metadataOnly := old
 				metadataOnly.Name, metadataOnly.DDLEnabled = d.Name, d.DDLEnabled
 				metadataOnly.AuthPolicyFingerprint, metadataOnly.ETag = d.AuthPolicyFingerprint, d.ETag
