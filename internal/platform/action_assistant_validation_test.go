@@ -131,3 +131,67 @@ func TestAssistantDraftValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAssistantRepairsUnsupportedSQLOnce(t *testing.T) {
+	f, _ := setupAction(t, false)
+	db, err := f.c.Get("default")
+	must(t, err)
+	def := db.Actions[0]
+	input := application.Input{DatabaseID: db.ID, Revision: db.Revision, Name: def.Name, Assistant: &application.AssistantInput{Mode: "draft", Draft: &def, Intent: "Find owned items by a case-insensitive name pattern"}}
+	unsupported := "function run(args,ctx){return my.all`SELECT id FROM items WHERE (name ILIKE ${args.pattern}) AND owner_id=${ctx.userId}`}"
+	supported := "function run(args,ctx){return my.all`SELECT id FROM items WHERE LOWER(name) LIKE LOWER(${args.pattern}) AND owner_id=${ctx.userId}`}"
+	encode := func(script string) string {
+		raw, err := json.Marshal(application.ActionSuggestion{Script: script, Parameters: map[string]action.Parameter{"pattern": {Type: "string"}}})
+		must(t, err)
+		return string(raw)
+	}
+	for _, tc := range []struct {
+		name, first, second, reason string
+		calls                       int
+	}{
+		{"repair", unsupported, supported, "", 2},
+		{"already_valid", supported, "", "", 1},
+		{"bounded_failure", unsupported, unsupported, "ILIKE", 2},
+		{"repair_cannot_add_privileged_reads", unsupported, strings.Replace(supported, "my.all", "db.all", 1), "新增的特权读取", 2},
+		{"malformed_repair", unsupported, "malformed", string(ai.Invalid), 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			f.app.Model = ai.Func(func(ctx context.Context, r ai.Request) (ai.Response, error) {
+				calls++
+				if !strings.Contains(r.Messages[0].Content, "never use ILIKE") {
+					t.Fatal("missing SQL subset contract")
+				}
+				if calls == 1 {
+					return ai.Response{Text: encode(tc.first)}, nil
+				}
+				if calls > 2 || len(r.Messages) != 4 || r.Messages[2].Role != "assistant" || !strings.Contains(r.Messages[3].Content, "ILIKE") || !strings.Contains(r.Messages[3].Content, "preserving all visibility") {
+					t.Fatal("invalid repair context", r.Messages)
+				}
+				if tc.second == "malformed" {
+					return ai.Response{Text: "{}"}, nil
+				}
+				return ai.Response{Text: encode(tc.second)}, nil
+			})
+			out, err := f.app.Call(f.ctx, "assist_action", input)
+			if tc.reason != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.reason) || out != nil {
+					t.Fatalf("expected %s, got %v, %v", tc.reason, out, err)
+				}
+			} else {
+				must(t, err)
+				if out.(map[string]any)["script"] != supported {
+					t.Fatal("corrected script missing", out)
+				}
+			}
+			if calls != tc.calls {
+				t.Fatalf("expected %d model calls, got %d", tc.calls, calls)
+			}
+		})
+	}
+	unchanged, err := f.c.Get(db.ID)
+	must(t, err)
+	if unchanged.Revision != db.Revision || unchanged.Actions[0].Script != def.Script {
+		t.Fatal("repair changed saved draft")
+	}
+}
