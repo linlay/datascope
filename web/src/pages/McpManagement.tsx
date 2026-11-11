@@ -165,7 +165,7 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
         </Space>
       </Card>
       {error && <Alert type="error" showIcon title={t("MCP 配置保存失败")} description={error} closable onClose={() => setError(undefined)} />}
-      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={db.access?.policy.mode === 'NONE' ? t('无需认证') : `${db.access?.policy.mode === 'ACCOUNT' ? t('Token · 账号密码') : db.access?.policy.mode === 'TOKEN' ? 'Token / API Key' : db.access?.policy.mode === 'ONEID' ? t('企业 SSO（oneid）') : 'MCP OAuth'} · ${db.access?.provider.name || t('本库业务账号')}`}  /> : (
+      {db.mcp_enabled ? <Alert type="info" showIcon title={t("此数据库使用独立业务认证")} description={db.access?.policy.mode === 'NONE' ? t('无需认证') : `${db.access?.policy.mode === 'ACCOUNT' ? t('Token · 账号密码') : db.access?.policy.mode === 'TOKEN' ? 'Token / API Key' : db.access?.policy.mode === 'ONEID' ? t('企业 OneID（oneid）') : db.access?.provider.type === 'ENTERPRISE_OAUTH' ? t('企业 SSO（跳转登录）') : 'MCP OAuth'} · ${db.access?.provider.name || t('本库业务账号')}`}  /> : (
         <Alert type="info" showIcon title={t("MCP 已关闭，开启并保存后可测试。")} />
       )}
     </Space>

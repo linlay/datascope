@@ -190,7 +190,9 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 ## 每个数据库独立的业务认证
 
-业务 MCP 对应 Platform 的 `none`、`mcp`、`oneid`、`token` 四种接入模式，配置与示例见 [业务 MCP 认证](docs/business-authentication.md)。全局提供方可由业务库引用，也可使用本库独立配置。普通账号支持平台账号、逐库演示账号、企业账号验证接口；OAuth 支持演示与企业提供方。平台管理登录继续使用普通账号或企业 OAuth。
+业务 MCP 对应 Platform 的 `none`、`mcp`、`oneid`、`token` 四种接入模式，配置与示例见 [业务 MCP 认证](docs/business-authentication.md)。企业 SSO 使用 `OAUTH` / `mcp`，跳转 SSO 登录后使用访问令牌；企业 OneID 使用 `ONEID` / `oneid`，客户端直接发送自身的 ID Token。全局提供方可由业务库引用，也可使用本库独立配置。普通账号支持平台账号、逐库演示账号、企业账号验证接口；OAuth 支持演示与企业提供方。平台管理登录继续使用普通账号或企业 OAuth。
+
+OneID 验签支持 JWKS 地址或直接导入／粘贴 RSA `publickey.pem`，两者二选一。企业身份字段可通过本库允许列表映射到内部员工编号；姓名读取 Token 的 `name`，数据范围继续由本库行权限决定。
 
 演示账号的兼容 `authentication` 配置用于设置登录页名称和员工目录校验：
 
@@ -203,7 +205,7 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 平台管理员可以为每个数据库分别创建、停用业务账号、设置业务能力或重置密码，也可以通过管理 MCP 的 `business_account.list/save` 操作维护。业务账号可获得 `query`、`action`、`knowledge.read` 和单独授予的 `raw_query`；它不能登录管理后台或调用管理 MCP。管理业务账号及修改认证设置仅限平台管理员。
 
-每个数据库有独立 OAuth issuer：`{OAUTH_ISSUER}/auth/databases/{database_id}`。业务 MCP 的资源发现元数据返回该 issuer，客户端随后发现其授权、注册、令牌端点并跳转该数据库的员工登录页。管理 MCP 默认使用平台根 issuer，企业 OAuth 模式下使用配置的企业 issuer。旧客户端仍从根授权入口发起业务授权时，会跳转相应数据库的员工认证入口。
+使用本库业务账号 OAuth 时，每个数据库有独立 issuer：`{OAUTH_ISSUER}/auth/databases/{database_id}`。业务 MCP 的资源发现元数据返回该 issuer，客户端随后发现其授权、注册、令牌端点并跳转该数据库的员工登录页。企业 SSO 模式则返回配置的企业 issuer，由客户端发现并跳转企业 SSO；OneID 不发布浏览器授权服务器元数据。管理 MCP 默认使用平台根 issuer，企业 OAuth 模式下使用配置的企业 issuer。旧客户端仍从根授权入口发起本库业务账号授权时，会跳转相应数据库的员工认证入口。
 
 令牌绑定精确 MCP resource、数据库账号域、账号版本和认证配置版本；密码重置、账号停用、业务能力或身份变更、认证设置变更都会使旧令牌和刷新凭据失效。修改认证设置后需在客户端重新授权连接器。相同工号可以存在于两个数据库甚至平台用户中，三个账号分别认证。
 

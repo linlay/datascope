@@ -20,7 +20,7 @@ export function buildConnectorZip(db: Database, endpoint: URL) {
     throw new Error('连接器需要 HTTPS 地址，本机测试可使用回环 HTTP 地址');
   }
   if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('MCP 地址不能包含凭据、查询参数或片段');
-  if (mode === 'ONEID' && (endpoint.protocol !== 'https:' || endpoint.port)) throw new Error('企业 SSO 需要使用默认端口的 HTTPS 地址');
+  if (mode === 'ONEID' && (endpoint.protocol !== 'https:' || endpoint.port)) throw new Error('企业 OneID 需要使用默认端口的 HTTPS 地址');
 
   const id = connectorId(endpoint.origin, db.id);
   const version = `1.${db.revision}.${access.revision}`;

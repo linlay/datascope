@@ -6,8 +6,10 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
@@ -71,6 +73,33 @@ type oneIDKey struct {
 	Use string `json:"use"`
 	N   string `json:"n"`
 	E   string `json:"e"`
+}
+
+// Public keys are administrator-pinned config, never loaded from token claims.
+// Accept SPKI and PKCS#1 RSA public keys; reject private keys and extra blocks.
+func parseOneIDPublicKey(raw string) (*rsa.PublicKey, error) {
+	if len(raw) > 64*1024 {
+		return nil, fmt.Errorf("OneID PEM 公钥不能超过 64 KiB")
+	}
+	data := []byte(strings.TrimSpace(raw))
+	block, rest := pem.Decode(data)
+	if block == nil || len(strings.TrimSpace(string(rest))) != 0 || len(block.Headers) != 0 || !strings.HasPrefix(string(data), "-----BEGIN "+block.Type+"-----") {
+		return nil, fmt.Errorf("OneID 需要单个有效 PEM 公钥")
+	}
+	var key *rsa.PublicKey
+	switch block.Type {
+	case "PUBLIC KEY":
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err == nil {
+			key, _ = parsed.(*rsa.PublicKey)
+		}
+	case "RSA PUBLIC KEY":
+		key, _ = x509.ParsePKCS1PublicKey(block.Bytes)
+	}
+	if key == nil || key.N.BitLen() < 2048 || key.N.BitLen() > 8192 || key.E < 3 || key.E > 2147483647 || key.E%2 == 0 {
+		return nil, fmt.Errorf("OneID 需要 2048–8192 位 RSA 公钥（PUBLIC KEY 或 RSA PUBLIC KEY）")
+	}
+	return key, nil
 }
 
 var oneIDKeys = struct {
@@ -146,29 +175,42 @@ func verifyOneID(ctx context.Context, p AuthProvider, token string) (map[string]
 	if err != nil {
 		return nil, ErrDenied
 	}
-	keys, err := loadOneIDKeys(ctx, p.JWKSURL)
-	if err != nil {
-		return nil, err
-	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
 	verified := false
-	for _, k := range keys {
-		if k.Kty != "RSA" || k.Kid != h.Kid || k.Alg != "" && k.Alg != "RS256" || k.Use != "" && k.Use != "sig" {
-			continue
+	// Exactly one configured trust source, with no fallback on verification failure.
+	hasJWKS, hasPEM := strings.TrimSpace(p.JWKSURL) != "", strings.TrimSpace(p.PublicKeyPEM) != ""
+	if hasJWKS == hasPEM {
+		return nil, ErrDenied
+	}
+	if hasPEM {
+		key, err := parseOneIDPublicKey(p.PublicKeyPEM)
+		if err != nil {
+			return nil, ErrDenied
 		}
-		n, e1 := decode(k.N)
-		e, e2 := decode(k.E)
-		if e1 != nil || e2 != nil || len(n) < 256 || len(n) > 1024 || len(e) == 0 || len(e) > 4 {
-			continue
+		verified = rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) == nil
+	} else {
+		keys, err := loadOneIDKeys(ctx, p.JWKSURL)
+		if err != nil {
+			return nil, err
 		}
-		exponent := new(big.Int).SetBytes(e).Int64()
-		if exponent < 3 || exponent > 2147483647 || exponent%2 == 0 {
-			continue
-		}
-		key := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(exponent)}
-		if key.N.BitLen() >= 2048 && rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) == nil {
-			verified = true
-			break
+		for _, k := range keys {
+			if k.Kty != "RSA" || k.Kid != h.Kid || k.Alg != "" && k.Alg != "RS256" || k.Use != "" && k.Use != "sig" {
+				continue
+			}
+			n, e1 := decode(k.N)
+			e, e2 := decode(k.E)
+			if e1 != nil || e2 != nil || len(n) < 256 || len(n) > 1024 || len(e) == 0 || len(e) > 4 {
+				continue
+			}
+			exponent := new(big.Int).SetBytes(e).Int64()
+			if exponent < 3 || exponent > 2147483647 || exponent%2 == 0 {
+				continue
+			}
+			key := &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(exponent)}
+			if key.N.BitLen() >= 2048 && rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) == nil {
+				verified = true
+				break
+			}
 		}
 	}
 	if !verified {

@@ -4,13 +4,14 @@ import { Alert, Button, Card, Form, Input, InputNumber, Modal, Radio, Select, Sp
 import { databases, managementCall, type AuthConfig, type AuthPolicy, type AuthProvider, type Database } from '../api';
 import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
+import { OneIDKeyInput, IdentityMappingsInput } from './OneIDConfiguration';
 import { BusinessAccounts } from '../pages/BusinessAccounts';
 
 type Authentication = NonNullable<Database['authentication']>;
 const providerTypes = (mode: AuthPolicy['mode']) => mode === 'OAUTH' ? ['DEMO_OAUTH', 'ENTERPRISE_OAUTH'] : mode === 'ONEID' ? ['ONEID'] : mode === 'TOKEN' ? ['STATIC_TOKEN', 'BUSINESS_ACCOUNT', 'ENTERPRISE_ACCOUNT_API'] : ['BUSINESS_ACCOUNT', 'ENTERPRISE_ACCOUNT_API'];
-const providerLabel = (type: string) => ({ STATIC_TOKEN: 'Token / API Key', ONEID: 'Desktop 企业 SSO', BUSINESS_ACCOUNT: '账号密码 / 业务 Token', ENTERPRISE_ACCOUNT_API: '企业账号接口', DEMO_OAUTH: '本库业务账号 · OAuth', ENTERPRISE_OAUTH: '企业 OAuth' }[type] || type);
+const providerLabel = (type: string) => ({ STATIC_TOKEN: 'Token / API Key', ONEID: '企业 OneID（客户端 ID Token）', BUSINESS_ACCOUNT: '账号密码 / 业务 Token', ENTERPRISE_ACCOUNT_API: '企业账号接口', DEMO_OAUTH: '本库业务账号 · OAuth', ENTERPRISE_OAUTH: '企业 SSO（跳转登录）' }[type] || type);
 const providerMode = (type: string): AuthPolicy['mode'] => ['BUSINESS_ACCOUNT', 'ENTERPRISE_ACCOUNT_API'].includes(type) ? 'ACCOUNT' : type === 'STATIC_TOKEN' ? 'TOKEN' : type === 'ONEID' ? 'ONEID' : 'OAUTH';
-const oneIDFields = [['issuer', '身份签发方（Issuer）'], ['jwks_url', '签名公钥地址（JWKS）'], ['audience', '接收方（Audience）']] as const;
+const oneIDFields = [['issuer', '身份签发方（Issuer）'], ['audience', '接收方（Audience）']] as const;
 const oauthFields = [
  ['issuer', '认证服务标识（Issuer）'], ['authorize_url', '登录授权地址'], ['token_url', 'Token 地址'], ['userinfo_url', '用户信息地址'], ['client_id', '应用标识（Client ID）'],
 ] as const;
@@ -70,6 +71,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
     }
    }
    if (mode === 'ONEID') for (const [key, label] of oneIDFields) { if (!selectedProvider?.[key]?.trim()) throw new Error(t('{0}不能为空', { '0': t(label) })); }
+   if (mode === 'ONEID' && (!selectedProvider?.jwks_url?.trim() === !selectedProvider?.public_key_pem?.trim())) throw new Error(t('JWKS 地址与 PEM 公钥必须且只能配置一种'));
    if (mode === 'TOKEN' && !selected.business_user_id) throw new Error(t('请填写正整数业务身份'));
    setBusy(true); setError('');
    await databases.save({ ...db, authentication: { ...current, source: mode === 'NONE' ? 'GLOBAL' : source, provider: source === 'DATABASE' && mode !== 'NONE' ? current.provider : undefined, access: { ...selected, id: 'database-auth', name: '本库业务认证' } } });
@@ -100,7 +102,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
    <Card title={t('业务认证')} extra={user.system_admin ? <Space><Button disabled={!dirty || busy} onClick={() => { setDraft(undefined); setError(''); }}>{t('取消')}</Button><SaveButton type="primary" loading={busy} disabled={!dirty || mode !== 'NONE' && !selectedProvider?.enabled} onClick={() => void saveMode()} /></Space> : undefined}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {error && !optionsOpen && <Alert type="error" showIcon title={error} />}
-     <Radio.Group aria-label={t('认证方式')} value={displayMode} disabled={!user.system_admin || busy} onChange={e => changeMode(e.target.value)} options={[{ value: 'NONE', label: t('无需认证（none）') }, { value: 'OAUTH', label: 'MCP OAuth（mcp）' }, { value: 'ONEID', label: t('企业 SSO（oneid）') }, { value: 'TOKEN', label: 'Token / API Key（token）' }]} />
+     <Radio.Group aria-label={t('认证方式')} value={displayMode} disabled={!user.system_admin || busy} onChange={e => changeMode(e.target.value)} options={[{ value: 'NONE', label: t('无需认证（none）') }, { value: 'OAUTH', label: t('SSO / MCP OAuth（mcp）') }, { value: 'ONEID', label: t('企业 OneID（oneid）') }, { value: 'TOKEN', label: 'Token / API Key（token）' }]} />
      {mode !== 'NONE' && <>
       <Space wrap><Typography.Text>{t('配置来源')}</Typography.Text><Radio.Group aria-label={t('配置来源')} value={source} disabled={!user.system_admin || busy} onChange={e => changeSource(e.target.value)} options={[{ value: 'GLOBAL', label: t('使用全局提供方') }, { value: 'DATABASE', label: t('本库独立配置') }]} /></Space>
       {source === 'GLOBAL' ? <Space wrap>
@@ -110,6 +112,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        <Space wrap><Typography.Text>{t('认证服务')}</Typography.Text><Select aria-label={t('认证服务')} style={{ width: 280, maxWidth: '100%' }} disabled={!user.system_admin || busy} value={selectedProvider?.type} options={providerTypes(displayMode).map(type => ({ value: type, label: t(providerLabel(type)) }))} onChange={type => { const provider = newProvider(displayMode, type); update({ provider, access: { ...selected, mode: providerMode(type), provider_id: provider.id } }); }} /></Space>
        {(mode === 'ONEID' || mode === 'TOKEN') && <Form layout="vertical" disabled={!user.system_admin || busy} className="auth-connection-form">
         {(mode === 'ONEID' ? oneIDFields : []).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
+        {mode === 'ONEID' && <OneIDKeyInput jwksUrl={selectedProvider?.jwks_url} publicKeyPem={selectedProvider?.public_key_pem} disabled={!user.system_admin || busy} onChange={patchProvider} />}
         {mode === 'TOKEN' && <Form.Item label={t('API Key 请求头（留空使用 Bearer）')}><Input aria-label={t('API Key 请求头')} value={selectedProvider?.header_name || ''} onChange={e => patchProvider({ header_name: e.target.value })} placeholder="X-API-Key" /></Form.Item>}
         {mode === 'ONEID' && optionalFields.filter(([key]) => key !== 'secret_env').map(([key,label]) => <Form.Item key={key} label={t(label)}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
        </Form>}
@@ -128,7 +131,9 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        <Button danger disabled={dirty||busy||db.access?.policy.mode!=='TOKEN'} onClick={()=>Modal.confirm({title:t('撤销 API Key'),content:t('撤销后，该密钥不能继续访问本数据库。'),onOk:()=>manageKey('revoke_database_api_key')})}>{t('撤销 API Key')}</Button>
       </Space>}
      </Space>}
-     {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，按请求发送 Desktop ID Token。业务身份字段必须映射到正整数员工编号。')} />}
+     {mode === 'ONEID' && <Form layout="vertical"><Form.Item label={t('本库业务身份映射')}><IdentityMappingsInput value={selected.business_id_mappings} disabled={!user.system_admin || busy} onChange={business_id_mappings => patchPolicy({ business_id_mappings })} /></Form.Item></Form>}
+     {mode === 'OAUTH' && <Alert type="info" showIcon title={t(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? 'Platform 选择 mcp，通过授权发现跳转到企业 SSO 登录，取得访问令牌后访问本库。' : 'Platform 选择 mcp，通过 OAuth 跳转到本库业务账号登录。企业 SSO 请使用企业 SSO 提供方。')} />}
+     {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，客户端直接发送自身的 ID Token，无需为本库跳转 SSO 登录。服务端验签并映射业务身份；姓名默认读取 name。')} />}
      {(mode === 'NONE' || !usesAccounts) && <Space wrap>
       {(mode === 'NONE' || mode === 'TOKEN') && <><Typography.Text>{t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')}</Typography.Text><InputNumber aria-label={t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')} min={0} precision={0} disabled={!user.system_admin || busy} value={selected.business_user_id || 0} onChange={value => patchPolicy({ business_user_id: value || 0 })} /></>}
       <Checkbox.Group disabled={!user.system_admin || busy} value={selected.permissions || []} options={[{ value: 'query', label: t('查询') }, { value: 'knowledge.read', label: t('知识查询') }, { value: 'raw_query', label: t('原始查询') }, { value: 'action', label: t('执行动作') }]} onChange={permissions => patchPolicy({ permissions: permissions as string[] })} />

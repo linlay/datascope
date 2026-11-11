@@ -6,8 +6,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"math/big"
 	"net/http"
@@ -24,6 +26,11 @@ import (
 )
 
 func oneIDFixture(t *testing.T) (management.AuthProvider, func(map[string]any, string) string) {
+	p, sign, _ := oneIDFixtureKeys(t)
+	return p, sign
+}
+
+func oneIDFixtureKeys(t *testing.T) (management.AuthProvider, func(map[string]any, string) string, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	must(t, err)
@@ -32,7 +39,7 @@ func oneIDFixture(t *testing.T) (management.AuthProvider, func(map[string]any, s
 		json.NewEncoder(w).Encode(map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "test-key", "alg": "RS256", "use": "sig", "n": b64(key.N.Bytes()), "e": b64(big.NewInt(int64(key.E)).Bytes())}}})
 	}))
 	t.Cleanup(server.Close)
-	p := management.AuthProvider{ID: "oneid", Name: "Desktop SSO", Type: "ONEID", Enabled: true, Issuer: server.URL, JWKSURL: server.URL + "/jwks", Audience: "desktop", SubjectClaim: "sub", UsernameClaim: "username", BusinessIDClaim: "employee_id"}
+	p := management.AuthProvider{ID: "oneid", Name: "Desktop OneID", Type: "ONEID", Enabled: true, Issuer: server.URL, JWKSURL: server.URL + "/jwks", Audience: "desktop", SubjectClaim: "sub", UsernameClaim: "username", BusinessIDClaim: "employee_id"}
 	sign := func(patch map[string]any, algorithm string) string {
 		t.Helper()
 		claims := map[string]any{"iss": p.Issuer, "aud": p.Audience, "exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Add(-time.Second).Unix(), "sub": "stable-employee", "username": "employee", "employee_id": 10, "permissions": []string{"raw_query", "action"}}
@@ -51,7 +58,9 @@ func oneIDFixture(t *testing.T) (management.AuthProvider, func(map[string]any, s
 		must(t, err)
 		return unsigned + "." + b64(sig)
 	}
-	return p, sign
+	publicDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	must(t, err)
+	return p, sign, string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))
 }
 
 func TestOneIDValidation(t *testing.T) {
@@ -101,7 +110,7 @@ func TestOneIDValidation(t *testing.T) {
 
 func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 	f := setup(t)
-	p, sign := oneIDFixture(t)
+	p, sign, publicPEM := oneIDFixtureKeys(t)
 	const secret = "test-api-key-at-least-sixteen-characters"
 	t.Setenv("DATASCOPE_AUTH_CONNECTOR_KEY", secret)
 	configure := func(mode string, provider management.AuthProvider) {
@@ -115,7 +124,7 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 	must(t, err)
 	server := httptest.NewServer(h)
 	defer server.Close()
-	probe := func(header, value string, want int) {
+	probe := func(header, value string, want int) http.Header {
 		t.Helper()
 		req, _ := http.NewRequest("POST", server.URL+"/mcp/default", strings.NewReader(`{}`))
 		if header != "" {
@@ -128,6 +137,7 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 		if res.StatusCode != want {
 			t.Fatalf("status = %d, want %d", res.StatusCode, want)
 		}
+		return res.Header
 	}
 	query := func(token string) {
 		t.Helper()
@@ -141,7 +151,10 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 		}
 	}
 	configure("ONEID", p)
-	probe("", "", 401)
+	headers := probe("", "", 401)
+	if headers.Get("WWW-Authenticate") != `Bearer realm="DataScope"` || headers.Get("Location") != "" {
+		t.Fatalf("OneID must request the client's ID token without SSO discovery or redirect: %v", headers)
+	}
 	probe("Authorization", "Bearer wrong", 401)
 	query(sign(nil, "RS256"))
 	res, err := http.Get(server.URL + "/.well-known/oauth-protected-resource/mcp/default")
@@ -151,6 +164,26 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 	if strings.Contains(string(raw), "authorization_servers") {
 		t.Fatal("oneid advertised browser OAuth")
 	}
+	// Pin a PEM key in persisted source config, then bind an external staff ID.
+	pinned := p
+	pinned.JWKSURL = ""
+	pinned.PublicKeyPEM = publicPEM
+	pinned.BusinessIDClaim = "staffno"
+	configure("ONEID", pinned)
+	d, err := f.c.Get("default")
+	must(t, err)
+	d.Authentication.Access.BusinessIDMappings = map[string]int64{"external-sales": 10}
+	must(t, f.c.Save(f.ctx, *d))
+	query(sign(map[string]any{"staffno": "external-sales", "name": "Sales demo"}, "RS256"))
+	probe("Authorization", "Bearer "+sign(map[string]any{"staffno": "unmapped"}, "RS256"), 401)
+	probe("Authorization", "Bearer "+sign(map[string]any{"staffno": "10"}, "RS256"), 401)
+	// Switching back to JWKS preserves the same mapping and scoped result.
+	d, err = f.c.Get("default")
+	must(t, err)
+	p.BusinessIDClaim = "staffno"
+	d.Authentication.Provider = &p
+	must(t, f.c.Save(f.ctx, *d))
+	query(sign(map[string]any{"staffno": "external-sales"}, "RS256"))
 	key := management.AuthProvider{ID: "key", Name: "API key", Type: "STATIC_TOKEN", Enabled: true, SecretEnv: "DATASCOPE_AUTH_CONNECTOR_KEY"}
 	configure("TOKEN", key)
 	probe("", "", 401)

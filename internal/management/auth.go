@@ -34,16 +34,18 @@ type AuthProvider struct {
 	UsernameClaim   string `json:"username_claim,omitempty" yaml:"usernameClaim,omitempty"`
 	BusinessIDClaim string `json:"business_id_claim,omitempty" yaml:"businessIdClaim,omitempty"`
 	JWKSURL         string `json:"jwks_url,omitempty" yaml:"jwksUrl,omitempty"`
+	PublicKeyPEM    string `json:"public_key_pem,omitempty" yaml:"publicKeyPem,omitempty"`
 	Audience        string `json:"audience,omitempty" yaml:"audience,omitempty"`
 	HeaderName      string `json:"header_name,omitempty" yaml:"headerName,omitempty"`
 }
 type AuthPolicy struct {
-	ID             string   `json:"id" yaml:"id"`
-	Name           string   `json:"name" yaml:"name"`
-	Mode           string   `json:"mode" yaml:"mode"`
-	ProviderID     string   `json:"provider_id,omitempty" yaml:"providerId,omitempty"`
-	Permissions    []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
-	BusinessUserID int64    `json:"business_user_id,omitempty" yaml:"businessUserId,omitempty"`
+	BusinessIDMappings map[string]int64 `json:"business_id_mappings,omitempty" yaml:"businessIdMappings,omitempty"`
+	ID                 string           `json:"id" yaml:"id"`
+	Name               string           `json:"name" yaml:"name"`
+	Mode               string           `json:"mode" yaml:"mode"`
+	ProviderID         string           `json:"provider_id,omitempty" yaml:"providerId,omitempty"`
+	Permissions        []string         `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	BusinessUserID     int64            `json:"business_user_id,omitempty" yaml:"businessUserId,omitempty"`
 }
 type AuthBinding struct {
 	TargetType string `json:"target_type" yaml:"targetType"`
@@ -198,8 +200,22 @@ func validateAuthProvider(p AuthProvider) error {
 	if p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) {
 		return fmt.Errorf("认证密钥需使用 DATASCOPE_AUTH_ 开头的环境变量")
 	}
-	if p.Type == "ONEID" && (!authURL(p.Issuer) || !authURL(p.JWKSURL) || strings.TrimSpace(p.Audience) == "") {
-		return fmt.Errorf("OneID 需要有效的 issuer、JWKS 地址和 audience")
+	if p.Type == "ONEID" {
+		if !authURL(p.Issuer) || strings.TrimSpace(p.Audience) == "" {
+			return fmt.Errorf("OneID 需要有效的 issuer 和 audience")
+		}
+		hasJWKS, hasPEM := strings.TrimSpace(p.JWKSURL) != "", strings.TrimSpace(p.PublicKeyPEM) != ""
+		if hasJWKS == hasPEM {
+			return fmt.Errorf("OneID 的 JWKS 地址与 PEM 公钥必须且只能配置一种")
+		}
+		if hasJWKS && !authURL(p.JWKSURL) {
+			return fmt.Errorf("OneID JWKS 地址需要 HTTPS 或本机测试地址")
+		}
+		if hasPEM {
+			if _, err := parseOneIDPublicKey(p.PublicKeyPEM); err != nil {
+				return err
+			}
+		}
 	}
 	if p.Type == "STATIC_TOKEN" && (p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) || !validTokenHeader(p.HeaderName)) {
 		return fmt.Errorf("Token 需要有效的自定义请求头（留空使用 Bearer）；旧环境变量引用须以 DATASCOPE_AUTH_ 开头")
@@ -233,6 +249,9 @@ func validateAuth(cfg AuthConfig) error {
 	}
 	policies := map[string]AuthPolicy{}
 	for _, p := range cfg.Policies {
+		if err := validateIdentityMappings(p); err != nil {
+			return err
+		}
 		if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"ACCOUNT", "OAUTH", "NONE", "ONEID", "TOKEN"}, p.Mode) {
 			return fmt.Errorf("认证策略无效")
 		}
@@ -462,6 +481,9 @@ func validateDatabaseAuth(connection DatabaseAuthConnection, providers []AuthPro
 	return validateBusinessAuth(*connection.Access, providers)
 }
 func validateBusinessAuth(p AuthPolicy, providers []AuthProvider) error {
+	if err := validateIdentityMappings(p); err != nil {
+		return err
+	}
 	if !slices.Contains([]string{"NONE", "ACCOUNT", "OAUTH", "ONEID", "TOKEN"}, p.Mode) {
 		return fmt.Errorf("认证方式无效")
 	}
@@ -504,6 +526,21 @@ func externalID(provider, subject string) int64 {
 	sum := sha256.Sum256([]byte(provider + "/" + subject))
 	return int64(binary.BigEndian.Uint64(sum[:8])&((1<<52)-1)) + 1
 }
+
+func validateIdentityMappings(p AuthPolicy) error {
+	if len(p.BusinessIDMappings) > 10000 {
+		return fmt.Errorf("业务身份映射最多10000项")
+	}
+	if len(p.BusinessIDMappings) > 0 && p.Mode != "ONEID" {
+		return fmt.Errorf("业务身份映射仅用于 OneID 策略")
+	}
+	for external, id := range p.BusinessIDMappings {
+		if external == "" || strings.TrimSpace(external) != external || len(external) > 256 || id <= 0 {
+			return fmt.Errorf("业务身份映射需要非空企业身份和正整数本库员工编号")
+		}
+	}
+	return nil
+}
 func (r ResolvedAuth) Identity(database string, claims map[string]any) (BusinessAccount, error) {
 	subjectKey := r.Provider.SubjectClaim
 	if subjectKey == "" {
@@ -518,6 +555,13 @@ func (r ResolvedAuth) Identity(database string, claims map[string]any) (Business
 		key = "employee_id"
 	}
 	value := claimString(claims[key])
+	if len(r.Policy.BusinessIDMappings) > 0 {
+		mapped, ok := r.Policy.BusinessIDMappings[value]
+		if !ok || mapped <= 0 {
+			return BusinessAccount{}, fmt.Errorf("企业身份未配置本库业务员工映射")
+		}
+		value = strconv.FormatInt(mapped, 10)
+	}
 	if database == "" && value == "" {
 		value = "1"
 	}

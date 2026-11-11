@@ -24,16 +24,28 @@ const server = spawn(process.execPath, [resolve(root, 'web/node_modules/vite/bin
   await page.goto(base+'/#/database');
   const card=page.locator('.ant-card').filter({has:page.locator('.ant-card-head-title').getByText('业务认证',{exact:true})});
   const choice=name=>card.getByRole('radio',{name,exact:true});
-  for (const name of ['无需认证（none）','MCP OAuth（mcp）','企业 SSO（oneid）','Token / API Key（token）']) await choice(name).waitFor();
-  assert.equal(await choice('MCP OAuth（mcp）').isChecked(),true);
-  await choice('企业 SSO（oneid）').check();
+  for (const name of ['无需认证（none）','SSO / MCP OAuth（mcp）','企业 OneID（oneid）','Token / API Key（token）']) await choice(name).waitFor();
+  assert.equal(await choice('SSO / MCP OAuth（mcp）').isChecked(),true);
+  await card.getByRole('radio',{name:'本库独立配置',exact:true}).check();
+  await card.getByRole('combobox',{name:'认证服务',exact:true}).click();
+  await page.getByTitle('企业 SSO（跳转登录）',{exact:true}).click();
+  for (const [name,value] of [['认证服务标识（Issuer）','https://identity.example.com'],['登录授权地址','https://identity.example.com/authorize'],['Token 地址','https://identity.example.com/token'],['用户信息地址','https://identity.example.com/userinfo'],['应用标识（Client ID）','datascope']]) {
+   await card.getByRole('textbox',{name,exact:true}).fill(value);
+  }
+  await card.getByRole('button',{name:'保存',exact:true}).click();
+  await page.getByText('认证方式已保存，业务客户端需重新连接',{exact:true}).waitFor();
+  let db=await getDB(); assert.equal(db.access.policy.mode,'OAUTH'); assert.equal(db.access.provider.type,'ENTERPRISE_OAUTH');
+  await page.reload(); await choice('SSO / MCP OAuth（mcp）').waitFor(); assert.equal(await choice('SSO / MCP OAuth（mcp）').isChecked(),true);
+  await card.getByText('Platform 选择 mcp，通过授权发现跳转到企业 SSO 登录，取得访问令牌后访问本库。',{exact:true}).waitFor();
+  if(output)await card.screenshot({path:resolve(output,'business-auth-sso.png')});
+  await choice('企业 OneID（oneid）').check();
   await card.getByRole('textbox',{name:'身份签发方（Issuer）',exact:true}).fill('https://identity.example.com');
   await card.getByRole('textbox',{name:'签名公钥地址（JWKS）',exact:true}).fill('https://identity.example.com/jwks');
   await card.getByRole('textbox',{name:'接收方（Audience）',exact:true}).fill('desktop-client');
   await card.getByRole('button',{name:'保存',exact:true}).click();
   await page.getByText('认证方式已保存，业务客户端需重新连接',{exact:true}).waitFor();
-  let db=await getDB(); assert.equal(db.access.policy.mode,'ONEID'); assert.equal(db.access.provider.audience,'desktop-client');
-  await page.reload(); await choice('企业 SSO（oneid）').waitFor(); assert.equal(await choice('企业 SSO（oneid）').isChecked(),true);
+  db=await getDB(); assert.equal(db.access.policy.mode,'ONEID'); assert.equal(db.access.provider.audience,'desktop-client');
+  await page.reload(); await choice('企业 OneID（oneid）').waitFor(); assert.equal(await choice('企业 OneID（oneid）').isChecked(),true);
   if(output)await card.screenshot({path:resolve(output,'business-auth-oneid.png')});
   await choice('Token / API Key（token）').check();
   await card.getByRole('textbox',{name:'API Key 请求头',exact:true}).fill('X-API-Key');
@@ -82,7 +94,7 @@ const server = spawn(process.execPath, [resolve(root, 'web/node_modules/vite/bin
   await page.reload(); await choice('Token / API Key（token）').waitFor(); assert.equal(await choice('Token / API Key（token）').isChecked(),true);
   assert.equal((await getDB()).access.policy.mode,'ACCOUNT');
   assert.deepEqual(errors,[]);
-  console.log('business authentication: four choices, saved OneID/API key, reload, legacy account, narrow layout passed');
+  console.log('business authentication: separate SSO/OneID, saved SSO/OneID/API key, reload, legacy account, narrow layout passed');
  } catch(e) { if(page&&output)await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}); throw e; }
  finally { if(browser)await browser.close(); server.kill('SIGTERM'); }
 })().catch(e=>{console.error(e);process.exitCode=1;});
