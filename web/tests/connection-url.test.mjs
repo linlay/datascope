@@ -34,3 +34,22 @@ test('unsupported, lossy and malformed URLs are rejected', () => {
   assert.throws(()=>parseConnectionURL(value),value);
  }
 });
+
+test('OceanBase URLs preserve tenant routing and support direct and ODP ports', () => {
+ const direct = parseConnectionURL('oceanbase://reader%40tenant:pass@localhost/business');
+ assert.equal(direct.driver, 'oceanbase');
+ assert.equal(direct.connection.port, 2881);
+ assert.equal(direct.connection.database, 'business');
+ assert.equal(direct.connection.schema, 'business');
+ assert.equal(direct.connection.username, 'reader@tenant');
+ assert.equal(direct.connection.tls_mode, 'verify-full');
+ const proxy = parseConnectionURL('jdbc:oceanbase://[::1]:2883/sales?user=reader%40tenant%23cluster&password=p%40ss%23word&useSSL=false');
+ assert.equal(proxy.driver, 'oceanbase');
+ assert.equal(proxy.connection.host, '::1');
+ assert.equal(proxy.connection.port, 2883);
+ assert.equal(proxy.connection.username, 'reader@tenant#cluster');
+ assert.equal(proxy.password, 'p@ss#word');
+ assert.equal(proxy.connection.tls_mode, 'disable');
+ assert.equal(parseConnectionURL('oceanbase://reader:pass@localhost').connection.schema, '');
+ for (const raw of ['oceanbase://reader@localhost/business#cluster','oceanbase://localhost/business?sslmode=require','oceanbase://localhost/business?compatibleMode=oracle']) assert.throws(()=>parseConnectionURL(raw), raw);
+});

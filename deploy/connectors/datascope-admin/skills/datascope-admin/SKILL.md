@@ -1,19 +1,20 @@
 ---
 name: datascope-admin
-description: 管理 DataScope 数据库登记、访问策略、MCP 配置、用户授权和业务知识，诊断 SQL 权限改写并查询审计。用于 DataScope 管理任务；业务数据查询使用对应数据库连接器。
+description: 管理 DataScope 数据库登记、SQLite DDL、访问策略、MCP 配置、用户授权和业务知识，诊断 SQL 权限改写并查询审计。用于 DataScope 管理任务；业务数据查询使用对应数据库连接器。
 ---
 
 使用本连接器的三个 MCP 工具，统一传入 `{action,args}`，其中 `args.resourceType` 选择资源。管理连接器使用 `/mcp/admin` 的 OAuth 授权；每个数据库 MCP 有独立地址与令牌 audience。
 
 | 工具 | 用途 | 资源 |
 | --- | --- | --- |
-| `datascope_query` | 查询管理状态 | database、policy、user、business_account、grant、knowledge、view、audit |
-| `datascope_manage` | 创建与修改 | database、policy、mcp、action、user、business_account、grant、knowledge、view |
-| `datascope_inspect` | 连接测试、策略校验、改写预览 | database、policy、action |
+| `datascope_query` | 查询管理状态 | database、ddl、policy、user、business_account、grant、knowledge、view、audit |
+| `datascope_manage` | 创建与修改 | database、ddl、policy、mcp、action、user、business_account、grant、knowledge、view |
+| `datascope_inspect` | 连接测试、策略校验、改写与 DDL 预览 | database、ddl、policy、action |
 
 按当前任务读取对应 reference，其中包含支持的动作、必需参数、权限及示例。不要将全部资源与动作任意组合；服务端拒绝不支持的组合和无关参数。
 
 - 登记数据库、重命名、配置数据库 MCP：读 [数据库与 MCP](references/databases.md)。
+- 开启 SQLite DDL 管理，查询、创建、修改或删除表、字段、约束、索引、数据库视图、触发器：读 [SQLite DDL](references/ddl.md)。
 - 修改表、行、字段访问策略，验证策略或预览 SQL：读 [策略](references/policies.md)。
 - 管理平台用户或逐库业务账号、启停账号、重置密码、分配或撤销权限：读 [用户与授权](references/permissions-users.md)。
 - 编写业务 Action、维护独立写入账号或试运行：读 [业务操作](references/actions.md)。

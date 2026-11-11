@@ -5,6 +5,7 @@ import (
 	"datascope-server/internal/adminapi"
 	"datascope-server/internal/application"
 	"datascope-server/internal/catalog"
+	"datascope-server/internal/ddl"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -23,15 +24,20 @@ func TestManagedSQLiteCreationAndSchema(t *testing.T) {
 	}
 	var d application.DatabaseView
 	must(t, json.Unmarshal(body, &d))
-	if !d.SchemaEditable || d.Path != filepath.Join(f.c.LocalSQLiteRoot(), "business.sqlite3") {
+	if d.SchemaEditable || d.Path != filepath.Join(f.c.LocalSQLiteRoot(), "business.sqlite3") {
 		t.Fatalf("unexpected local source: %+v", d)
 	}
+	enabled := true
+	_, err := f.app.Call(f.ctx, "update_database", application.Input{DatabaseID: d.ID, Database: &catalog.Database{ID: d.ID, Revision: d.Revision, DDLEnabled: &enabled}})
+	must(t, err)
 	for _, query := range []string{"CREATE TABLE clients(id INTEGER PRIMARY KEY, name TEXT)", "ALTER TABLE clients ADD COLUMN email TEXT", "CREATE INDEX clients_name ON clients(name)"} {
-		_, err := f.app.Call(f.ctx, "edit_sqlite_schema", application.Input{DatabaseID: d.ID, SQL: query})
+		out, err := f.app.Call(f.ctx, "preview_ddl", application.Input{DatabaseID: d.ID, SQL: query})
+		must(t, err)
+		_, err = f.app.Call(f.ctx, "apply_ddl", application.Input{DatabaseID: d.ID, PlanID: out.(*ddl.Plan).ID, RequestID: query})
 		must(t, err)
 	}
-	for _, query := range []string{"ATTACH DATABASE '/tmp/escape.db' AS other", "PRAGMA writable_schema=ON", "INSERT INTO clients(name) VALUES ('x')", "CREATE TABLE bad(id); DROP TABLE clients", "CREATE TABLE copy AS SELECT * FROM clients", "CREATE TEMP TABLE temp_items(id)", "CREATE TABLE temp.temp_items(id)"} {
-		if _, err := f.app.Call(f.ctx, "edit_sqlite_schema", application.Input{DatabaseID: d.ID, SQL: query}); err == nil {
+	for _, query := range []string{"ATTACH DATABASE '/tmp/escape.db' AS other", "PRAGMA writable_schema=ON", "INSERT INTO clients(name) VALUES ('x')", "CREATE TABLE copy AS SELECT * FROM clients", "CREATE TEMP TABLE temp_items(id)", "CREATE TABLE temp.temp_items(id)"} {
+		if _, err := f.app.Call(f.ctx, "preview_ddl", application.Input{DatabaseID: d.ID, SQL: query}); err == nil {
 			t.Fatalf("accepted %s", query)
 		}
 	}

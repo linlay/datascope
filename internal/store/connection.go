@@ -39,7 +39,7 @@ type Connection struct {
 var credentialID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
 
 func DefaultPort(driver string) int {
-	return map[string]int{"mysql": 3306, "postgresql": 5432, "oracle": 1521, "dameng": 5236}[driver]
+	return map[string]int{"mysql": 3306, "oceanbase": 2881, "postgresql": 5432, "oracle": 1521, "dameng": 5236}[driver]
 }
 
 // ConnectionDefaults copies input so normalization cannot mutate a request or stored record.
@@ -51,7 +51,7 @@ func ConnectionDefaults(driver string, c *Connection) *Connection {
 	if out.Port == 0 {
 		out.Port = DefaultPort(driver)
 	}
-	if driver == "mysql" && out.Schema == "" {
+	if dialect.Family(driver) == "mysql" && out.Schema == "" {
 		out.Schema = out.Database
 	}
 	if c.AllowedSchemas != nil {
@@ -85,7 +85,7 @@ func ValidateConnection(driver string, c *Connection) error {
 	} else if !passwordEnvName.MatchString(c.PasswordEnv) {
 		return errors.New("password_env 必须为 DATASCOPE_DB_ 开头的大写环境变量名称")
 	}
-	if driver == "mysql" && c.Database != c.Schema {
+	if dialect.Family(driver) == "mysql" && c.Database != c.Schema {
 		return errors.New("MySQL database 必须与 schema 相同")
 	}
 	if driver == "postgresql" && c.Database == "" {
@@ -107,7 +107,7 @@ func ValidateConnection(driver string, c *Connection) error {
 	if c.AllowedSchemas != nil && c.Schema != "" && !seen[c.Schema] {
 		return errors.New("默认 Schema 必须在允许范围内")
 	}
-	switch driver {
+	switch dialect.Family(driver) {
 	case "mysql":
 		if c.TLSMode != "" && c.TLSMode != "verify-full" && c.TLSMode != "disable" {
 			return errors.New("MySQL tls_mode 支持 verify-full 或 disable")
@@ -126,7 +126,7 @@ func ValidateConnection(driver string, c *Connection) error {
 
 func SupportedDriver(driver string) bool {
 	switch driver {
-	case "sqlite", "mysql", "postgresql", "oracle", "dameng":
+	case "sqlite", "oceanbase", "mysql", "postgresql", "oracle", "dameng":
 		return true
 	}
 	return false
@@ -185,6 +185,12 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 		db.Close()
 		return nil, fmt.Errorf("%s 连接失败（请检查地址、凭据和网络）", driver)
 	}
+	if driver == "oceanbase" {
+		if err = validateOceanBaseMode(ctx, db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	s := &Store{db: db, queryTimeout: timeout, engine: &dialect.Engine{Driver: driver, Schema: c.Schema, AllowedSchemas: c.AllowedSchemas, Tables: map[string]string{}}}
 	// Verify that a read-only session can actually be established. In particular,
 	// go-ora does not implement driver.TxOptions.ReadOnly; DM ignores errors
@@ -205,9 +211,21 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	return s, nil
 }
 
+// Reject other products and Oracle tenants instead of guessing a compatible dialect.
+func validateOceanBaseMode(ctx context.Context, db *sql.DB) error {
+	var mode string
+	if err := db.QueryRowContext(ctx, "SELECT @@ob_compatibility_mode").Scan(&mode); err != nil {
+		return errors.New("无法确认 OceanBase 租户兼容模式，请检查目标是否为 OceanBase MySQL 租户")
+	}
+	if !strings.EqualFold(strings.TrimSpace(mode), "mysql") {
+		return errors.New("OceanBase 当前仅支持 MySQL 兼容模式")
+	}
+	return nil
+}
+
 func connectionDSN(driver string, c Connection, password string, timeout time.Duration) (string, string) {
 	address := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	switch driver {
+	switch dialect.Family(driver) {
 	case "mysql":
 		cfg := mysql.NewConfig()
 		cfg.User = c.Username
@@ -307,7 +325,7 @@ func SameConnectionTarget(driver string, a, b *Connection) bool {
 	y.Schema = ""
 	x.AllowedSchemas = nil
 	y.AllowedSchemas = nil
-	if driver == "mysql" {
+	if dialect.Family(driver) == "mysql" {
 		x.Database = ""
 		y.Database = ""
 	}

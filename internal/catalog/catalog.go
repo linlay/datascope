@@ -40,6 +40,7 @@ type SQLExample struct {
 }
 
 type Database struct {
+	DDLEnabled             *bool               `json:"ddl_enabled,omitempty" yaml:"ddlEnabled,omitempty"`
 	SchemaIdentityVersion  int                 `json:"schema_identity_version,omitempty" yaml:"schemaIdentityVersion,omitempty"`
 	Views                  []view.Definition   `json:"views,omitempty" yaml:"views,omitempty"`
 	QueryViewID            string              `json:"query_view_id,omitempty" yaml:"queryViewId,omitempty"`
@@ -348,6 +349,8 @@ func (c *Catalog) Create(ctx context.Context, d Database, password string) (*Dat
 }
 
 func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) error {
+	// New sources always require an explicit, administrator-only opt-in later.
+	d.DDLEnabled = nil
 	if d.Authentication != nil {
 		if c.Management == nil {
 			if d.Authentication.Access != nil || d.Authentication.Source != "" || d.Authentication.Provider != nil {
@@ -460,6 +463,9 @@ func (c *Catalog) Save(ctx context.Context, d Database) error {
 }
 
 func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, password string) error {
+	if d.DDLEnabled != nil && *d.DDLEnabled && d.Driver != "sqlite" {
+		return fmt.Errorf("DDL 管理仅支持 SQLite 数据库")
+	}
 	// Provision only when HMAC is first enabled; later reads/edits must fail if
 	// its key has been lost, rather than silently producing new identities.
 	if hasHMAC(d.Discovery) {
@@ -541,11 +547,16 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				if d.Driver != old.Driver || d.Path != old.Path || !store.SameConnectionTarget(d.Driver, d.Connection, old.Connection) {
 					return fmt.Errorf("连接目标登记后固定，请新建数据源")
 				}
-				svc, err := c.Open(ctx, &d)
-				if err != nil {
-					return err
+				metadataOnly := old
+				metadataOnly.Name, metadataOnly.DDLEnabled = d.Name, d.DDLEnabled
+				metadataOnly.AuthPolicyFingerprint, metadataOnly.ETag = d.AuthPolicyFingerprint, d.ETag
+				if !reflect.DeepEqual(metadataOnly, d) {
+					svc, err := c.Open(ctx, &d)
+					if err != nil {
+						return err
+					}
+					svc.Store.Close()
 				}
-				svc.Store.Close()
 				d.Revision++
 				(*items)[i] = d
 				return nil

@@ -19,7 +19,7 @@ import (
 // Opt-in and read-only. An administrator provisions the isolated fixtures in
 // fixtures/databases/schema_join first. Missing environments are SKIP, not PASS.
 func TestSchemaJoinNetworkIntegration(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			raw := os.Getenv("DATASCOPE_SCHEMA_INTEGRATION_" + strings.ToUpper(driver))
 			if raw == "" {
@@ -40,7 +40,7 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 			c := &catalog.Catalog{Path: filepath.Join(t.TempDir(), "catalog"), Timeout: 10 * time.Second, AsOf: store.DefaultAsOf}
 			fixture.Connection.AllowedSchemas = []string{fixture.FirstSchema, fixture.SecondSchema}
 			fixture.Connection.Schema = ""
-			if driver == "mysql" {
+			if (driver == "mysql" || driver == "oceanbase") {
 				fixture.Connection.Database = ""
 			}
 			if err := c.Add(ctx, catalog.Database{ID: "schema_join", Name: "Schema acceptance", Driver: driver, Connection: &fixture.Connection}); err != nil {
@@ -175,7 +175,7 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 			// Removing a schema is independently enforced by the raw test execution path.
 			d.Connection.AllowedSchemas = []string{fixture.FirstSchema}
 			d.Connection.Schema = fixture.FirstSchema
-			if driver == "mysql" {
+			if (driver == "mysql" || driver == "oceanbase") {
 				d.Connection.Database = fixture.FirstSchema
 			}
 			if err := c.Save(ctx, *d); err != nil {

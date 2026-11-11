@@ -3,14 +3,12 @@ package catalog
 import (
 	"context"
 	"database/sql"
-	"datascope-server/internal/store"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 var sqliteFilename = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}\.(db|sqlite|sqlite3)$`)
@@ -29,22 +27,11 @@ func (c *Catalog) LocalSQLiteRoot() string {
 }
 
 func (c *Catalog) CanEditSchema(d *Database) bool {
-	if d == nil || d.Driver != "sqlite" || c.Management == nil {
-		return false
-	}
-	root, err := filepath.EvalSymlinks(c.LocalSQLiteRoot())
-	if err != nil {
-		return false
-	}
-	// The managed directory itself must not redirect outside the configured location.
-	if root != c.LocalSQLiteRoot() {
+	if d == nil || d.Driver != "sqlite" || c.Management == nil || d.DDLEnabled == nil || !*d.DDLEnabled {
 		return false
 	}
 	real, err := filepath.EvalSymlinks(d.Path)
 	if err != nil {
-		return false
-	}
-	if filepath.Dir(real) != root || real != d.Path {
 		return false
 	}
 	info, err := os.Stat(real)
@@ -112,20 +99,5 @@ func (c *Catalog) CreateLocalSQLite(ctx context.Context, d Database) (*Database,
 }
 
 func (c *Catalog) EditSchema(ctx context.Context, id, query string) error {
-	d, err := c.Get(id)
-	if err != nil {
-		return err
-	}
-	if !c.CanEditSchema(d) {
-		return errors.New("仅允许修改项目 database 目录内的 SQLite 表结构")
-	}
-	if strings.TrimSpace(query) == "" {
-		return errors.New("需要结构 SQL")
-	}
-	st, err := store.OpenWriter(ctx, d.Path, c.Timeout)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	return st.ExecuteSchema(ctx, query)
+	return errors.New("请使用 preview_ddl 和 apply_ddl 预览后执行结构变更")
 }

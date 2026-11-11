@@ -17,7 +17,7 @@ func (s *Store) remoteTableCandidates(ctx context.Context, all bool) ([]Table, e
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
 	query := ""
-	switch s.Driver() {
+	switch dialect.Family(s.Driver()) {
 	case "mysql":
 		query = `SELECT TABLE_SCHEMA,TABLE_NAME FROM information_schema.TABLES WHERE TABLE_TYPE='BASE TABLE' ORDER BY TABLE_SCHEMA,TABLE_NAME`
 	case "postgresql":
@@ -99,7 +99,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	tx.Rollback()
 	out := &TableSchema{Name: physical, Schema: owner, TableName: name, Columns: []Column{}, Indexes: []string{}}
 	query := ""
-	switch s.Driver() {
+	switch dialect.Family(s.Driver()) {
 	case "mysql":
 		query = `SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLUMN_DEFAULT,COLUMN_COMMENT,CASE WHEN COLUMN_KEY='PRI' THEN 1 ELSE 0 END FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY ORDINAL_POSITION`
 	case "postgresql":
@@ -137,7 +137,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	if len(out.Columns) == 0 {
 		return nil, fmt.Errorf("%w: %s", ErrTableNotFound, table)
 	}
-	switch s.Driver() {
+	switch dialect.Family(s.Driver()) {
 	case "mysql":
 		query = `SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? ORDER BY INDEX_NAME`
 	case "postgresql":
@@ -164,7 +164,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	}
 	// Foreign-key metadata is only a navigation hint; it never expands schema
 	// scope or grants access to a referenced table.
-	switch s.Driver() {
+	switch dialect.Family(s.Driver()) {
 	case "mysql":
 		query = `SELECT COLUMN_NAME,CONCAT(REFERENCED_TABLE_SCHEMA,'.',REFERENCED_TABLE_NAME),REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND REFERENCED_TABLE_NAME IS NOT NULL`
 	case "postgresql":
@@ -193,7 +193,7 @@ func (s *Store) remoteDescribe(ctx context.Context, table string) (*TableSchema,
 	if err != nil {
 		return nil, err
 	}
-	switch s.Driver() {
+	switch dialect.Family(s.Driver()) {
 	case "mysql":
 		query = `SELECT COALESCE(TABLE_COMMENT,'') FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME=?`
 	case "postgresql":

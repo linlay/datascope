@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"datascope-server/internal/store"
 	"github.com/dop251/goja"
 	"github.com/evanw/esbuild/pkg/api"
 )
@@ -56,6 +55,9 @@ func ValidateLibraries(libraries []Library) error {
 		// Linking an unused library here validates its own imports without running
 		// top-level JavaScript. Runtime calls only link their reachable modules.
 		source := fmt.Sprintf("import * as library from %q; function run() { return library; }", library.Name)
+		if isCommonJS(library.Script) {
+			source = fmt.Sprintf("const library = require(%q); function main() { return library; }", "./"+library.Name)
+		}
 		if _, _, err := compileWithLibraries(source, libraries, ""); err != nil {
 			return fmt.Errorf("公共函数库 %s: %w", library.Name, err)
 		}
@@ -64,6 +66,9 @@ func ValidateLibraries(libraries []Library) error {
 }
 
 func compileWithLibraries(source string, libraries []Library, database string) (*goja.Program, []site, error) {
+	if hasMain(source) {
+		return compileNative(source, libraries, database)
+	}
 	if len(libraries) == 0 {
 		// Preserve the existing path and diagnostics for standalone scripts.
 		return compile(source)
@@ -154,7 +159,7 @@ func compileWithLibraries(source string, libraries []Library, database string) (
 		return nil, nil, err
 	}
 	for _, site := range sites {
-		if err := store.ValidateActionTemplate(site.sql, site.count, site.method == "exec"); err != nil {
+		if err := site.validate(); err != nil {
 			return nil, nil, err
 		}
 	}

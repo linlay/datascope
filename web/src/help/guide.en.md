@@ -12,6 +12,8 @@ Administrators can register a network database, connect or create a SQLite datab
 
 For a network database, configure the schema scope before enrolling tables. When cloning configuration, check the source, destination and preview before applying changes.
 
+System administrators can open Database configuration → Basic information → Edit connection to maintain a network database's host, port, read-only account, password and TLS. Leave the password blank to keep it; new passwords are encrypted. Use Test connection to check the draft, then Validate and save. Saving repeats the connection test and checks that enrolled columns still exist with compatible types, nullability and primary-key attributes. Failure preserves the previous configuration and password. Existing action write connections receive the same host, port and TLS settings, keep their separate account and password, and are also tested. Refresh and retry if another window has saved changes. Successful edits retain the source ID, permissions and business configuration and create an audit entry. This entry is for maintenance of the same business database; matching structure cannot prove that business data is identical. Create a new source to switch business databases or database types. SQLite has no editing entry, and database names and schema scope are not changed in this dialog.
+
 Platform accounts sign in to the console. Database grants control access to configuration and workbenches. Business identities determine data visibility and authorization for real actions. Configure business authentication and capabilities for the selected database. Open system settings in the top bar to change language or appearance and access authorized platform settings.
 
 ## Query configuration, SQL workbench and table data
@@ -23,6 +25,8 @@ In the SQL workbench, choose an identity and run a read-only SELECT. For a datab
 Use the table data page to browse and filter stored records with full query access. To check a business user's visibility, use that identity in the SQL workbench.
 
 ## Action configuration and script reference
+
+New actions default to `main(params, context)`. Obtain the current database connection with `db.session()`, read with `conn.query` / `conn.queryOne`, and write with `conn.update`, using literal SQL and `:name` parameters. Queries do not automatically apply normal query permissions: scripts must check record ownership using `context.userId` and verify `result.rowsAffected` after writes. Export shared functions with `exports.fn` and load them with `require("./library")`. The following reference describes the compatible `run(args, ctx)` template; do not mix the two script APIs.
 
 Create an action with a name, description and typed parameters. Implement the synchronous entry point `function run(args, ctx)`. Declare id as an integer and value as a string for the example below. Configure a write connection and enable writes before testing the action.
 

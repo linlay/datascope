@@ -54,7 +54,7 @@ func TestCrossSchemaJoinPoliciesAndExecution(t *testing.T) {
 		`WITH o AS (SELECT order_id,customer_id FROM sales.orders) SELECT o.order_id,c.customer_name FROM o JOIN crm.customers AS c ON c.customer_id=o.customer_id`,
 		`SELECT o.order_id,c.customer_name FROM orders AS o JOIN crm.customers AS c ON c.customer_id=o.customer_id`,
 	}
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driver, func(t *testing.T) {
 			r, cfg := crossSchemaRewriter(t)
 			e := dialect.Engine{Driver: driver, Schema: "sales", AllowedSchemas: []string{"sales", "crm"}, Tables: map[string]string{"sales.orders": "sales.orders", "crm.customers": "crm.customers"}}

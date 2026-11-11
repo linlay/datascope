@@ -14,6 +14,15 @@ import (
 	parser "github.com/rqlite/sql"
 )
 
+// Family selects shared SQL behavior while preserving the configured product identity.
+// OceanBase currently supports MySQL-compatible tenants only.
+func Family(driver string) string {
+	if driver == "oceanbase" {
+		return "mysql"
+	}
+	return driver
+}
+
 type Engine struct {
 	Driver         string
 	Schema         string
@@ -24,7 +33,7 @@ type Engine struct {
 
 func (e Engine) Quote(name string) string {
 	q := `"`
-	if e.Driver == "mysql" {
+	if Family(e.Driver) == "mysql" {
 		q = "`"
 	}
 	return q + strings.ReplaceAll(name, q, q+q) + q
@@ -91,7 +100,7 @@ func (e Engine) Resolve(schema, name string) (string, error) {
 }
 
 func (e Engine) fold(name string) string {
-	switch e.Driver {
+	switch Family(e.Driver) {
 	case "oracle", "dameng":
 		return strings.ToUpper(name)
 	case "postgresql":
@@ -170,7 +179,7 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 			if len(x.ValueLists) > 0 || len(x.Windows) > 0 {
 				return nil, errors.New("暂不支持 VALUES 或 WINDOW")
 			}
-			if e.Driver == "oracle" && x.Except.IsValid() {
+			if Family(e.Driver) == "oracle" && x.Except.IsValid() {
 				return nil, errors.New("Oracle 暂不支持 EXCEPT，请改写为其他受支持的查询")
 			}
 			for _, limit := range []parser.Expr{x.LimitExpr, x.OffsetExpr} {
@@ -184,7 +193,7 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 					}
 				}
 			}
-			if x.Source == nil && e.Driver == "oracle" {
+			if x.Source == nil && Family(e.Driver) == "oracle" {
 				dual := &parser.QualifiedTableName{Schema: &parser.Ident{Name: "SYS", Quoted: true}, Name: &parser.Ident{Name: "DUAL", Quoted: true}}
 				generatedDual[dual] = true
 				x.Source = dual
@@ -240,7 +249,7 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 				return nil, errors.New("多库查询暂不支持 MATERIALIZED 提示")
 			}
 		case *parser.JoinOperator:
-			if x.Natural.IsValid() || (e.Driver == "mysql" && x.Full.IsValid()) {
+			if x.Natural.IsValid() || (Family(e.Driver) == "mysql" && x.Full.IsValid()) {
 				return nil, errors.New("不支持该 JOIN 形式，请显式使用 JOIN ON")
 			}
 		case *parser.UnaryExpr:
@@ -248,7 +257,7 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 				return nil, errors.New("不支持该一元运算")
 			}
 		case *parser.BoolLit:
-			if e.Driver == "oracle" {
+			if Family(e.Driver) == "oracle" {
 				return nil, errors.New("Oracle 查询请使用数值或比较表达式代替布尔字面量")
 			}
 		case *parser.Null:
@@ -334,7 +343,7 @@ func (e Engine) emit(canonical string, args []any) (string, []any, error) {
 				}
 			}
 			bound = append(bound, value)
-			switch e.Driver {
+			switch Family(e.Driver) {
 			case "postgresql":
 				v = fmt.Sprintf("$%d", len(bound))
 			case "oracle", "dameng":
@@ -345,13 +354,13 @@ func (e Engine) emit(canonical string, args []any) (string, []any, error) {
 		case parser.AS:
 			// Oracle permits column aliases without AS, requires this for table
 			// aliases, and still requires AS before a CTE's parenthesized body.
-			if e.Driver == "oracle" && i+1 < len(tokens) && tokens[i+1].kind != parser.LP {
+			if Family(e.Driver) == "oracle" && i+1 < len(tokens) && tokens[i+1].kind != parser.LP {
 				continue
 			}
 		}
 		parts = append(parts, v)
 	}
-	if e.Driver == "oracle" {
+	if Family(e.Driver) == "oracle" {
 		parts = oracleLimits(parts)
 	}
 	return strings.Join(parts, " "), bound, nil

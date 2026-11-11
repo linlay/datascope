@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"datascope-server/internal/dialect"
 	"fmt"
 	"slices"
 	"strconv"
@@ -29,7 +30,7 @@ func (s *Store) remoteBrowse(ctx context.Context, opts BrowseOptions) (*BrowseRe
 	where := []string{}
 	bind := func(v any) string {
 		args = append(args, v)
-		switch s.Driver() {
+		switch dialect.Family(s.Driver()) {
 		case "postgresql":
 			return fmt.Sprintf("$%d", len(args))
 		case "oracle", "dameng":
@@ -49,7 +50,7 @@ func (s *Store) remoteBrowse(ctx context.Context, opts BrowseOptions) (*BrowseRe
 		likes := []string{}
 		for _, c := range columns {
 			typ := "TEXT"
-			switch s.Driver() {
+			switch dialect.Family(s.Driver()) {
 			case "mysql":
 				typ = "CHAR"
 			case "oracle":

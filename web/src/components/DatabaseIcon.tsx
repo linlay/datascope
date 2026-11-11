@@ -1,11 +1,12 @@
 import { DatabaseOutlined } from '@ant-design/icons';
 import sqlite from '../assets/databases/sqlite.svg';
+import oceanbase from '../assets/databases/oceanbase.svg';
 import mysql from '../assets/databases/mysql.svg';
 import postgresql from '../assets/databases/postgresql.svg';
 import oracle from '../assets/databases/oracle.svg';
 import dameng from '../assets/databases/dameng.svg';
 
-const logos: Record<string, string> = { sqlite, mysql, postgresql, oracle, dameng };
+const logos: Record<string, string> = { sqlite, mysql, oceanbase, postgresql, oracle, dameng };
 
 export function DatabaseIcon({ driver }: { driver: string }) {
  const src = logos[driver];

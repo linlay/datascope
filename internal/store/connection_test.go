@@ -16,7 +16,7 @@ func validConnection(driver string) Connection {
 }
 
 func TestConnectionConfiguration(t *testing.T) {
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		c := validConnection(driver)
 		if err := ValidateConnection(driver, &c); err != nil {
 			t.Fatal(driver, err)
@@ -47,11 +47,11 @@ func TestConnectionConfiguration(t *testing.T) {
 
 func TestDSNCredentialsAreEscaped(t *testing.T) {
 	password := "p@ss:/?#&=_% 空格"
-	for _, driver := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		c := validConnection(driver)
 		c.Host = "::1"
 		_, dsn := connectionDSN(driver, c, password, time.Second*3)
-		if driver == "mysql" {
+		if (driver == "mysql" || driver == "oceanbase") {
 			cfg, err := mysql.ParseDSN(dsn)
 			if err != nil {
 				t.Fatal(err)
@@ -82,7 +82,7 @@ func TestMissingSecretFailsBeforeNetwork(t *testing.T) {
 }
 
 func TestDefaultPortsAndCredentialReferences(t *testing.T) {
-	for driver, port := range map[string]int{"mysql": 3306, "postgresql": 5432, "oracle": 1521, "dameng": 5236} {
+	for driver, port := range map[string]int{"mysql": 3306, "oceanbase": 2881, "postgresql": 5432, "oracle": 1521, "dameng": 5236} {
 		input := validConnection(driver)
 		input.Port = 0
 		input.PasswordEnv = ""

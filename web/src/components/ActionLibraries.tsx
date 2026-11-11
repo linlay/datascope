@@ -7,7 +7,7 @@ import { CodeEditor } from './CodeEditor';
 import { useI18n } from '../ui/preferences';
 import { setRouteParams, useNavigationBlocker, useRoute } from '../navigation';
 
-const example: ActionLibrary = { name: '', title: '', description: '', script: 'export function helper(value) {\n  return value;\n}\n' };
+const example: ActionLibrary = { name: '', title: '', description: '', script: 'exports.helper = function(value) {\n  return value;\n};\n' };
 
 export function ActionLibraries({ db, disabled, onSaved }: { db: Database; disabled: boolean; onSaved: (db: Database) => void }) {
  const t = useI18n();
@@ -69,7 +69,7 @@ export function ActionLibraries({ db, disabled, onSaved }: { db: Database; disab
    <SaveButton loading={busy} disabled={!canWrite || !dirty} onClick={() => void save()} />
   </Space>} styles={{ body: { maxHeight: '74vh', overflowY: 'auto' } }}>
    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-    <Typography.Paragraph type="secondary">{t('使用 export 导出函数，在动作或其他库中通过 import { fn1, fn2 as alias } from "库名称" 引用。仅加载当前数据库被引用的模块。')}</Typography.Paragraph>
+    <Typography.Paragraph type="secondary">{t('使用 exports.fn 导出函数，通过 require("./库名称") 引用。公共库与动作共享当前数据库事务，仅加载被引用的模块。')}</Typography.Paragraph>
     <Space wrap>
      <Select aria-label={t('选择公共函数')} style={{ width: 300 }} value={selectedName} placeholder={t('选择公共函数')} disabled={busy} options={items.map(item => ({ value: item.name, label: `${item.title} · ${item.name}` }))} onChange={name => navigate(() => edit(items.find(item => item.name === name),false,false))} />
      <IconButton label={t('新增公共函数')} icon={<PlusOutlined />} disabled={!canWrite || busy || creating} onClick={() => navigate(() => edit({ ...example }, true))} />
@@ -82,7 +82,7 @@ export function ActionLibraries({ db, disabled, onSaved }: { db: Database; disab
       <Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item>
       <Form.Item name="description" label={t('说明')}><Input /></Form.Item>
      </div>
-     <Form.Item name="script" label="JavaScript · export" rules={[{ required: true }]}><CodeEditor height="420px" readOnly={!canWrite || busy} /></Form.Item>
+     <Form.Item name="script" label="JavaScript · CommonJS" rules={[{ required: true }]}><CodeEditor height="420px" readOnly={!canWrite || busy} /></Form.Item>
     </Form> : <Empty description={t('选择或新增一个公共函数。')} />}
    </Space>
   </Modal>

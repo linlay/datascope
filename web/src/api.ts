@@ -225,6 +225,7 @@ export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {
+	ddl_enabled?:boolean;
  schema_identity_version?:number;
  schema_editable?:boolean;
  views?:ViewDefinition[]; query_view_id?:string;
@@ -337,3 +338,11 @@ export async function platformRequest<T>(path: string, init?: RequestInit): Prom
  return data as T;
 }
 export const managementCall=<T>(action:string,args:Record<string,unknown>={})=>platformRequest<T>('/api/management/call',{method:'POST',body:JSON.stringify({action,arguments:args})});
+
+export interface DDLColumn {name:string;type:string;not_null:boolean;default?:string;primary_key:number;hidden:number;sql?:string}
+export interface DDLDefinition {sql?:string;columns?:Partial<DDLColumn>[];constraints?:string[];unique?:boolean;where?:string;strict?:boolean;without_rowid?:boolean}
+export interface DDLObject {object_type:string;name:string;parent_name:string;sql:string;definition:DDLDefinition;dependencies:string[]}
+export interface DDLChange {operation:'create'|'update'|'rename'|'drop';object_type:string;name:string;parent_name?:string;new_name?:string;definition?:DDLDefinition}
+export interface DDLDifference {object_type:string;name:string;before:string;after:string}
+export interface DDLPlan {plan_id:string;sql:string[];diff:DDLDifference[];warnings:string[];requires_rebuild:boolean}
+export interface DDLExecution {execution_id:string;plan_id:string;actor_id:number;status:string;started_at:string;finished_at?:string;error?:string;backup_id?:string;discovery_status:string;sql:string[];diff:DDLDifference[]}

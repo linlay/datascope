@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect } from 'react';
 import { Modal } from 'antd';
 
-export type Page = 'database' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql-workbench' | 'table' | 'mcp' | 'audit';
+export type Page = 'database' | 'ddl' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql-workbench' | 'table' | 'mcp' | 'audit';
 export interface Route { page: Page; selection?: string; params: URLSearchParams }
 // Public paths describe the page's purpose; internal page keys remain stable.
 const pagePaths: Record<Page, string> = {
  database: 'database-configuration',
+ ddl: 'ddl-management',
  tables: 'query-configuration',
  actions: 'action-configuration',
  views: 'view-configuration',

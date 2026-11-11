@@ -73,7 +73,7 @@ func probeStore(driverName string, c *probeConn) *Store {
 }
 
 func TestNetworkExecutionUsesNativeBindingsAndReadOnlyTransaction(t *testing.T) {
-	for _, driverName := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, driverName := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(driverName, func(t *testing.T) {
 			c := &probeConn{}
 			s := probeStore(driverName, c)
@@ -128,7 +128,7 @@ func TestUnsupportedRawFunctionNeverReachesDriver(t *testing.T) {
 }
 
 func TestActionNetworkTransactionUsesNativeWriteBindings(t *testing.T) {
-	for _, name := range []string{"mysql", "postgresql", "oracle", "dameng"} {
+	for _, name := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		t.Run(name, func(t *testing.T) {
 			c := &probeConn{}
 			s := probeStore(name, c)

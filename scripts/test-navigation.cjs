@@ -40,6 +40,7 @@ for (const bookmark of ['sql', 'sql-workbench', 'query-workbench']) {
 }
 assert.equal(readRoute('#/knowledge-workbench?database=default').page, 'knowledge-workbench');
 const configurationPaths = {
+ ddl: 'ddl-management',
  database: 'database-configuration', tables: 'query-configuration',
  actions: 'action-configuration', views: 'view-configuration',
  knowledge: 'knowledge-configuration', mcp: 'mcp-configuration',
