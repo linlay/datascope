@@ -159,6 +159,12 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    </Card>
    <Card className="action-editor-panel" title={<Space>{creating ? t('新增动作') : selected?.title || t('选择动作')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
     {draft && <Space wrap>
+     {draft && canWrite && currentDB.permissions?.includes('config.read') && !locked && !remoteChanged &&
+      <DraftAssistant key={JSON.stringify([currentDB.id, selectedName, creating])} db={currentDB} name={creating ? undefined : selectedName} draft={draft} rows={parameters}
+       apply={(script, params) => {
+        if (script !== undefined) { form.setFieldValue('script', script); setDraft({ ...draft, script }); }
+        if (params) setParameters(parameterRows(params));
+       }} />}
     <IconButton label={t('试运行')} help={dirty ? t('保存后可试运行') : undefined} icon={<PlayCircleOutlined />} disabled={!canTrial || locked} onClick={() => { setTrialName(selectedName); setResult(undefined); setTrialError(''); }} />
     <IconButton label={t('复制')} icon={<CopyOutlined />} disabled={!canWrite || dirty || creating || locked} onClick={copy} />
     <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={!canWrite || locked} onClick={remove} />
@@ -167,12 +173,6 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<IconButton label={t('刷新')} icon={<ReloadOutlined />} onClick={reload} />} />}
-     {draft && canWrite && currentDB.permissions?.includes('config.read') && !locked && !remoteChanged &&
-      <DraftAssistant key={JSON.stringify([currentDB.id, selectedName, creating])} db={currentDB} name={creating ? undefined : selectedName} draft={draft} rows={parameters}
-       apply={(script, params) => {
-        if (script !== undefined) { form.setFieldValue('script', script); setDraft({ ...draft, script }); }
-        if (params) setParameters(parameterRows(params));
-       }} />}
      {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
       <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
       <div className="action-fields-grid">
