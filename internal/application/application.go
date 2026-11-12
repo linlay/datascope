@@ -3,6 +3,7 @@ package application
 
 import (
 	"context"
+	"datascope-server/internal/ai"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/ddl"
@@ -19,6 +20,7 @@ import (
 )
 
 type Service struct {
+	Model            ai.Client
 	Management       *management.Store
 	Catalog          *catalog.Catalog
 	WebURL           string
@@ -27,6 +29,7 @@ type Service struct {
 	SecureCookies    bool
 }
 type Input struct {
+	Assistant      *AssistantInput                `json:"assistant,omitempty"`
 	ObjectType     string                         `json:"object_type,omitempty"`
 	ParentName     string                         `json:"parent_name,omitempty"`
 	PlanID         string                         `json:"plan_id,omitempty"`
@@ -179,6 +182,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, errors.New("需要 action 名称，请先调用 list_actions")
 		}
 		return s.InspectAction(ctx, in.DatabaseID, in.Name)
+	case "assist_action":
+		return s.assistAction(ctx, in)
 	case "try_action":
 		if e := require("action.write"); e != nil {
 			return nil, e
@@ -346,6 +351,17 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, e
 		}
 		return s.DatabaseView(ctx, *d), nil
+	case "edit_database_connection", "test_edited_database_connection":
+		if !u.SystemAdmin {
+			return nil, management.ErrDenied
+		}
+		if in.Database == nil || in.Database.ID != in.DatabaseID {
+			return nil, errors.New("需要标识一致的 database 参数")
+		}
+		if err := s.Catalog.EditConnection(ctx, in.DatabaseID, in.Database.Revision, in.Database.Connection, in.Password, action == "edit_database_connection"); err != nil {
+			return nil, err
+		}
+		return map[string]bool{"connected": true}, nil
 	case "remove_database":
 		if !u.SystemAdmin {
 			return nil, management.ErrDenied

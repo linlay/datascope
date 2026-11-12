@@ -80,12 +80,19 @@ export function AuditPage({databases}:{databases:Database[]}){
  };
  const advancedCount=([query.filters.actor_id,query.filters.kind,query.filters.source,query.filters.tool,query.filters.request_id] as unknown[]).filter(value=>value!==undefined&&value!=='').length;
  const actorName=(id:number)=>id===0?t('系统任务'):(result?.actor_names[String(id)]||`${t('用户')} #${id}`);
+ const eventActor=(event:AuditEvent)=>{
+  if(event.business_username)return event.subject_id?`${event.business_username} · #${event.subject_id}`:event.business_username;
+  if(event.actor_id)return actorName(event.actor_id);
+  if(event.subject_id)return `${t('业务身份')} #${event.subject_id}`;
+  return event.kind==='mcp.request'?'—':actorName(0);
+ };
  const dbName=(id:string)=>id?(databases.find(db=>db.id===id)?.name??id):t('平台操作');
  const detail=(event:AuditEvent)=><Space orientation="vertical" style={{width:'100%'}} size="middle">
   <Descriptions size="small" column={{xs:1,md:3}} items={[
    {key:'request',label:t('请求 ID'),children:<Typography.Text copyable>{event.request_id}</Typography.Text>},
    {key:'database',label:t('数据库'),children:dbName(event.database_id)},
-   {key:'actor',label:t('操作用户'),children:actorName(event.actor_id)},
+   {key:'actor',label:t('操作用户'),children:eventActor(event)},
+   ...(event.business_account_id?[{key:'account',label:t('业务账号 ID'),children:event.business_account_id}]:[]),
    {key:'subject',label:t('业务身份'),children:event.subject_id||'—'},
    {key:'tool',label:t('工具'),children:event.tool||'—'},
    {key:'version',label:t('策略版本'),children:event.policy_version||'—'},
@@ -120,7 +127,7 @@ export function AuditPage({databases}:{databases:Database[]}){
    <Table<AuditEvent> rowKey="id" size="small" loading={busy} dataSource={result?.items??[]} scroll={{x:1100}} locale={{emptyText:<Empty description={t('没有符合条件的日志')}/>}} pagination={{current:query.page,pageSize:query.size,total:result?.total??0,showSizeChanger:true,pageSizeOptions:[20,50,100,200],showTotal:total=>t('共 {count} 条',{count:total}),onChange:(page,size)=>setQuery(old=>({...old,page:size===old.size?page:1,size}))}} columns={[
     {title:t('时间'),dataIndex:'started_at',width:180,render:value=>new Date(value).toLocaleString()},
     {title:t('数据库'),dataIndex:'database_id',width:150,render:dbName},
-    {title:t('操作用户'),dataIndex:'actor_id',width:130,render:actorName},
+    {title:t('操作用户'),dataIndex:'actor_id',width:160,render:(_,event)=>eventActor(event)},
     {title:t('来源'),dataIndex:'source',width:130,render:value=>t(sourceLabels[value]??value)},
     {title:t('操作类型'),dataIndex:'kind',render:kind=><Space orientation="vertical" size={0}><Typography.Text>{t(kindLabels[kind]??kind)}</Typography.Text>{kindLabels[kind]&&<Typography.Text type="secondary" className="mono">{kind}</Typography.Text>}</Space>},
     {title:t('状态'),dataIndex:'status',width:100,render:status=><Tag color={status==='success'?'green':status==='failed'?'red':status==='running'?'blue':'orange'}>{t(statusLabels[status]??status)}</Tag>},

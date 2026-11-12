@@ -466,3 +466,25 @@ details > summary {
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-tab { padding-block: 4px; font-size: 14px; line-height: 24px; }
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-ink-bar { height: 2px; }
 .workbench-mode-tabs > .ant-tabs-nav .ant-tabs-extra-content { display: flex; align-items: center; }
+
+.user-guide { line-height: 1.75; overflow-wrap: anywhere; }
+.user-guide pre { overflow-x: auto; padding: 12px; background: rgba(128,128,128,.1); border-radius: 6px; }
+.user-guide table { border-collapse: collapse; width: 100%; }
+.user-guide th, .user-guide td { border: 1px solid rgba(128,128,128,.35); padding: 6px 10px; text-align: start; }
+.assistant-comparison { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:12px; }
+.assistant-comparison pre { overflow:auto; max-height:320px; padding:10px; background:var(--ant-color-fill-quaternary); border:1px solid var(--ant-color-border-secondary); }
+.assistant-comparison .added { background:rgba(60,170,91,.17); }
+.assistant-comparison .removed { background:rgba(205,72,66,.15); }
+
+.action-assistant-drawer .ant-drawer-section { background:#fff; }
+:root[data-theme='dark'] .action-assistant-drawer .ant-drawer-section { background:#202024; }
+.action-assistant-drawer .ant-drawer-body { padding:20px; }
+.action-assistant-drawer .ant-drawer-footer { padding:16px 20px; }
+.assistant-chat { display:flex; flex-direction:column; gap:24px; margin:20px 0; }
+.assistant-user { margin-left:36px; padding:12px 16px; border-radius:12px; background:var(--ant-color-primary-bg); white-space:pre-wrap; overflow-wrap:anywhere; }
+.assistant-answer { display:flex; flex-direction:column; gap:12px; margin-top:16px; min-width:0; }
+.assistant-prose { white-space:pre-wrap; overflow-wrap:anywhere; }
+.assistant-prose p { margin:8px 0; }
+.assistant-empty { color:var(--ant-color-text-secondary); }
+.assistant-proposal { border-top:1px solid var(--ant-color-border-secondary); padding-top:12px; }
+@media (max-width:600px) { .action-assistant-drawer .assistant-comparison { grid-template-columns:1fr; } }

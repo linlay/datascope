@@ -29,6 +29,7 @@ type ActionResponse struct {
 	ConfirmationURL   string          `json:"confirmation_url,omitempty"`
 }
 type actionPayload struct {
+	TrialFailure          string          `json:"trial_failure,omitempty"`
 	Name                  string          `json:"name"`
 	Arguments             map[string]any  `json:"arguments"`
 	UserID                int64           `json:"user_id"`
@@ -217,6 +218,9 @@ func (s *Service) invokeAction(ctx context.Context, database, name, requestID st
 			return nil, e
 		}
 		res := &ActionResponse{Status: "denied", Message: e.Error()}
+		if dryRun {
+			p.TrialFailure = trialFailure(e)
+		}
 		p.Response = res
 		data, _ = json.Marshal(p)
 		if err := s.Management.FinishAction(rec, "running", "denied", string(data)); err != nil {

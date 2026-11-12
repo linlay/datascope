@@ -106,6 +106,16 @@ function main(params, context) {
 
 实际迁移前会备份逐库管理配置，通过 revision 检查一次保存全部脚本；重复迁移无变更。不提交证券业务数据，不重装视图或重新授权账号。源码升级后需构建并重启 API/MCP 服务，使新脚本由新执行器运行。
 
+## 动作 AI 助手
+
+admin-api 的 `DATASCOPE_AI_ENDPOINT` 可填写以 `/v1` 结尾的网关基址或完整的 Chat Completions 端点，模型需支持 JSON 对象响应。`DATASCOPE_AI_MODEL` 选择模型，`DATASCOPE_AI_KEY` 仅配置在服务端，`DATASCOPE_AI_TIMEOUT` 默认为 120s，限制等待首个有效输出和后续连续空闲的时间。客户端请求流式响应，每段正文或推理增量都会重新计时。助手在流结束并校验完整 JSON 后返回建议。兼容完整 JSON 对象外层的 Markdown 代码块；流已明确返回 `finish_reason=stop` 时，允许正常 EOF 代替 `[DONE]`，并处理末尾省略空行的完整事件。缺少 stop、输出截断、过滤、工具调用替代正文、无正文、响应结构或建议字段错误分别返回可诊断原因，不返回提供商原始正文。`finish_reason=length` 时需提高提供商输出 token 上限或缩短需求；格式错误需核对模型的 JSON 输出能力。如果错误仍显示 30s，检查部署环境是否显式设置了旧值；改为 `DATASCOPE_AI_TIMEOUT=120s` 并重启 admin-api（容器环境变量变化时重新创建容器）。首段输出更慢时可进一步调整。空闲时限不是整次请求总时限，入口代理需覆盖完整生成及可能的一次自动修正；仓库 Docker 配置为管理调用预留 600s，外层网关也需相应配置。使用外部模型时，动作草稿与选定的结构元数据会发送到该端点。服务端记录模型、耗时、状态和提供商返回的 token 用量。
+
+控制台通过管理接口 `assist_action` 发送数据库标识、revision、已保存的动作名（新增时省略）和 assistant。draft 模式允许提交当前编辑中的定义，test 使用已保存定义生成示例，diagnose 用当前平台账号的 request_id 查找回滚回执。参数校验失败可从提交给平台的参数重建诊断。动作编辑器右上角的 AI 辅助打开右侧对话抽屉，展示公开的方案摘要、正文、请求状态与耗时；当前没有模型工具调用，不将后台请求伪装成模型工具调用。draft 可传 history（最多 12 条 user/assistant 消息，每条最多 100000 字节，总上下文仍限制 250000 字节），最近六轮成功对话作为非可信上下文传入，当前草稿为准。响应可包含 summary（公开方案摘要，不是内部推理）和 explanation。用户比较参数与脚本差异，选择采纳项，再确认应用到草稿；保存仍为独立操作。停止生成或草稿变化会丢弃未完成结果。助手不会调用脚本、保存或发布。生成建议经过参数、模块和静态 SQL 校验。若参数或脚本校验失败，且原始上下文、建议与错误反馈合计不超过 250000 字节，最多再请求模型修正一次；保留原系统契约与当前草稿，修正后重新校验参数、模块、静态 SQL 和新增特权读取。不会执行脚本，不重试提供商错误，也不放宽权限校验。动作 SQL 使用统一解析器语法子集，不支持 PostgreSQL 的 `ILIKE` / `NOT ILIKE`；可使用 `LOWER(column) LIKE LOWER(${args.pattern})` / `NOT LIKE`，并在目标数据库验证排序规则与 Unicode 大小写行为。仍然校验失败时接口返回“AI 建议未通过动作参数或脚本校验”及底层具体原因，不返回可应用的建议。可将原因补充到编写需求中重新生成，或手工修改草稿。业务归属语义仍需作者审查并以不同身份试运行。
+
+其他业务场景可向应用服务注入同一个 `internal/ai.Client`，用自己的权限、提示词和输出类型调用 `Complete(ctx, ai.Request{Messages: ..., JSONObject: true})`，再校验返回内容。普通文本可省略 JSONObject。测试中用 `ai.Func` 实现固定或失败响应。术语提取的测试调用方位于 `internal/platform/terms_test.go`。
+
+离线验收使用 `go test ./internal/ai ./internal/action ./internal/platform`。浏览器闭环还需先运行 `npm --prefix web run build`，安装 Playwright 与 Chromium，设置 `DATASCOPE_ASSISTANT_BROWSER_NODE=node` 后执行 `go test ./internal/platform -run '^TestAssistantBrowser$' -count=1 -v`。可用 `DATASCOPE_PLAYWRIGHT` 指定模块路径、`DATASCOPE_CHROMIUM` 指定浏览器路径。测试启动隔离的 admin-api 和 SQLite 夹具，使用模拟模型。
+
 ## MCP 调用和人工确认
 
 ```json

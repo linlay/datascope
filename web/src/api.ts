@@ -326,7 +326,7 @@ export interface KnowledgeEntry {id:string;name:string;description:string}
 export interface KnowledgeSearch {items:KnowledgeEntry[];next_cursor?:string}
 export interface Knowledge {id:string;database_id:string;name:string;description:string;content?:string;published:boolean;revision:number}
 
-export interface AuditEvent {id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
+export interface AuditEvent {business_username?:string;business_account_id?:string;id:string;request_id:string;actor_id:number;subject_id:number;database_id:string;source:string;tool:string;kind:string;status:string;original_sql?:string;rewritten_sql?:string;executed_sql?:string;binds?:unknown;error?:string;started_at:string;finished_at?:string;rows:number;truncated:boolean;detail?:unknown;policy_version:number}
 export interface AuditFilters {database_id?:string;platform_only?:boolean;request_id?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;query?:string;started_from?:string;started_to?:string}
 export interface AuditResult {items:AuditEvent[];total:number;limit:number;offset:number;kinds:string[];sources:string[];actors:number[];actor_names:Record<string,string>}
 

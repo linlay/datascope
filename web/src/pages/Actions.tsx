@@ -3,10 +3,12 @@ import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, ReloadO
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
 import { databases, managementCall, type Database, type ActionDefinition } from '../api';
 import { ActionLibraries } from '../components/ActionLibraries';
+import { DraftAssistant } from '../components/ActionAssistant';
 import { CodeEditor } from '../components/CodeEditor';
 import { PublicationSwitch } from '../components/PublicationSwitch';
 import { ActionConfirmationHelp } from '../components/ActionConfirmationHelp';
 import { IconButton, SaveButton } from '../components/IconButton';
+import { UserGuide } from '../components/UserGuide';
 import { HelpTip } from '../components/HelpTip';
 import { ParameterEditor, parameterMap, parameterRows, type ParameterRow } from '../components/ParameterEditor';
 import { useI18n } from '../ui/preferences';
@@ -157,6 +159,12 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    </Card>
    <Card className="action-editor-panel" title={<Space>{creating ? t('新增动作') : selected?.title || t('选择动作')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
     {draft && <Space wrap>
+     {draft && canWrite && currentDB.permissions?.includes('config.read') && !locked && !remoteChanged &&
+      <DraftAssistant key={JSON.stringify([currentDB.id, selectedName, creating])} db={currentDB} name={creating ? undefined : selectedName} draft={draft} rows={parameters}
+       apply={(script, params) => {
+        if (script !== undefined) { form.setFieldValue('script', script); setDraft({ ...draft, script }); }
+        if (params) setParameters(parameterRows(params));
+       }} />}
     <IconButton label={t('试运行')} help={dirty ? t('保存后可试运行') : undefined} icon={<PlayCircleOutlined />} disabled={!canTrial || locked} onClick={() => { setTrialName(selectedName); setResult(undefined); setTrialError(''); }} />
     <IconButton label={t('复制')} icon={<CopyOutlined />} disabled={!canWrite || dirty || creating || locked} onClick={copy} />
     <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={!canWrite || locked} onClick={remove} />
@@ -174,7 +182,7 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
        <Form.Item name="view_id" label={t("关联视图")}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
        <Form.Item name="confirm" label={<Space size={4}>{t('人工确认')}<ActionConfirmationHelp /></Space>} valuePropName="checked"><Switch /></Form.Item>
       </div>
-      <Form.Item name="script" label={<Space size={4}>JavaScript · main(params, context)<HelpTip label={t('动作代码')}>{t('db.session() 连接当前数据库；使用 query/queryOne/update 和静态 SQL。动作自行检查业务权限，人工确认动作先预览再确认。')}{' '}{t('使用 const { fn } = require("./库名称") 引用当前数据库的公共函数。')}</HelpTip></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
+      <Form.Item name="script" label={<Space size={4}>JavaScript · main(params, context)<HelpTip label={t('动作代码')}>{t('db.session() 连接当前数据库；使用 query/queryOne/update 和静态 SQL。动作自行检查业务权限，人工确认动作先预览再确认。')}{' '}{t('使用 const { fn } = require("./库名称") 引用当前数据库的公共函数。')}</HelpTip><UserGuide scriptReference/></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
       <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
      </Form> : <Empty description={t('从左侧选择动作，或新增一个动作。')} />}
     </Space>
