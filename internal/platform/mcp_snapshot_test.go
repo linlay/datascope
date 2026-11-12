@@ -79,12 +79,25 @@ func TestMCPRequestSnapshotReadsOnceAndObservesChanges(t *testing.T) {
 		{`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"describe_table","arguments":{"table":"items"}}}`, "metadata_describe"},
 	} {
 		counts = call("/mcp/default", 200, tc.body)
-		if counts["query_initialize"] != 1 || counts["store_open"] != 1 || counts["service_initialize"] != 1 || counts[tc.stage] < 1 {
-			t.Fatalf("missing metadata initialization/timing: %v", counts)
+		if counts["query_initialize"] != 1 || counts["store_open"] != 0 || counts["service_initialize"] != 0 || counts[tc.stage] != 1 {
+			t.Fatalf("metadata did not reuse service or read fresh metadata: %v", counts)
 		}
 	}
 	// The same handler must observe disabling, re-enabling and route changes on
 	// the next HTTP request, rather than retaining configuration across requests.
+	d, err = f.c.Get("default")
+	must(t, err)
+	d.Name = "Changed metadata configuration"
+	must(t, f.c.Save(f.ctx, *d))
+	metadata := `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"list_tables","arguments":{}}}`
+	counts = call("/mcp/default", 200, metadata)
+	if counts["store_open"] != 1 || counts["service_initialize"] != 1 || counts["metadata_tables"] != 1 {
+		t.Fatalf("metadata reused stale configuration: %v", counts)
+	}
+	counts = call("/mcp/default", 200, metadata)
+	if counts["store_open"] != 0 || counts["metadata_tables"] != 1 {
+		t.Fatalf("metadata lease was not cached: %v", counts)
+	}
 	d, err = f.c.Get("default")
 	must(t, err)
 	d.MCPEnabled = false

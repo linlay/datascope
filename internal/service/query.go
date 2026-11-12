@@ -61,13 +61,13 @@ func New(ctx context.Context, st *store.Store, cfg *rewrite.Config, asOf time.Ti
 		if len(pol.Columns) == 0 {
 			continue
 		}
-		schema, err := st.Describe(ctx, pol.Table)
+		columns, err := st.ValidationColumns(ctx, pol.Table)
 		if err != nil {
 			return nil, err
 		}
 		known := map[string]bool{}
-		for _, c := range schema.Columns {
-			key := c.Name
+		for _, name := range columns {
+			key := name
 			if st.Driver() == "sqlite" {
 				key = strings.ToLower(key)
 			}

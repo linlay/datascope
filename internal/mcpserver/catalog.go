@@ -190,7 +190,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				var current *service.QueryService
 				var release func()
 				var hit bool
-				if call.Params.Name == "query" || call.Params.Name == "raw_query" {
+				if call.Params.Name == "query" || call.Params.Name == "raw_query" || call.Params.Name == "list_tables" || call.Params.Name == "describe_table" {
 					current, release, hit, err = c.AcquireQuery(ctx, d)
 				} else {
 					current, err = c.Open(ctx, d)

@@ -11,8 +11,8 @@ import (
 	"datascope-server/internal/service"
 )
 
-// Only query/raw_query may lease these immutable services. Metadata discovery
-// and actions retain request-local stores because they can mutate store state.
+// Query and read-only MCP metadata tools may lease these immutable services.
+// Discovery and actions retain request-local stores because they can mutate state.
 type queryEntry struct {
 	key            [32]byte
 	ready          chan struct{}
