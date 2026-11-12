@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Form, Input, InputNumber, Radio, Space, Upload, message } from 'antd';
+import { useEffect, useState } from 'react';
+import { Button, Form, Input, Radio, Space, Upload, message } from 'antd';
 import { useI18n } from '../ui/preferences';
 
 export function OneIDKeyInput({ jwksUrl, publicKeyPem, onChange, disabled }: {
@@ -26,31 +26,4 @@ export function OneIDKeyInput({ jwksUrl, publicKeyPem, onChange, disabled }: {
    </Space>
   </Form.Item>}
  </>;
-}
-
-// Emit invalid partial rows as invalid config, so Save cannot silently drop a binding.
-export function IdentityMappingsInput({ value, onChange, disabled }: {
- value?: Record<string, number>; onChange?: (value: Record<string, number> | undefined) => void; disabled?: boolean;
-}) {
- const t = useI18n();
- const [rows, setRows] = useState(() => Object.entries(value || {}));
- const last = useRef(JSON.stringify(value));
- useEffect(() => { const incoming = JSON.stringify(value); if (incoming !== last.current) { setRows(Object.entries(value || {})); last.current = incoming; } }, [value]);
- const duplicate = new Set(rows.map(([external]) => external)).size !== rows.length;
- const emit = (next: [string, number][]) => {
-  setRows(next);
-  const duplicated = new Set(next.map(([external]) => external)).size !== next.length;
-  const updated = next.length ? duplicated ? { '': 0 } : Object.fromEntries(next) : undefined;
-  last.current = JSON.stringify(updated); onChange?.(updated);
- };
- return <Space orientation="vertical" style={{ width: '100%' }}>
-  <Alert type="info" showIcon title={t('配置映射后，仅已登记的企业身份可访问本库；不配置时直接使用业务身份字段值。')} />
-  {rows.map(([external, id], index) => <Space key={index} wrap>
-   <Input disabled={disabled} aria-label={t('企业身份值') + ` ${index + 1}`} placeholder={t('企业工号，如 E1001')} value={external} onChange={e => emit(rows.map((row, i) => i === index ? [e.target.value, id] : row))} />
-   <span>→</span><InputNumber disabled={disabled} aria-label={t('本库员工编号') + ` ${index + 1}`} min={1} precision={0} placeholder={t('本库员工编号')} value={id || undefined} onChange={v => emit(rows.map((row, i) => i === index ? [external, v || 0] : row))} />
-   <Button disabled={disabled} danger onClick={() => emit(rows.filter((_, i) => i !== index))}>{t('移除')}</Button>
-  </Space>)}
-  {duplicate && <Alert type="error" title={t('企业身份值不能重复')} />}
-  <Button disabled={disabled} onClick={() => emit([...rows, ['', 0]])}>{t('增加身份映射')}</Button>
- </Space>;
 }

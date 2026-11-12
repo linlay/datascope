@@ -39,13 +39,12 @@ type AuthProvider struct {
 	HeaderName      string `json:"header_name,omitempty" yaml:"headerName,omitempty"`
 }
 type AuthPolicy struct {
-	BusinessIDMappings map[string]int64 `json:"business_id_mappings,omitempty" yaml:"businessIdMappings,omitempty"`
-	ID                 string           `json:"id" yaml:"id"`
-	Name               string           `json:"name" yaml:"name"`
-	Mode               string           `json:"mode" yaml:"mode"`
-	ProviderID         string           `json:"provider_id,omitempty" yaml:"providerId,omitempty"`
-	Permissions        []string         `json:"permissions,omitempty" yaml:"permissions,omitempty"`
-	BusinessUserID     int64            `json:"business_user_id,omitempty" yaml:"businessUserId,omitempty"`
+	ID             string   `json:"id" yaml:"id"`
+	Name           string   `json:"name" yaml:"name"`
+	Mode           string   `json:"mode" yaml:"mode"`
+	ProviderID     string   `json:"provider_id,omitempty" yaml:"providerId,omitempty"`
+	Permissions    []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	BusinessUserID int64    `json:"business_user_id,omitempty" yaml:"businessUserId,omitempty"`
 }
 type AuthBinding struct {
 	TargetType string `json:"target_type" yaml:"targetType"`
@@ -249,9 +248,6 @@ func validateAuth(cfg AuthConfig) error {
 	}
 	policies := map[string]AuthPolicy{}
 	for _, p := range cfg.Policies {
-		if err := validateIdentityMappings(p); err != nil {
-			return err
-		}
 		if !sourceID.MatchString(p.ID) || p.Name == "" || !slices.Contains([]string{"ACCOUNT", "OAUTH", "NONE", "ONEID", "TOKEN"}, p.Mode) {
 			return fmt.Errorf("认证策略无效")
 		}
@@ -481,9 +477,6 @@ func validateDatabaseAuth(connection DatabaseAuthConnection, providers []AuthPro
 	return validateBusinessAuth(*connection.Access, providers)
 }
 func validateBusinessAuth(p AuthPolicy, providers []AuthProvider) error {
-	if err := validateIdentityMappings(p); err != nil {
-		return err
-	}
 	if !slices.Contains([]string{"NONE", "ACCOUNT", "OAUTH", "ONEID", "TOKEN"}, p.Mode) {
 		return fmt.Errorf("认证方式无效")
 	}
@@ -527,20 +520,6 @@ func externalID(provider, subject string) int64 {
 	return int64(binary.BigEndian.Uint64(sum[:8])&((1<<52)-1)) + 1
 }
 
-func validateIdentityMappings(p AuthPolicy) error {
-	if len(p.BusinessIDMappings) > 10000 {
-		return fmt.Errorf("业务身份映射最多10000项")
-	}
-	if len(p.BusinessIDMappings) > 0 && p.Mode != "ONEID" {
-		return fmt.Errorf("业务身份映射仅用于 OneID 策略")
-	}
-	for external, id := range p.BusinessIDMappings {
-		if external == "" || strings.TrimSpace(external) != external || len(external) > 256 || id <= 0 {
-			return fmt.Errorf("业务身份映射需要非空企业身份和正整数本库员工编号")
-		}
-	}
-	return nil
-}
 func (r ResolvedAuth) Identity(database string, claims map[string]any) (BusinessAccount, error) {
 	subjectKey := r.Provider.SubjectClaim
 	if subjectKey == "" {
@@ -555,13 +534,6 @@ func (r ResolvedAuth) Identity(database string, claims map[string]any) (Business
 		key = "employee_id"
 	}
 	value := claimString(claims[key])
-	if len(r.Policy.BusinessIDMappings) > 0 {
-		mapped, ok := r.Policy.BusinessIDMappings[value]
-		if !ok || mapped <= 0 {
-			return BusinessAccount{}, fmt.Errorf("企业身份未配置本库业务员工映射")
-		}
-		value = strconv.FormatInt(mapped, 10)
-	}
 	if database == "" && value == "" {
 		value = "1"
 	}

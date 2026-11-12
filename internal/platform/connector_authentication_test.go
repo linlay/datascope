@@ -164,7 +164,7 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 	if strings.Contains(string(raw), "authorization_servers") {
 		t.Fatal("oneid advertised browser OAuth")
 	}
-	// Pin a PEM key in persisted source config, then bind an external staff ID.
+	// Pin a PEM key and use the numeric staff ID directly.
 	pinned := p
 	pinned.JWKSURL = ""
 	pinned.PublicKeyPEM = publicPEM
@@ -172,18 +172,15 @@ func TestConnectorOneIDAndTokenMCP(t *testing.T) {
 	configure("ONEID", pinned)
 	d, err := f.c.Get("default")
 	must(t, err)
-	d.Authentication.Access.BusinessIDMappings = map[string]int64{"external-sales": 10}
-	must(t, f.c.Save(f.ctx, *d))
-	query(sign(map[string]any{"staffno": "external-sales", "name": "Sales demo"}, "RS256"))
+	query(sign(map[string]any{"staffno": "10", "name": "Sales demo"}, "RS256"))
 	probe("Authorization", "Bearer "+sign(map[string]any{"staffno": "unmapped"}, "RS256"), 401)
-	probe("Authorization", "Bearer "+sign(map[string]any{"staffno": "10"}, "RS256"), 401)
-	// Switching back to JWKS preserves the same mapping and scoped result.
+	// Switching back to JWKS preserves the same direct identity and scoped result.
 	d, err = f.c.Get("default")
 	must(t, err)
 	p.BusinessIDClaim = "staffno"
 	d.Authentication.Provider = &p
 	must(t, f.c.Save(f.ctx, *d))
-	query(sign(map[string]any{"staffno": "external-sales"}, "RS256"))
+	query(sign(map[string]any{"staffno": "10"}, "RS256"))
 	key := management.AuthProvider{ID: "key", Name: "API key", Type: "STATIC_TOKEN", Enabled: true, SecretEnv: "DATASCOPE_AUTH_CONNECTOR_KEY"}
 	configure("TOKEN", key)
 	probe("", "", 401)

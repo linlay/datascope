@@ -50,7 +50,7 @@ func TestComplexSQLAndDataIntegrity(t *testing.T) {
 		if err != nil || raw.RowCount == 0 {
 			t.Fatalf("raw example %s: %+v %v", ex.Label, raw, err)
 		}
-		for _, id := range []int64{1, 2, 3, 9, 39, 69} {
+		for _, id := range []int64{1, 2, 3, 9, 107078, 900330} {
 			got, err := svc.Query(ctx, ex.SQL, id, 5)
 			if err != nil {
 				t.Fatalf("%s user=%d: %v", ex.Label, id, err)
@@ -87,7 +87,7 @@ func TestPermissionsCannotBypassViaChildrenCTEOrUnion(t *testing.T) {
 	for _, tc := range []struct {
 		id     int64
 		filter string
-	}{{1, "1=1"}, {2, "o.region_id=1"}, {3, "o.region_id=2"}, {9, "o.office_id=1"}, {39, "o.owner_employee_id=39"}, {69, "o.owner_employee_id=69"}} {
+	}{{1, "1=1"}, {2, "o.region_id=1"}, {3, "o.region_id=2"}, {9, "o.office_id=1"}, {107078, "o.owner_employee_id=107078"}, {900330, "o.owner_employee_id=900330"}} {
 		for table, join := range map[string]string{
 			"sales_orders":        "sales_orders o",
 			"sales_order_items":   "sales_order_items x JOIN sales_orders o ON o.id=x.order_id",
@@ -126,7 +126,7 @@ func TestPermissionsCannotBypassViaChildrenCTEOrUnion(t *testing.T) {
 			t.Fatalf("sensitive column allowed: %s", q)
 		}
 	}
-	r, err := svc.Query(ctx, "SELECT * FROM customer_contacts", 39, 1)
+	r, err := svc.Query(ctx, "SELECT * FROM customer_contacts", 107078, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPermissionsCannotBypassViaChildrenCTEOrUnion(t *testing.T) {
 	if _, err = svc.Query(ctx, "SELECT COUNT(*) FROM products", 99999, 1); err == nil {
 		t.Fatal("unknown employee allowed")
 	}
-	if _, err = svc.RewriteWithParameters(ctx, "SELECT COUNT(*) FROM sales_orders", 39, map[string]any{"userId": int64(1)}); err == nil {
+	if _, err = svc.RewriteWithParameters(ctx, "SELECT COUNT(*) FROM sales_orders", 107078, map[string]any{"userId": int64(1)}); err == nil {
 		t.Fatal("forged user identity allowed")
 	}
 }
@@ -175,7 +175,7 @@ func TestInstallPreservesExistingConfigurationAndPasswords(t *testing.T) {
 	if !d.MCPEnabled || len(d.Config.Tables) != 27 || len(d.SQLExamples) != 10 {
 		t.Fatalf("incomplete install %+v", d)
 	}
-	account, err := m.AuthenticateBusiness(ctx, d.ID, "S0039", "regional-test-password")
+	account, err := m.AuthenticateBusiness(ctx, d.ID, "107078", "regional-test-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestInstallPreservesExistingConfigurationAndPasswords(t *testing.T) {
 	if again.Revision != revision || again.Name != "自定义名称" || again.MCPEnabled {
 		t.Fatal("reinstall overwrote configuration")
 	}
-	saved, err := m.BusinessAccount(ctx, d.ID, "S0039")
+	saved, err := m.BusinessAccount(ctx, d.ID, "107078")
 	if err != nil || saved.Active {
 		t.Fatalf("reinstall reactivated account: %+v %v", saved, err)
 	}

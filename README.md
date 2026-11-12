@@ -188,7 +188,7 @@ HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` �
 
 业务 MCP 对应 Platform 的 `none`、`mcp`、`oneid`、`token` 四种接入模式，配置与示例见 [业务 MCP 认证](docs/business-authentication.md)。企业 SSO 使用 `OAUTH` / `mcp`，跳转 SSO 登录后使用访问令牌；企业 OneID 使用 `ONEID` / `oneid`，客户端直接发送自身的 ID Token。全局提供方可由业务库引用，也可使用本库独立配置。普通账号支持平台账号、逐库演示账号、企业账号验证接口；OAuth 支持演示与企业提供方。平台管理登录继续使用普通账号或企业 OAuth。
 
-OneID 验签支持 JWKS 地址或直接导入／粘贴 RSA `publickey.pem`，两者二选一。企业身份字段可通过本库允许列表映射到内部员工编号；姓名读取 Token 的 `name`，数据范围继续由本库行权限决定。
+OneID 验签支持 JWKS 地址或直接导入／粘贴 RSA `publickey.pem`，两者二选一。企业身份字段直接作为业务库员工编号；姓名读取 Token 的 `name`，数据范围继续由本库行权限决定。
 
 演示账号的兼容 `authentication` 配置用于设置登录页名称和员工目录校验：
 

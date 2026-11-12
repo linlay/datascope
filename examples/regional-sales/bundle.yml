@@ -1,40 +1,40 @@
 accounts:
     - businessUserId: 1
-      name: S0001 演示员工
+      name: 陈俊杰
       permissions:
         - query
         - knowledge.read
       username: S0001
     - businessUserId: 2
-      name: S0002 演示员工
+      name: 谭梓睿
       permissions:
         - query
         - knowledge.read
       username: S0002
     - businessUserId: 3
-      name: S0003 演示员工
+      name: 任梦琪
       permissions:
         - query
         - knowledge.read
       username: S0003
     - businessUserId: 9
-      name: S0009 演示员工
+      name: 张承泽
       permissions:
         - query
         - knowledge.read
       username: S0009
-    - businessUserId: 39
-      name: S0039 演示员工
+    - businessUserId: 107078
+      name: 程梓睿
       permissions:
         - query
         - knowledge.read
-      username: S0039
-    - businessUserId: 69
-      name: S0069 演示员工
+      username: "107078"
+    - businessUserId: 900330
+      name: 蔡志诚
       permissions:
         - query
         - knowledge.read
-      username: S0069
+      username: "900330"
 database:
     authentication:
         type: local

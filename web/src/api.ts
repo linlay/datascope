@@ -221,7 +221,7 @@ export interface ActionSchema { type: string; additionalProperties: boolean; req
 export interface ActionDescription { view_id?:string; view_uri?:string; name:string;title:string;description:string;confirm:boolean;parameters?:ActionSchema }
 export interface ActionPreview { status:string;message?:string;result?:unknown;preview?:{result:unknown;writes:{sql:string;rows:number;binds:unknown[]}[]};sql?:unknown[] }
 export interface AuthProvider {id:string;name:string;type:string;enabled:boolean;issuer?:string;authorize_url?:string;token_url?:string;userinfo_url?:string;account_url?:string;client_id?:string;secret_env?:string;subject_claim?:string;username_claim?:string;business_id_claim?:string;jwks_url?:string;public_key_pem?:string;audience?:string;header_name?:string}
-export interface AuthPolicy {business_id_mappings?:Record<string,number>;id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'|'ONEID'|'TOKEN';provider_id?:string;permissions?:string[];business_user_id?:number}
+export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'|'ONEID'|'TOKEN';provider_id?:string;permissions?:string[];business_user_id?:number}
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {

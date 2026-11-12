@@ -16,6 +16,16 @@ make import-example EXAMPLE=regional-sales
 ```
 
 生成文件为 `data/regional_sales_demo.sqlite3`，脚本拒绝覆盖已有文件。
+客户采用带地域和行业的企业名称，员工和联系人使用中文姓名，商品包含品牌、规格和型号。演示数据说明集中放在本文和库说明中，业务记录不带“虚构客户”“演示型号”等占位标签。
+
+已有本地库可显式刷新展示数据：
+
+```sh
+python3 examples/regional-sales/generate.py --refresh-labels
+```
+
+刷新前通过 SQLite Backup 保存一致性备份到 `data/legacy/`。刷新只更新企业、人员、商品、组织和价目表名称及联系人信息；提交前校验其余字段摘要一致、外键和数据库完整性。主键、业务金额、时间、订单归属及员工权限范围保持原值。联系邮箱使用保留的 `.example` 域名。
+
 `bundle.yml`、`rewrite.yml`、`sql-examples.yml` 分别保存数据库与账号清单、静态权限 SQL 和10条工作台查询。通用导入器注册数据源、保存配置、发布知识并创建6个业务账号。
 安装前会在所有6个业务身份下执行示例，验证失败不会注册数据源。
 重复安装保留现有账号密码、停用状态、权限和自定义配置。
@@ -71,8 +81,8 @@ python3 examples/regional-sales/generate.py --db /tmp/regional-small.sqlite3 --o
 | S0002 | 2 | 华东大区 |
 | S0003 | 3 | 华南大区 |
 | S0009 | 9 | 上海中心分公司 |
-| S0039 | 39 | 上海中心销售员甲，仅本人的客户/订单/回款/目标 |
-| S0069 | 69 | 同公司销售员乙，仅本人的客户/订单/回款/目标 |
+| 107078 | 107078 | 上海中心销售员甲，仅本人的客户/订单/回款/目标 |
+| 900330 | 900330 | 同公司销售员乙，仅本人的客户/订单/回款/目标 |
 
 新账号初始密码由导入时 DATASCOPE_EXAMPLE_PASSWORD 提供。重复导入保留同目标已有库的全部配置，包括 OneID/SSO、账号密码、停用状态和自定义策略。
 
@@ -106,8 +116,8 @@ python3 examples/regional-sales/generate.py --db /tmp/regional-small.sqlite3 --o
 | `id` | INTEGER | 主键编号 |
 | `customer_id` | INTEGER | 客户编号 |
 | `name` | TEXT | 名称 |
-| `phone` | TEXT | 虚构联系电话（不向业务查询开放） |
-| `email` | TEXT | 虚构邮箱（不向业务查询开放） |
+| `phone` | TEXT | 联系电话（不向业务查询开放） |
+| `email` | TEXT | 联系邮箱（不向业务查询开放） |
 | `job_title` | TEXT | 联系人职务 |
 
 ### customers — 客户（3,000 行）
@@ -223,7 +233,7 @@ python3 examples/regional-sales/generate.py --db /tmp/regional-small.sqlite3 --o
 | `sku` | TEXT | 商品编码 |
 | `name` | TEXT | 名称 |
 | `category_id` | INTEGER | 商品分类编号 |
-| `brand` | TEXT | 虚构品牌 |
+| `brand` | TEXT | 品牌 |
 | `list_price_cents` | INTEGER | 商品目录价格（分） |
 | `standard_cost_cents` | INTEGER | 标准成本（分） |
 | `active` | INTEGER | 是否在职或启用 |

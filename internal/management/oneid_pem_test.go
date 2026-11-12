@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestOneIDPEMAndMappedIdentity(t *testing.T) {
+func TestOneIDPEMAndDirectIdentity(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +31,7 @@ func TestOneIDPEMAndMappedIdentity(t *testing.T) {
 	if err = validateAuthProvider(p); err != nil {
 		t.Fatal(err)
 	}
-	r := ResolvedAuth{Provider: p, Source: "DATABASE", Policy: AuthPolicy{Mode: "ONEID", Permissions: []string{"query", "knowledge.read"}, BusinessIDMappings: map[string]int64{"900039": 39}}}
+	r := ResolvedAuth{Provider: p, Source: "DATABASE", Policy: AuthPolicy{Mode: "ONEID", Permissions: []string{"query", "knowledge.read"}}}
 	sign := func(patch map[string]any) string {
 		claims := map[string]any{"iss": p.Issuer, "aud": p.Audience, "exp": time.Now().Add(time.Hour).Unix(), "sub": "external-subject", "staffno": "900039", "name": "演示用户", "roles": []string{"admin"}, "permissions": []string{"raw_query"}}
 		for k, v := range patch {
@@ -55,12 +55,12 @@ func TestOneIDPEMAndMappedIdentity(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if a.BusinessUserID != 39 || a.Username != "900039" || a.Name != "演示用户" || strings.Join(a.Permissions, ",") != "query,knowledge.read" {
+		if a.BusinessUserID != 900039 || a.Username != "900039" || a.Name != "演示用户" || strings.Join(a.Permissions, ",") != "query,knowledge.read" {
 			t.Fatalf("wrong trusted identity: %+v", a)
 		}
 	}
 	for name, patch := range map[string]map[string]any{
-		"unmapped": {"staffno": "900040"}, "missing identity": {"staffno": nil}, "cannot use local ID as bypass": {"staffno": "39"}, "expired": {"exp": time.Now().Add(-time.Minute).Unix()}, "wrong issuer": {"iss": "https://other.invalid"}, "wrong audience": {"aud": "other"}, "future nbf": {"nbf": time.Now().Add(time.Hour).Unix()}, "future iat": {"iat": time.Now().Add(time.Hour).Unix()}, "multiple aud without azp": {"aud": []string{p.Audience, "other"}}, "inactive": {"active": false},
+		"missing identity": {"staffno": nil}, "non-numeric identity": {"staffno": "external-sales"}, "expired": {"exp": time.Now().Add(-time.Minute).Unix()}, "wrong issuer": {"iss": "https://other.invalid"}, "wrong audience": {"aud": "other"}, "future nbf": {"nbf": time.Now().Add(time.Hour).Unix()}, "future iat": {"iat": time.Now().Add(time.Hour).Unix()}, "multiple aud without azp": {"aud": []string{p.Audience, "other"}}, "inactive": {"active": false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, e := r.VerifyBearer(context.Background(), "sales", sign(patch)); e == nil {
@@ -91,13 +91,12 @@ func TestOneIDPEMAndMappedIdentity(t *testing.T) {
 		t.Fatal("ambiguous runtime config accepted")
 	}
 	r.Provider = p
-	r.Policy.BusinessIDMappings = nil
 	a, err := r.VerifyBearer(context.Background(), "sales", token)
 	if err != nil || a.BusinessUserID != 900039 {
 		t.Fatalf("direct ID compatibility: %+v %v", a, err)
 	}
 	// Persisted fields survive both JSON and YAML, with enterprise IDs kept as strings.
-	cfg := DatabaseAuthConnection{Source: "DATABASE", Provider: &p, Access: &AuthPolicy{ID: "test", Name: "Test", Mode: "ONEID", ProviderID: p.ID, BusinessIDMappings: map[string]int64{"00900039": 39}}}
+	cfg := DatabaseAuthConnection{Source: "DATABASE", Provider: &p, Access: &AuthPolicy{ID: "test", Name: "Test", Mode: "ONEID", ProviderID: p.ID}}
 	for _, yamlMode := range []bool{false, true} {
 		var raw []byte
 		var e error
@@ -113,13 +112,13 @@ func TestOneIDPEMAndMappedIdentity(t *testing.T) {
 				e = json.Unmarshal(raw, &back)
 			}
 		}
-		if e != nil || back.Provider.PublicKeyPEM != p.PublicKeyPEM || back.Access.BusinessIDMappings["00900039"] != 39 {
+		if e != nil || back.Provider.PublicKeyPEM != p.PublicKeyPEM {
 			t.Fatalf("roundtrip: %s %v", raw, e)
 		}
 	}
 }
 
-func TestOneIDRejectsInvalidPublicKeysAndMappings(t *testing.T) {
+func TestOneIDRejectsInvalidPublicKeys(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -136,13 +135,5 @@ func TestOneIDRejectsInvalidPublicKeysAndMappings(t *testing.T) {
 		if _, err = parseOneIDPublicKey(raw); err == nil {
 			t.Fatal("invalid/weak/private key accepted")
 		}
-	}
-	for _, mapping := range []map[string]int64{{"": 39}, {" 900039": 39}, {"900039": 0}, {"900039": -1}} {
-		if err = validateIdentityMappings(AuthPolicy{Mode: "ONEID", BusinessIDMappings: mapping}); err == nil {
-			t.Fatal("bad mapping accepted")
-		}
-	}
-	if err = validateIdentityMappings(AuthPolicy{Mode: "NONE", BusinessIDMappings: map[string]int64{"x": 39}}); err == nil {
-		t.Fatal("mapping allowed for anonymous")
 	}
 }

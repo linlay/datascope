@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | 无需认证 | `none` | `NONE` | 配置的匿名业务身份及能力 |
 | SSO / MCP OAuth | `mcp` | `OAUTH` | 标准资源发现、浏览器跳转登录、授权码与 PKCE；企业 SSO 使用 `ENTERPRISE_OAUTH` 提供方 |
-| 企业 OneID | `oneid` | `ONEID` | 客户端直接提供自身已有的 ID Token，服务端验签并映射业务身份 |
+| 企业 OneID | `oneid` | `ONEID` | 客户端直接提供自身已有的 ID Token，服务端验签后直接读取业务身份 |
 | Token / API Key | `token` | `TOKEN` 或兼容的 `ACCOUNT` | 手工填写的 Bearer、API Key 或 Basic 账号密码 |
 
 策略枚举保留原有大写存储格式；旧 `ACCOUNT` 配置继续有效，在页面归入 Token 下的账号密码方式。Platform 的 token 表单只保存并发送凭据，不会调用账号接口自动换票。业务认证与平台管理登录分开，新增 ONEID/TOKEN 不用于平台管理登录或管理 MCP。
@@ -31,7 +31,7 @@
 
 服务端只接受 RS256，校验签名、精确 issuer/audience、必填 exp，以及存在时的 nbf/iat。多 audience 时要求 azp 与配置的 audience 一致。JWKS 模式只从管理员配置的地址获取公钥，不使用令牌中的 URL，不跟随重定向；最多缓存一分钟。公钥过期后获取失败则拒绝认证，未知 kid 不会触发无限刷新。PEM 模式可以在页面导入 `publickey.pem` 或直接粘贴公钥内容，支持单个 2048–8192 位 RSA 的 `PUBLIC KEY`（SPKI）或 `RSA PUBLIC KEY`（PKCS#1），不接受私钥、证书或多段公钥；配置保存公钥正文，不保存客户端文件路径。JWKS 与 PEM 必须且只能配置一种，验签失败不尝试另一来源。PEM 模式由管理员更新公钥，`kid` 不用于另行获取密钥。
 
-默认 `sub` 作为稳定主体，`employee_id` 映射到 SQL 行权限使用的正整数业务身份。姓名默认读取 `name`。可配置 `subjectClaim`、`usernameClaim`、`businessIdClaim`；例如员工编号放在其他 JWT 字段时填写该字段名。缺少合法业务身份时拒绝访问，不回退到匿名或平台管理员。签发方需要提供可映射的业务员工身份；只有姓名或邮箱的 ID Token 不能直接作为数字业务身份。若企业身份与业务库内部编号不同，可在本库策略 `authentication.access.businessIdMappings` 明确配置映射（企业身份原值 → 正整数本库员工编号）。启用非空映射后，它是允许列表：未登记的身份拒绝访问，不回退为直接编号；映射键保留原文，包括前导零。空映射保持旧行为，直接解析 `businessIdClaim` 为正整数。映射只适用于 OneID；权限仍由本库策略及业务库的员工/范围表决定。能力来自本库配置，不采用令牌中的 permissions。JWT 有效期内的身份撤销由签发方有效期及本库策略控制；没有在线 UserInfo 撤销查询。
+默认 `sub` 作为稳定主体，`employee_id` 直接作为 SQL 行权限使用的正整数员工编号。姓名默认读取 `name`。可配置 `subjectClaim`、`usernameClaim`、`businessIdClaim`；例如员工编号放在其他 JWT 字段时填写该字段名。缺少合法业务身份时拒绝访问，不回退到匿名或平台管理员。签发方需要提供业务库实际使用的员工编号；只有姓名或邮箱的 ID Token 不能直接作为数字业务身份。业务库员工编号应直接使用签发方提供的工号；权限由本库员工和范围表决定。能力来自本库配置，不采用令牌中的 permissions。JWT 有效期内的身份撤销由签发方有效期及本库策略控制；没有在线 UserInfo 撤销查询。
 
 ```yaml
 authentication:
@@ -56,17 +56,7 @@ authentication:
 ```
 
 
-例如签发方提供 `staffno`，但本库使用内部编号39：
-
-```yaml
-# authentication.access 下：
-businessIdMappings:
-  "E1001": 39
-# authentication.provider 下：
-subjectClaim: sub
-usernameClaim: staffno
-businessIdClaim: staffno
-```
+例如业务库员工编号直接使用企业工号时，设置 `businessIdClaim: staffno`。
 
 若使用固定PEM公钥，将上面的 `jwksUrl` 删除，改为：
 
@@ -77,7 +67,7 @@ publicKeyPem: |
   -----END PUBLIC KEY-----
 ```
 
-签名验证、Issuer/Audience/有效期检查全部成功后，`staffno=E1001` 才映射到员工39。
+签名验证及声明检查成功后，直接使用 Token 中的正整数 `staffno` 作为 SQL 查询员工编号。
 Token中的姓名、roles、groups不自动授予数据库管理能力或总部权限。
 仅解码Token只能读取字段，不能证明签名有效；Token本身不能恢复RSA验签公钥。
 

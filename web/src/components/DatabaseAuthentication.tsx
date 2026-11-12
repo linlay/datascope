@@ -4,7 +4,7 @@ import { Alert, Button, Card, Form, Input, InputNumber, Modal, Radio, Select, Sp
 import { databases, managementCall, type AuthConfig, type AuthPolicy, type AuthProvider, type Database } from '../api';
 import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
-import { OneIDKeyInput, IdentityMappingsInput } from './OneIDConfiguration';
+import { OneIDKeyInput } from './OneIDConfiguration';
 import { BusinessAccounts } from '../pages/BusinessAccounts';
 
 type Authentication = NonNullable<Database['authentication']>;
@@ -119,7 +119,7 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        {enterprise && <Form layout="vertical" disabled={!user.system_admin || busy} className="auth-connection-form">
         <div className="auth-connection-fields">
          {(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? oauthFields : accountFields).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'client_id' ? 'datascope' : 'https://identity.example.com/…'} /></Form.Item>)}
-         {optionalFields.map(([key, label]) => <Form.Item key={key} label={t(label)} tooltip={key === 'secret_env' ? t('填写服务端环境变量名，不在配置中保存密钥明文。') : key === 'business_id_claim' ? t('认证结果中映射到 SQL 行权限的正整数员工编号字段。') : undefined}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'secret_env' ? 'DATASCOPE_AUTH_ENTERPRISE_SECRET' : undefined} /></Form.Item>)}
+         {optionalFields.map(([key, label]) => <Form.Item key={key} label={t(label)} tooltip={key === 'secret_env' ? t('填写服务端环境变量名，不在配置中保存密钥明文。') : key === 'business_id_claim' ? t('认证结果中直接用于 SQL 行权限的正整数员工编号字段。') : undefined}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'secret_env' ? 'DATASCOPE_AUTH_ENTERPRISE_SECRET' : undefined} /></Form.Item>)}
         </div>
        </Form>}
       </>}
@@ -131,9 +131,8 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        <Button danger disabled={dirty||busy||db.access?.policy.mode!=='TOKEN'} onClick={()=>Modal.confirm({title:t('撤销 API Key'),content:t('撤销后，该密钥不能继续访问本数据库。'),onOk:()=>manageKey('revoke_database_api_key')})}>{t('撤销 API Key')}</Button>
       </Space>}
      </Space>}
-     {mode === 'ONEID' && <Form layout="vertical"><Form.Item label={t('本库业务身份映射')}><IdentityMappingsInput value={selected.business_id_mappings} disabled={!user.system_admin || busy} onChange={business_id_mappings => patchPolicy({ business_id_mappings })} /></Form.Item></Form>}
      {mode === 'OAUTH' && <Alert type="info" showIcon title={t(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? 'Platform 选择 mcp，通过授权发现跳转到企业 SSO 登录，取得访问令牌后访问本库。' : 'Platform 选择 mcp，通过 OAuth 跳转到本库业务账号登录。企业 SSO 请使用企业 SSO 提供方。')} />}
-     {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，客户端直接发送自身的 ID Token，无需为本库跳转 SSO 登录。服务端验签并映射业务身份；姓名默认读取 name。')} />}
+     {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，客户端直接发送自身的 ID Token，无需为本库跳转 SSO 登录。服务端验签后直接使用业务身份字段作为员工编号；姓名默认读取 name。')} />}
      {(mode === 'NONE' || !usesAccounts) && <Space wrap>
       {(mode === 'NONE' || mode === 'TOKEN') && <><Typography.Text>{t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')}</Typography.Text><InputNumber aria-label={t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')} min={0} precision={0} disabled={!user.system_admin || busy} value={selected.business_user_id || 0} onChange={value => patchPolicy({ business_user_id: value || 0 })} /></>}
       <Checkbox.Group disabled={!user.system_admin || busy} value={selected.permissions || []} options={[{ value: 'query', label: t('查询') }, { value: 'knowledge.read', label: t('知识查询') }, { value: 'raw_query', label: t('原始查询') }, { value: 'action', label: t('执行动作') }]} onChange={permissions => patchPolicy({ permissions: permissions as string[] })} />
