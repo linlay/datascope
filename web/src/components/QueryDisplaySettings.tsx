@@ -36,7 +36,7 @@ export function QueryDisplaySettings({ db, onSaved }: { db: Database; onSaved: (
    {error && <Alert type="error" showIcon title={error} />}
    <div>
     <Typography.Text>{t('默认查询视图')}</Typography.Text>
-    <Select aria-label={t('默认查询视图')} style={{ marginTop: 8, width: '100%', maxWidth: 480, display: 'block' }}
+    <Select aria-label={t('默认查询视图')} style={{ marginTop: 8, width: '100%', maxWidth: 480, display: 'flex' }}
      value={viewID} disabled={busy || !canWrite} onChange={setViewID}
      options={[{ value: '', label: t('使用原始查询结果') }, ...(current.views || []).filter(v => v.published).map(v => ({ value: v.id, label: v.name }))]} />
    </div>
