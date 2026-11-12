@@ -195,3 +195,38 @@ func TestAssistantRepairsUnsupportedSQLOnce(t *testing.T) {
 		t.Fatal("repair changed saved draft")
 	}
 }
+
+func TestAssistantMainContractAndReadBoundary(t *testing.T) {
+	f, _ := setupAction(t, false)
+	d, err := f.c.Get("default")
+	must(t, err)
+	script := `function main(params,context){const conn=db.session();return conn.queryOne("SELECT id FROM items WHERE owner_id=:userId",{userId:context.userId});}`
+	d.Actions[0].Script = script
+	must(t, f.c.Save(f.ctx, *d))
+	d, err = f.c.Get(d.ID)
+	must(t, err)
+	def := d.Actions[0]
+	in := application.Input{DatabaseID: d.ID, Revision: d.Revision, Name: def.Name, Assistant: &application.AssistantInput{Mode: "draft", Draft: &def, Intent: "Keep the existing ownership check"}}
+	for _, tc := range []struct {
+		script string
+		reject bool
+	}{
+		{script, false},
+		{`function main(params,context){return db.session().query("SELECT id, name FROM items");}`, true},
+	} {
+		f.app.Model = ai.Func(func(_ context.Context, r ai.Request) (ai.Response, error) {
+			if !strings.Contains(r.Messages[0].Content, "Preserve main(params, context)") || strings.Contains(r.Messages[0].Content, "Use synchronous function run") {
+				t.Fatal("wrong authoring contract")
+			}
+			raw, _ := json.Marshal(map[string]any{"parameters": def.Parameters, "script": tc.script})
+			return ai.Response{Text: string(raw)}, nil
+		})
+		_, err = f.app.Call(f.ctx, "assist_action", in)
+		if tc.reject && (err == nil || !strings.Contains(err.Error(), "特权读取")) {
+			t.Fatalf("new native read accepted: %v", err)
+		}
+		if !tc.reject {
+			must(t, err)
+		}
+	}
+}

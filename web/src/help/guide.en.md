@@ -75,6 +75,10 @@ Create an HTML view from a template, enter its identifier, name and HTML, and sa
 
 ## Connecting an MCP client
 
+The platform management connector uses `/mcp/admin`, separately from each database's business MCP. Management MCP supports SQLite DDL object inspection, preview, execution and history when DDL management is enabled and permissions allow it. Preview to obtain a plan_id before applying; check execution records when the result is uncertain. Business MCP does not expose DDL. System administrators can also test and save candidate network connections or remove a data source registration. Removal preserves business files; connection editing cannot change the target database.
+
+The action AI assistant follows the current draft entry point: main uses db.session() and CommonJS; legacy run retains tagged SQL templates without automatic migration. Both contracts reject new or changed policy-bypassing SELECT statements relative to the saved action. Author and review any new reads manually.
+
 Enable the required tools in MCP configuration and save. Configure the client using the displayed connection information and the database's business authentication method. List the tools before sending a test request.
 
 For clients that support connector packages, enable MCP, save and download the connector ZIP. Import it in the client and authenticate for the selected database.

@@ -69,6 +69,8 @@ var operations = map[string][]operation{
 		{"database", "create", "create_database", "database", "password"},
 		{"database", "save", "save_database", "database_id database", ""},
 		{"database", "update", "update_database", "database_id database", ""},
+		{"database", "edit_connection", "edit_database_connection", "database_id database", "password"},
+		{"database", "remove", "remove_database", "database_id", ""},
 		{"policy", "save", "save_policy", "database_id database", ""},
 		{"mcp", "save", "configure_mcp", "database_id database", ""},
 		{"grant", "grant", "grant_database_permissions", "database_id user_id permissions business_user_id", ""},
@@ -86,6 +88,7 @@ var operations = map[string][]operation{
 		{"action", "try", "try_action", "database_id name arguments request_id business_user_id", ""},
 		{"connection", "test", "test_database_connection", "database", "password"},
 		{"database", "test_connection", "test_connection", "database_id", ""},
+		{"database", "test_edited_connection", "test_edited_database_connection", "database_id database", "password"},
 		{"policy", "validate", "validate_policy", "database_id database", ""},
 		{"policy", "preview_rewrite", "preview_rewrite", "database_id sql", "business_user_id parameters"},
 	},
@@ -167,6 +170,8 @@ func decode(tool string, in input) (string, application.Input, error) {
 				} else {
 					required += " connection"
 				}
+			case "edit_database_connection", "test_edited_database_connection":
+				required += " connection"
 			case "save_database":
 				required += " name driver path config mcp_enabled mcp_path tools"
 			case "update_database":
@@ -196,14 +201,14 @@ func decode(tool string, in input) (string, application.Input, error) {
 
 func New(app *application.Service) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "datascope-management", Version: "2.0.0", Title: "DataScope 管理平台"}, &mcp.ServerOptions{
-		Instructions: "使用 datascope-admin 连接器及配套 skill 管理用户、数据库、SQLite DDL、权限、策略和知识。工具使用 {action,args}，args.resourceType 指定资源。DDL 使用 ddl.preview 生成计划，再用 ddl.apply 执行。先读取当前配置与 revision，校验后保存并回读。业务查询使用独立数据库 MCP。",
+		Instructions: "使用 datascope-admin 连接器及配套 skill 管理用户、数据库连接、SQLite DDL、权限、策略、动作、视图和知识。工具使用 {action,args}，args.resourceType 指定资源。DDL 使用 ddl.preview 生成计划，再用 ddl.apply 执行。网络连接编辑先 test_edited_connection，再 edit_connection；移除登记使用 database.remove。先读取当前配置与 revision，校验后保存并回读。业务查询使用独立数据库 MCP。",
 		Capabilities: &mcp.ServerCapabilities{},
 	})
 	for _, name := range []string{"datascope_query", "datascope_manage", "datascope_inspect"} {
 		description := map[string]string{
-			"datascope_query":   "查询数据库、SQLite DDL 对象与执行记录、策略、用户、授权、知识和审计。使用前阅读 datascope-admin skill。",
-			"datascope_manage":  "创建或修改数据库、执行 SQLite DDL 计划、策略、MCP 配置、授权、用户和知识。使用前阅读 datascope-admin skill。",
-			"datascope_inspect": "测试数据库连接、校验策略、预览 SQL 改写或 SQLite DDL 计划；DDL 在副本上验证，不修改业务源库。使用前阅读 datascope-admin skill。",
+			"datascope_query":   "查询数据库、SQLite DDL 对象与执行记录、策略、用户、授权、动作、视图模板、知识和审计。使用前阅读 datascope-admin skill。",
+			"datascope_manage":  "创建、修改或移除数据源登记、编辑网络连接、执行 SQLite DDL 计划，管理策略、MCP 配置、授权、用户、动作、视图和知识。使用前阅读 datascope-admin skill。",
+			"datascope_inspect": "测试新建、已保存或候选数据库连接，校验策略、回滚试运行动作、预览配置克隆、SQL 改写或 SQLite DDL 计划；DDL 在副本上验证，不修改业务源库。使用前阅读 datascope-admin skill。",
 		}[name]
 		actions, resources := []string{}, []string{}
 		for _, op := range operations[name] {

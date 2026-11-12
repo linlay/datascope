@@ -2,6 +2,7 @@ package managementmcp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -196,5 +197,50 @@ func TestKnowledgeSearchOptionalKeywordAndRetiredPromptRoutes(t *testing.T) {
 		if _, _, err := decode("datascope_query", in); err == nil {
 			t.Fatal("retired prompt route accepted", action)
 		}
+	}
+}
+
+func TestConnectionManagementRoutes(t *testing.T) {
+	for _, tc := range []struct{ tool, action, domain string }{
+		{"datascope_manage", "edit_connection", "edit_database_connection"},
+		{"datascope_inspect", "test_edited_connection", "test_edited_database_connection"},
+	} {
+		raw := `{"action":"` + tc.action + `","args":{"resourceType":"database","database_id":"target","database":{"id":"target","revision":2,"connection":{"host":"db.local","port":3306,"username":"reader"}},"password":"candidate-password"}}`
+		var in input
+		if err := json.Unmarshal([]byte(raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		domain, out, err := decode(tc.tool, in)
+		if err != nil || domain != tc.domain || out.Password != "candidate-password" || out.Database.Connection.Host != "db.local" {
+			t.Fatalf("%s %+v %v", domain, out, err)
+		}
+		for _, invalid := range []string{
+			strings.Replace(raw, `"revision":2`, `"revision":0`, 1),
+			strings.Replace(raw, `"id":"target"`, `"id":"other"`, 1),
+			strings.Replace(raw, `,"connection":{"host":"db.local","port":3306,"username":"reader"}`, "", 1),
+		} {
+			if err := json.Unmarshal([]byte(invalid), &in); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := decode(tc.tool, in); err == nil {
+				t.Fatal("accepted invalid connection edit")
+			}
+		}
+		if err := json.Unmarshal([]byte(raw), &in); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := decode("datascope_query", in); err == nil {
+			t.Fatal("query accepted connection edit")
+		}
+	}
+	var in input
+	if err := json.Unmarshal([]byte(`{"action":"remove","args":{"resourceType":"database","database_id":"target"}}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	if domain, _, err := decode("datascope_manage", in); err != nil || domain != "remove_database" {
+		t.Fatal(domain, err)
+	}
+	if _, _, err := decode("datascope_inspect", in); err == nil {
+		t.Fatal("inspect accepted removal")
 	}
 }

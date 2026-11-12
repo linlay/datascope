@@ -1,5 +1,11 @@
 # 数据库与 MCP
 
+## 编辑连接与移除数据源
+
+已有网络库先 database.get 获取当前配置。使用 `datascope_inspect({action:"test_edited_connection",args:{resourceType:"database",database_id,database,password?}})` 测试候选连接，通过后使用 `datascope_manage({action:"edit_connection",args:{resourceType:"database",database_id,database,password?}})` 保存；两者均仅系统管理员可用。database 必须带匹配的 id、最新 revision 和 connection，connection 从当前配置复制后修改 host、port、username、tls_mode。仅这些连接字段可编辑，密码省略或留空保留；不能切换驱动、目标 database、service_name 或 Schema 范围，SQLite 不支持此操作。保存会再次测试连接、已登记字段结构与独立写连接，并递增版本。与 database.test_connection（测试已保存连接）及 connection.test（测试新建连接）不同，候选连接测试还验证现有结构兼容性，且不保存密码或配置。密码不要回显。
+
+显式要求移除登记时，使用 `datascope_manage({action:"remove",args:{resourceType:"database",database_id}})`，仅系统管理员可用。只移除数据源登记，保留业务数据文件；随后 database.list 核对。不要用移除操作代替暂时关闭 MCP。
+
 所有调用使用 `{action,args}`；下表参数均位于 args，另加对应 `resourceType`。除列出的可选参数外，其余参数必需；不接受 null 或无关参数。数字使用 JSON number，布尔值使用 true/false。
 
 | 工具 | resourceType | action | 参数 | 权限 |
