@@ -67,11 +67,11 @@ func TestMCPRequestSnapshotReadsOnceAndObservesChanges(t *testing.T) {
 	if counts["query_initialize"] != 1 || counts["store_open"] != 0 || counts["service_initialize"] != 0 || counts["query_execute"] != 1 {
 		t.Fatalf("warm-query timing did not preserve reuse: %v", counts)
 	}
-	if counts["read_state"] != 1 || counts["resolve_auth"] != 1 || counts["business_get"] != 1 || counts["config_state"] != 5 {
+	if counts["read_state"] != 0 || counts["config_cache_hit"] != 1 || counts["resolve_auth"] != 1 || counts["business_get"] != 1 || counts["config_state"] != 5 {
 		t.Fatalf("query view lookup escaped the request snapshot: %v", counts)
 	}
 	counts = call("/mcp/default", 200, `{"jsonrpc":"2.0","id":3,"method":"resources/templates/list"}`)
-	if counts["read_state"] != 1 || counts["config_state"] != 5 {
+	if counts["read_state"] != 0 || counts["config_cache_hit"] != 1 || counts["config_state"] != 5 {
 		t.Fatalf("resource lookup escaped the request snapshot: %v", counts)
 	}
 	for _, tc := range []struct{ body, stage string }{

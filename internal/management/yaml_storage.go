@@ -53,6 +53,12 @@ func (s *Source) withState(ctx context.Context, write bool, fn func(*sourceState
 }
 
 func (s *Source) withStateUncached(ctx context.Context, write bool, fn func(*sourceState) error) error {
+	return s.withStateMode(ctx, write, false, fn)
+}
+
+// cached is reserved for the immutable request snapshot loader. Ordinary
+// callbacks and all writes continue to receive freshly loaded mutable state.
+func (s *Source) withStateMode(ctx context.Context, write, cached bool, fn func(*sourceState) error) error {
 	for {
 		if s.owner != nil {
 			if err := s.owner.recoverPending(ctx); err != nil {
@@ -72,9 +78,15 @@ func (s *Source) withStateUncached(ctx context.Context, write bool, fn func(*sou
 			if err := recoverPublication(s.Path); err != nil {
 				return err
 			}
-			readDone := requesttiming.Start(ctx, "read_state")
-			state, err := readState(s.Path)
-			readDone()
+			var state *sourceState
+			var err error
+			if cached && !write {
+				state, err = s.cachedState(ctx)
+			} else {
+				readDone := requesttiming.Start(ctx, "read_state")
+				state, err = readState(s.Path)
+				readDone()
+			}
 			if err != nil {
 				return err
 			}

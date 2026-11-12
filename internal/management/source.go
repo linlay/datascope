@@ -12,16 +12,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"sync"
 	"time"
 
 	"datascope-server/internal/audit"
 )
 
 type Source struct {
-	owner *Store
-	Path  string
-	Audit *audit.Store
-	ID    string
+	owner       *Store
+	Path        string
+	Audit       *audit.Store
+	ID          string
+	cacheMu     sync.Mutex
+	stateCache  *sourceState
+	stateDigest [32]byte
 }
 
 func (s *Source) Close() {

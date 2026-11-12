@@ -16,17 +16,17 @@ type authSnapshotKey struct {
 type requestSnapshot struct {
 	disabled atomic.Bool
 	stateMu  sync.Mutex
-	states   map[*Source][]byte
+	states   map[*Source]*sourceState
 	authMu   sync.Mutex
 	auth     map[authSnapshotKey][]byte
 }
 
 // WithRequestSnapshot scopes configuration reuse to ONE HTTP request. The next
 // request must create a new context so revocations and publications remain live.
-// Snapshot bytes are private; every consumer receives a fresh decoded value.
+// Immutable parsed state is private; every consumer receives a deep copy.
 func WithRequestSnapshot(ctx context.Context) context.Context {
 	return context.WithValue(ctx, requestSnapshotKey{}, &requestSnapshot{
-		states: make(map[*Source][]byte), auth: make(map[authSnapshotKey][]byte),
+		states: make(map[*Source]*sourceState), auth: make(map[authSnapshotKey][]byte),
 	})
 }
 
@@ -51,14 +51,10 @@ func (r *requestSnapshot) read(ctx context.Context, s *Source, fn func(*sourceSt
 	if raw == nil {
 		return s.withStateUncached(ctx, false, fn)
 	}
-	var state sourceState
-	if err := json.Unmarshal(raw, &state); err != nil {
-		return err
-	}
-	return fn(&state)
+	return fn(cloneSourceState(raw))
 }
 
-func (r *requestSnapshot) state(ctx context.Context, s *Source) ([]byte, error) {
+func (r *requestSnapshot) state(ctx context.Context, s *Source) (*sourceState, error) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -70,11 +66,10 @@ func (r *requestSnapshot) state(ctx context.Context, s *Source) ([]byte, error) 
 	if raw, ok := r.states[s]; ok {
 		return raw, nil
 	}
-	var raw []byte
-	err := s.withStateUncached(ctx, false, func(st *sourceState) error {
-		var err error
-		raw, err = json.Marshal(st)
-		return err
+	var raw *sourceState
+	err := s.withStateMode(ctx, false, true, func(st *sourceState) error {
+		raw = st
+		return nil
 	})
 	if err == nil {
 		r.states[s] = raw
