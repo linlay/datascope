@@ -24,6 +24,18 @@ In the SQL workbench, choose an identity and run a read-only SELECT. For a datab
 
 Use the table data page to browse and filter stored records with full query access. To check a business user's visibility, use that identity in the SQL workbench.
 
+## Data sources, import scripts and schedules
+
+Choose the target database and open Data sources. Search, create and select tasks in the Import list on the left; edit scripts, schedules and parameters in Import details on the right. Use the External connections button beside the list title to add, edit, test connections or browse schema in a dialog. You can also add a connection directly from task details. Opening the connection dialog preserves unsaved task drafts. Connections can serve multiple tasks, and a task can read multiple connections. SQLite sources connect only to existing files. Referenced connections cannot be deleted. Passwords are encrypted; leave the password blank when editing to keep it.
+
+On the Script tab, implement synchronous `function main(params, context)`. Read with `sources.get("alias").query(sql, [values])` and access the current target with `db.target().query/update(sql, [values])`, using `?` placeholders. JS controls transformation, joins, pagination and insert/update rules. Target tables must already exist. Network targets require an enabled independent writer in Action configuration; SQLite imports use a separate writer independently of the Action switch.
+
+Save, use Rollback trial to inspect logs and affected rows, then Run now. A trial executes the entire saved script and rolls back without advancing the checkpoint. A real run uses one target transaction and commits only on success; errors, timeouts and stops roll it back. Use `context.log(message)`, `context.checkpoint` and `context.saveCheckpoint({...})` for logs and progress. The checkpoint is saved after target commit; interruption between them can cause replay, so scripts must tolerate duplicates. Each query permits up to 1,000 rows and fails on overflow; paginate large tables in JS. Scripts have no async, network, filesystem or npm support.
+
+Schedule supports manual, one-time, fixed interval and daily runs. Check the timezone and estimated times, save and enable automatic execution. The same task cannot overlap; missed schedules coalesce into one execution and failures do not retry automatically. The default timeout is 300 seconds, configurable from 1 to 3,600 seconds. Scheduling runs in admin-api and continues when the browser closes.
+
+Open the separate Data run history menu before SQL workbench to view status, logs, script version, actual parameters and progress, and filter by import task. The Data run history button in the task editor opens that task’s records. Stop a running task from its details. Affected rows from trials, failures and stops do not indicate committed data. Check business data before rerunning interrupted or unknown outcomes. Access requires `config.read` and `source.write`. This explicitly permits reading sources and writing the target outside business query row/column policies and masking, so grant it separately.
+
 ## Action configuration and script reference
 
 New actions default to `main(params, context)`. Obtain the current database connection with `db.session()`, read with `conn.query` / `conn.queryOne`, and write with `conn.update`, using literal SQL and `:name` parameters. Queries do not automatically apply normal query permissions: scripts must check record ownership using `context.userId` and verify `result.rowsAffected` after writes. Export shared functions with `exports.fn` and load them with `require("./library")`. The following reference describes the compatible `run(args, ctx)` template; do not mix the two script APIs.

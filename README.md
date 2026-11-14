@@ -97,6 +97,8 @@ internal/
 
 DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；业务库命名不受影响。YAML 配置字段统一使用小驼峰，如 `mcpEnabled`、`maxRows`、`denyUnless`、`businessUserId`，业务标识与脚本正文保留原值；HTTP JSON 接口格式保持不变。运行时会话、OAuth 授权码 / 刷新凭据和连接保留在内存。完整表结构、认证接口约定与发布清单见 [存储与认证改造](docs/storage-auth-refactor.md)。
 
+「数据来源」在当前目标库下管理外部只读连接、Goja JS 导入任务和运行计划，支持手动、指定时间、固定间隔与每天运行，以及回滚试运行、停止和持久执行记录。入口需要 `config.read` 与 `source.write`，详见[数据来源与脚本导入](docs/data-sources.md)。
+
 常规查询使用业务数据库只读连接；业务 Action 使用显式启用的独立写入连接，见 [业务操作说明](docs/actions.md)。`DATABASE_ALLOWED_ROOTS` 指定允许登记的目录，macOS/Linux 多个目录用 `:` 分隔；默认 `data`。管理库、审计库及其符号链接、硬链接不能注册为业务数据源。原始查询也禁止 ATTACH 和修改连接状态的 PRAGMA，避免从已授权业务库访问内部状态。
 
 配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数。工作台路径为 `query-workbench`（查询工作台）、`knowledge-workbench`（知识工作台）、`action-workbench`（动作工作台）和 `view-workbench`（视图工作台）；旧 `sql`、`sql-workbench` 链接兼容转为 `query-workbench`。

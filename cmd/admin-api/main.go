@@ -143,6 +143,10 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	imports := app.DataSourceManager()
+	importDone := make(chan struct{})
+	go func() { defer close(importDone); imports.RunScheduler(ctx) }()
+	defer func() { stop(); <-importDone; imports.Close() }()
 	scanInterval, err := time.ParseDuration(envflag.String("DISCOVERY_INTERVAL", "5m"))
 	if err != nil || scanInterval < 0 {
 		return fmt.Errorf("DISCOVERY_INTERVAL 必须为非负时长")

@@ -6,6 +6,7 @@ import (
 	"datascope-server/internal/ai"
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
+	"datascope-server/internal/datasource"
 	"datascope-server/internal/ddl"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
@@ -17,6 +18,7 @@ import (
 	"io"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 type Service struct {
@@ -27,8 +29,13 @@ type Service struct {
 	ManagementMCPURL string
 	MCPBase          string
 	SecureCookies    bool
+	sourceOnce       sync.Once
+	sources          *datasource.Manager
 }
 type Input struct {
+	SourceConnection *datasource.Connection `json:"source_connection,omitempty"`
+	ImportTask       *datasource.Task       `json:"import_task,omitempty"`
+
 	Assistant      *AssistantInput                `json:"assistant,omitempty"`
 	ObjectType     string                         `json:"object_type,omitempty"`
 	ParentName     string                         `json:"parent_name,omitempty"`
@@ -135,6 +142,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "list_data_sources", "get_import_run", "save_source_connection", "inspect_source_connection", "delete_source_connection", "save_import_task", "delete_import_task", "run_import_task", "trial_import_task", "stop_import_run":
+		return s.DataSources(ctx, action, in)
 	case "list_ddl_objects", "get_ddl_object", "preview_ddl", "apply_ddl", "get_ddl_execution", "list_ddl_executions":
 		result, ddlErr := s.DDL(ctx, action, in)
 		if ev != nil {

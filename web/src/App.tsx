@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useState } from 'react';
 import { Alert, Button, Form, Input, Layout, Menu, Modal, Select, Space, Spin, Tag, type MenuProps } from 'antd';
-import { SettingOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined, LayoutOutlined, DesktopOutlined } from '@ant-design/icons';
+import { SettingOutlined, HistoryOutlined, DatabaseOutlined, FilterOutlined, CodeOutlined, BookOutlined, ConsoleSqlOutlined, TableOutlined, AuditOutlined, ApiOutlined, FileSearchOutlined, PlayCircleOutlined, LayoutOutlined, DesktopOutlined } from '@ant-design/icons';
 import { UserGuide } from './components/UserGuide';
 import { SystemSettings } from './components/SystemSettings';
 import { usePreferences } from './ui/preferences';
@@ -18,6 +18,8 @@ import { isMySQLDriver } from './components/connectionURL';
 import { ConnectionFields } from './components/ConnectionFields';
 import { NavigationContext, navigate, readRoute, setRouteParams, startNavigation, type Page } from './navigation';
 
+const DataSources = lazy(() => import('./pages/DataSources'));
+const DataRunHistory = lazy(() => import('./pages/DataRunHistory'));
 const ViewManagement = lazy(() => import('./pages/ViewManagement'));
 const DDLManagement = lazy(() => import('./pages/DDLManagement'));
 const ViewWorkbench = lazy(() => import('./pages/ViewWorkbench'));
@@ -25,11 +27,11 @@ const KnowledgeWorkbench = lazy(() => import('./pages/KnowledgeWorkbench'));
 const ActionWorkbench = lazy(() => import('./pages/ActionWorkbench'));
 const KnowledgePage = lazy(() => import('./pages/KnowledgeManagement').then(module => ({ default: module.KnowledgePage })));
 
-const icons={ddl:<ConsoleSqlOutlined/>,views:<LayoutOutlined/>,database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,'knowledge-workbench':<FileSearchOutlined/>,'action-workbench':<PlayCircleOutlined/>,'view-workbench':<DesktopOutlined/>,'sql-workbench':<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
-const titles:Record<Page,string>={ddl:'DDL 管理',views:'视图配置',database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识配置','sql-workbench':'查询工作台','knowledge-workbench':'知识工作台','action-workbench':'动作工作台','view-workbench':'视图工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
+const icons={'data-runs':<HistoryOutlined/>,sources:<DatabaseOutlined/>,ddl:<ConsoleSqlOutlined/>,views:<LayoutOutlined/>,database:<DatabaseOutlined/>,tables:<FilterOutlined/>,actions:<CodeOutlined/>,knowledge:<BookOutlined/>,'knowledge-workbench':<FileSearchOutlined/>,'action-workbench':<PlayCircleOutlined/>,'view-workbench':<DesktopOutlined/>,'sql-workbench':<ConsoleSqlOutlined/>,table:<TableOutlined/>,audit:<AuditOutlined/>,mcp:<ApiOutlined/>};
+const titles:Record<Page,string>={'data-runs':'数据运行记录',sources:'数据来源',ddl:'DDL 管理',views:'视图配置',database:'数据库配置',tables:'查询配置',actions:'动作配置',knowledge:'知识配置','sql-workbench':'查询工作台','knowledge-workbench':'知识工作台','action-workbench':'动作工作台','view-workbench':'视图工作台',table:'表数据',audit:'操作日志',mcp:'MCP 配置'};
 const navigationGroups: Page[][] = [
- ['database', 'ddl', 'tables', 'actions', 'knowledge', 'views', 'mcp'],
- ['sql-workbench', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'table'],
+ ['database', 'ddl', 'sources', 'tables', 'actions', 'knowledge', 'views', 'mcp'],
+ ['data-runs', 'sql-workbench', 'knowledge-workbench', 'action-workbench', 'view-workbench', 'table'],
  ['audit'],
 ];
 
@@ -80,7 +82,7 @@ export function App() {
 
   const current=items.find(d=>d.id===dbID);
  const can=(p:string)=>user.system_admin||!!current?.permissions?.includes(p);
- const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='ddl'?current?.driver==='sqlite'&&!!current.ddl_enabled&&can('config.read'):p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='views'||p==='view-workbench'?can('config.read')&&can('view.write'):p==='knowledge'?can('knowledge.write'):p==='knowledge-workbench'?can('knowledge.read'):p==='action-workbench'?can('action.write'):p==='table'?can('raw_query'):p==='sql-workbench'?can('query'):(can('mcp.write')||can('action.write')));
+ const visiblePages=(Object.keys(titles) as Page[]).filter(p=>p==='sources'||p==='data-runs'?can('config.read')&&can('source.write'):p==='ddl'?current?.driver==='sqlite'&&!!current.ddl_enabled&&can('config.read'):p==='audit'?(user.system_admin||items.some(d=>d.permissions?.includes('audit.read'))):p==='database'?(user.system_admin||can('config.read')||can('grant')):p==='tables'?can('config.read'):p==='actions'?can('config.read')&&can('action.write'):p==='views'||p==='view-workbench'?can('config.read')&&can('view.write'):p==='knowledge'?can('knowledge.write'):p==='knowledge-workbench'?can('knowledge.read'):p==='action-workbench'?can('action.write'):p==='table'?can('raw_query'):p==='sql-workbench'?can('query'):(can('mcp.write')||can('action.write')));
  const navigationItems: NonNullable<MenuProps['items']> = [];
  navigationGroups.forEach((group, index) => {
   const pages = group.filter(page => visiblePages.includes(page));
@@ -115,6 +117,8 @@ export function App() {
    navigate('database',undefined,{database:next},true);
   }
  }}/>}
+ {activePage==='sources'&&current&&<Suspense fallback={<Spin/>}><DataSources key={current.id} db={current}/></Suspense>}
+ {activePage==='data-runs'&&current&&<Suspense fallback={<Spin/>}><DataRunHistory key={current.id} db={current}/></Suspense>}
  {activePage==='ddl'&&current&&<Suspense fallback={<Spin/>}><DDLManagement db={current} onSaved={()=>void refresh()}/></Suspense>}
  {activePage==='audit'&&<AuditPage databases={items}/>}
  {activePage==='views'&&current&&<Suspense fallback={<Spin/>}><ViewManagement db={current} onSaved={()=>void refresh()}/></Suspense>}

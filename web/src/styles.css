@@ -488,3 +488,15 @@ details > summary {
 .assistant-empty { color:var(--ant-color-text-secondary); }
 .assistant-proposal { border-top:1px solid var(--ant-color-border-secondary); padding-top:12px; }
 @media (max-width:600px) { .action-assistant-drawer .assistant-comparison { grid-template-columns:1fr; } }
+
+/* Data sources follow the existing configuration cards and editor controls. */
+.source-list-toolbar {display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;}
+.source-list-toolbar {margin-bottom:20px;}
+.source-script-layout {display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start;}
+.source-api-reference code {display:block;font-size:12px;overflow-wrap:anywhere;margin-block:8px;}
+.source-api-reference p {font-size:12px;color:var(--muted);}
+.source-run-log {white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;padding:16px;border:1px solid var(--border);border-radius:6px;}
+.source-task-editor .ant-card-head {flex-wrap:wrap;}
+@media(max-width:1100px){.source-script-layout{grid-template-columns:minmax(0,1fr)}.source-task-editor .ant-card-head-wrapper{flex-wrap:wrap;gap:12px;padding-block:12px;}}
+
+@media(max-width:1280px){.source-workspace .source-script-layout{grid-template-columns:minmax(0,1fr)}}
