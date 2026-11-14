@@ -37,10 +37,10 @@ export function PlatformUsersDialog({open,onClose}:{open:boolean;onClose:()=>voi
  </Modal>
  <PlatformDatabasePermissions user={permissionUser} onClose={()=>setPermissionUser(undefined)}/>
  <Modal title={t("创建平台用户")} open={adding} onCancel={()=>setAdding(false)} confirmLoading={busy} onOk={()=>void form.validateFields().then(v=>run('create_user',v))}>
-  <Form form={form} layout="vertical">
-   <Form.Item name="username" label={t("用户名")} rules={[{required:true}]}><Input autoComplete="off"/></Form.Item>
-   <Form.Item name="name" label={t("姓名")} rules={[{required:true}]}><Input/></Form.Item>
-   <Form.Item name="password" label={t("初始密码")} rules={[{required:true,min:6}]}><Input.Password autoComplete="new-password"/></Form.Item>
+  <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap>
+   <Form.Item name="username" label={<span className="configuration-label-text">{t("用户名")}</span>} rules={[{required:true}]}><Input autoComplete="off"/></Form.Item>
+   <Form.Item name="name" label={<span className="configuration-label-text">{t("姓名")}</span>} rules={[{required:true}]}><Input/></Form.Item>
+   <Form.Item name="password" label={<span className="configuration-label-text">{t("初始密码")}</span>} rules={[{required:true,min:6}]}><Input.Password autoComplete="new-password"/></Form.Item>
   </Form>
  </Modal>
  </>;

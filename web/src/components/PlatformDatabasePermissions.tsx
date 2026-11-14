@@ -70,9 +70,9 @@ export function PlatformDatabasePermissions({ user, onClose }: { user?: Platform
   </Modal>
   <Modal {...saveModalProps} title={t('设置权限 · {0}', { '0': editing?.database.name || '' })} open={!!editing} onCancel={() => setEditing(undefined)} onOk={() => void save()} confirmLoading={saving} width={640}>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
-   <Form form={form} layout="vertical">
-    <Form.Item name="business_user_id" label={t('业务身份编号（0 表示未绑定）')}><InputNumber min={0} precision={0} /></Form.Item>
-    <Form.Item name="permissions" label={t('授予能力')}><Checkbox.Group options={Object.entries(permissionLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
+   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap>
+    <Form.Item name="business_user_id" label={<span className="configuration-label-text">{t('业务身份编号（0 表示未绑定）')}</span>}><InputNumber min={0} precision={0} /></Form.Item>
+    <Form.Item name="permissions" label={<span className="configuration-label-text">{t('授予能力')}</span>}><Checkbox.Group options={Object.entries(permissionLabels).map(([value, label]) => ({ value, label: t(label) }))} /></Form.Item>
    </Form>
   </Modal>
  </>;

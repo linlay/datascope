@@ -1,0 +1,223 @@
+version: 1
+actions:
+  -
+    name: "enroll_section"
+    title: "学生选课"
+    description: "仅本人、选课窗口内；检查先修学分、人数、重复课程、学分与课表冲突。"
+    confirm: true
+    parameters:
+      section_id:
+        type: "integer"
+        description: "目标教学班编号"
+        min: 1
+      reason:
+        type: "string"
+        description: "办理原因，记入结果与审计"
+        maxLength: 200
+        pattern: "\\S"
+    script: |
+      const conn = db.session();
+      const acad = require("./academic");
+      function main(params,context) {
+       const u=acad.actor(context), day=acad.day(context);acad.student(u);
+       const s=acad.section(params.section_id);acad.window(s,day);
+       const duplicate=conn.queryOne("SELECT COUNT(*) AS n FROM enrollments e JOIN sections x ON x.id=e.section_id WHERE e.student_id=:uid AND x.term_id=:term AND x.course_id=:course AND e.status<>'dropped'",{uid:u.id,term:s.term_id,course:s.course_id});
+       if(duplicate.n) throw new HttpError(403,'本学期已选同一课程');
+       const missing=conn.queryOne("SELECT COUNT(*) AS n FROM prerequisites p WHERE p.course_id=:course AND NOT EXISTS(SELECT 1 FROM prior_credits c WHERE c.student_id=:uid AND c.course_id=p.required_course_id AND c.score>=60 AND c.recognized_on<=:day) AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN sections x ON x.id=e.section_id JOIN assessments a ON a.section_id=x.id JOIN grades g ON g.enrollment_id=e.id AND g.assessment_id=a.id JOIN grade_releases r ON r.assessment_id=a.id WHERE e.student_id=:uid AND e.status='completed' AND x.course_id=p.required_course_id AND substr(r.released_at,1,10)<=:day GROUP BY e.id HAVING SUM(a.weight)=100 AND SUM(g.score*a.weight)>=6000)",{course:s.course_id,uid:u.id,day:day});
+       if(missing.n) throw new HttpError(403,'先修课程尚未取得有效学分');
+       const credits=conn.queryOne("SELECT COALESCE(SUM(c.credits),0) AS n FROM enrollments e JOIN sections x ON x.id=e.section_id JOIN courses c ON c.id=x.course_id WHERE e.student_id=:uid AND x.term_id=:term AND e.status<>'dropped'",{uid:u.id,term:s.term_id});
+       if(credits.n+s.credits>s.max_credits) throw new HttpError(403,'超过本学期学分上限');
+       const clash=conn.queryOne("SELECT COUNT(*) AS n FROM enrollments e JOIN sections x ON x.id=e.section_id JOIN section_meetings old ON old.section_id=x.id JOIN section_meetings target ON target.section_id=:sid WHERE e.student_id=:uid AND e.status<>'dropped' AND x.term_id=:term AND old.weekday=target.weekday AND old.period_from<=target.period_to AND target.period_from<=old.period_to AND old.week_from<=target.week_to AND target.week_from<=old.week_to",{sid:s.id,uid:u.id,term:s.term_id});
+       if(clash.n) throw new HttpError(403,'与已选课程时间冲突');
+       const reserved=conn.update("UPDATE sections SET version=version+1 WHERE id=:id AND version=:version AND status='open' AND (SELECT COUNT(*) FROM enrollments WHERE section_id=:id AND status<>'dropped')<capacity",{id:s.id,version:s.version}).rowsAffected;
+       if(reserved!==1) throw new HttpError(403,'教学班已满或状态已变化');
+       const old=conn.queryOne("SELECT id,status FROM enrollments WHERE student_id=:uid AND section_id=:sid",{uid:u.id,sid:s.id});
+       if(old) {
+        if(old.status!=='dropped') throw new HttpError(403,'选课记录状态已变化');
+        const changed=conn.update("UPDATE enrollments SET status='enrolled',enrolled_on=:day,dropped_on=NULL WHERE id=:id AND status='dropped'",{day:day,id:old.id}).rowsAffected;
+        if(changed!==1) throw new HttpError(403,'选课记录已变化');
+       } else {
+        conn.update("INSERT INTO enrollments(student_id,section_id,status,enrolled_on) VALUES(:uid,:sid,'enrolled',:day)",{uid:u.id,sid:s.id,day:day});
+       }
+       const e=conn.queryOne("SELECT id FROM enrollments WHERE student_id=:uid AND section_id=:sid",{uid:u.id,sid:s.id});
+       conn.update("INSERT INTO grades(enrollment_id,assessment_id,status) SELECT :eid,a.id,'pending' FROM assessments a WHERE a.section_id=:sid AND NOT EXISTS(SELECT 1 FROM grades g WHERE g.enrollment_id=:eid AND g.assessment_id=a.id)",{eid:e.id,sid:s.id});
+       return {enrollment_id:e.id,section_id:s.id,student_id:u.id,reason:params.reason};
+      }
+  -
+    name: "drop_section"
+    title: "学生退课"
+    description: "仅本人已选教学班；选退课窗口内且尚无已录入成绩。保留退课历史。"
+    confirm: true
+    parameters:
+      enrollment_id:
+        type: "integer"
+        description: "本人选课记录编号"
+        min: 1
+      reason:
+        type: "string"
+        description: "办理原因，记入结果与审计"
+        maxLength: 200
+        pattern: "\\S"
+    script: |
+      const conn = db.session();
+      const acad = require("./academic");
+      function main(params,context) {
+       const u=acad.actor(context),day=acad.day(context);acad.student(u);
+       const e=conn.queryOne("SELECT id,student_id,section_id,status FROM enrollments WHERE id=:id",{id:params.enrollment_id});
+       if(!e||e.student_id!==u.id||e.status!=='enrolled') throw new HttpError(403,'只能退本人已选课程');
+       const s=acad.section(e.section_id);acad.window(s,day);
+       const marks=conn.queryOne("SELECT COUNT(*) AS n FROM grades WHERE enrollment_id=:id AND status<>'pending'",{id:e.id});
+       if(marks.n) throw new HttpError(403,'已有成绩，不能通过选退课修改历史');
+       const changed=conn.update("UPDATE enrollments SET status='dropped',dropped_on=:day WHERE id=:id AND student_id=:uid AND status='enrolled'",{day:day,id:e.id,uid:u.id}).rowsAffected;
+       if(changed!==1) throw new HttpError(403,'选课记录已变化');
+       conn.update("UPDATE sections SET version=version+1 WHERE id=:id",{id:s.id});
+       return {enrollment_id:e.id,status:'dropped',reason:params.reason};
+      }
+  -
+    name: "record_grade"
+    title: "教师录入成绩"
+    description: "仅本教学班教师，可录入或修改已到考核日期且尚未发布的成绩；发布后锁定。"
+    confirm: true
+    parameters:
+      grade_id:
+        type: "integer"
+        description: "成绩记录编号"
+        min: 1
+      score:
+        type: "integer"
+        description: "百分制分数；缺考必须为0"
+        min: 0
+        max: 100
+      status:
+        type: "string"
+        description: "正常评分或缺考"
+        enum:
+          - "graded"
+          - "absent"
+      reason:
+        type: "string"
+        description: "办理原因，记入结果与审计"
+        maxLength: 200
+        pattern: "\\S"
+    script: |
+      const conn = db.session();
+      const acad = require("./academic");
+      function main(params,context) {
+       const u=acad.actor(context),day=acad.day(context);
+       const g=conn.queryOne("SELECT g.id,g.score,g.status,g.assessment_id,e.status AS enrollment_status,a.section_id,a.assessment_date FROM grades g JOIN enrollments e ON e.id=g.enrollment_id JOIN assessments a ON a.id=g.assessment_id WHERE g.id=:id",{id:params.grade_id});
+       if(!g||g.enrollment_status==='dropped') throw new HttpError(403,'成绩不存在或学生已退课');
+       acad.teacher(u,g.section_id,false);
+       if(g.assessment_date>day) throw new HttpError(403,'考核尚未进行');
+       if(params.status==='absent'&&params.score!==0) throw new HttpError(403,'缺考成绩必须为0');
+       const release=conn.queryOne("SELECT assessment_id FROM grade_releases WHERE assessment_id=:id",{id:g.assessment_id});
+       if(release) throw new HttpError(403,'成绩已发布并锁定');
+       if(g.score===params.score&&g.status===params.status) throw new HttpError(403,'成绩未变化');
+       const n=conn.update("UPDATE grades SET score=:score,status=:status,graded_by=:uid,graded_on=:day WHERE id=:id AND score IS :before_score AND status=:before_status AND NOT EXISTS(SELECT 1 FROM grade_releases WHERE assessment_id=:assessment)",{score:params.score,status:params.status,uid:u.id,day:day,id:g.id,before_score:g.score,before_status:g.status,assessment:g.assessment_id}).rowsAffected;
+       if(n!==1) throw new HttpError(403,'成绩已变化，请重新预览');
+       return {grade_id:g.id,before:g.score,after:params.score,status:params.status,reason:params.reason};
+      }
+  -
+    name: "publish_grades"
+    title: "主讲教师发布成绩"
+    description: "仅主讲教师；考核日期已到，所有未退课学生成绩齐备，发布后不可直接改分。"
+    confirm: true
+    parameters:
+      assessment_id:
+        type: "integer"
+        description: "考核项目编号"
+        min: 1
+      reason:
+        type: "string"
+        description: "办理原因，记入结果与审计"
+        maxLength: 200
+        pattern: "\\S"
+    script: |
+      const conn = db.session();
+      const acad = require("./academic");
+      function main(params,context) {
+       const u=acad.actor(context),day=acad.day(context);
+       const a=conn.queryOne("SELECT id,section_id,assessment_date FROM assessments WHERE id=:id",{id:params.assessment_id});
+       if(!a) throw new HttpError(403,'考核项目不存在');
+       acad.teacher(u,a.section_id,true);
+       if(a.assessment_date>day) throw new HttpError(403,'考核尚未进行');
+       const release=conn.queryOne("SELECT assessment_id FROM grade_releases WHERE assessment_id=:id",{id:a.id});
+       if(release) throw new HttpError(403,'本考核已经发布');
+       const count=conn.queryOne("SELECT COUNT(*) AS n FROM enrollments WHERE section_id=:sid AND status<>'dropped'",{sid:a.section_id});
+       const missing=conn.queryOne("SELECT COUNT(*) AS n FROM enrollments e WHERE e.section_id=:sid AND e.status<>'dropped' AND NOT EXISTS(SELECT 1 FROM grades g WHERE g.enrollment_id=e.id AND g.assessment_id=:aid AND g.status IN ('graded','absent'))",{sid:a.section_id,aid:a.id});
+       if(!count.n||missing.n) throw new HttpError(403,'空教学班或成绩尚未齐备');
+       const stamp=new Date(new Date(context.now).getTime()+8*3600000).toISOString().slice(0,19)+'+08:00';
+       conn.update("INSERT INTO grade_releases(assessment_id,released_by,released_at) VALUES(:aid,:uid,:stamp)",{aid:a.id,uid:u.id,stamp:stamp});
+       return {assessment_id:a.id,students:count.n,released_at:stamp,reason:params.reason};
+      }
+  -
+    name: "change_meeting_room"
+    title: "教务员调整上课教室"
+    description: "教务管理员或所属学院教务员；检查教室类型、容量和时间占用。仅调整常规上课地点，考试安排独立保留。"
+    confirm: true
+    parameters:
+      meeting_id:
+        type: "integer"
+        description: "课表记录编号"
+        min: 1
+      room_id:
+        type: "integer"
+        description: "新教室编号"
+        min: 1
+      expected_room_id:
+        type: "integer"
+        description: "预览前的教室编号"
+        min: 1
+      reason:
+        type: "string"
+        description: "办理原因，记入结果与审计"
+        maxLength: 200
+        pattern: "\\S"
+    script: |
+      const conn = db.session();
+      const acad = require("./academic");
+      function main(params,context) {
+       const u=acad.actor(context),day=acad.day(context);
+       const m=conn.queryOne("SELECT id,section_id,room_id,weekday,period_from,period_to,week_from,week_to FROM section_meetings WHERE id=:id",{id:params.meeting_id});
+       if(!m) throw new HttpError(403,'课表不存在');
+       const s=acad.section(m.section_id);
+       if(u.role!=='REGISTRAR'&&!(u.role==='SCHOOL_ADMIN'&&u.school_id===s.school_id)) throw new HttpError(403,'需要本学院教务员权限');
+       if(day>s.end_date||s.status==='cancelled') throw new HttpError(403,'不能改写已结束学期或停开课程');
+       if(m.room_id!==params.expected_room_id||m.room_id===params.room_id) throw new HttpError(403,'原教室已变化或新旧教室相同');
+       const r=conn.queryOne("SELECT id,capacity,room_type FROM rooms WHERE id=:id",{id:params.room_id});
+       if(!r||r.capacity<s.capacity||r.room_type!==s.room_type) throw new HttpError(403,'教室不存在、容量不足或类型不符');
+       const clash=conn.queryOne("SELECT COUNT(*) AS n FROM section_meetings other JOIN sections x ON x.id=other.section_id WHERE other.room_id=:room AND x.term_id=:term AND x.status<>'cancelled' AND other.id<>:id AND other.weekday=:weekday AND other.period_from<=:p_to AND other.period_to>=:p_from AND other.week_from<=:w_to AND other.week_to>=:w_from",{room:r.id,term:s.term_id,id:m.id,weekday:m.weekday,p_to:m.period_to,p_from:m.period_from,w_to:m.week_to,w_from:m.week_from});
+       if(clash.n) throw new HttpError(403,'教室在该时段已有课程');
+       const n=conn.update("UPDATE section_meetings SET room_id=:room WHERE id=:id AND room_id=:old",{room:r.id,id:m.id,old:params.expected_room_id}).rowsAffected;
+       if(n!==1) throw new HttpError(403,'课表已变化');
+       conn.update("UPDATE sections SET version=version+1 WHERE id=:id",{id:s.id});
+       return {meeting_id:m.id,before:m.room_id,after:r.id,reason:params.reason};
+      }
+actionLibraries:
+  -
+    name: "academic"
+    title: "教务身份与学期校验"
+    description: "独立校验操作身份、授课归属及选退课期限；查询可见范围不授予写权限"
+    script: |
+      const conn = db.session();
+      exports.actor = function(context) {
+        const u=conn.queryOne("SELECT id,role,school_id FROM users WHERE id=:id AND active=1",{id:context.userId});
+        if(!u) throw new HttpError(403,'需要有效教务身份');
+        return u;
+      };
+      exports.day = function(context) { return new Date(new Date(context.now).getTime()+8*3600000).toISOString().slice(0,10); };
+      exports.section = function(id) {
+        const s=conn.queryOne("SELECT s.id,s.term_id,s.course_id,s.capacity,s.status,s.version,c.credits,c.school_id,c.room_type,t.enroll_from,t.add_drop_until,t.end_date,t.max_credits FROM sections s JOIN courses c ON c.id=s.course_id JOIN terms t ON t.id=s.term_id WHERE s.id=:id",{id:id});
+        if(!s) throw new HttpError(403,'教学班不存在');
+        return s;
+      };
+      exports.student = function(u) {
+        const s=conn.queryOne("SELECT id,status FROM students WHERE id=:id",{id:u.id});
+        if(u.role!=='STUDENT'||!s||s.status!=='active') throw new HttpError(403,'仅正常在籍学生可办理本人选退课');
+      };
+      exports.window = function(s,day) {
+        if(s.status!=='open'||day<s.enroll_from||day>s.add_drop_until) throw new HttpError(403,'教学班未开放或已过选退课期限');
+      };
+      exports.teacher = function(u,section,lead) {
+        const t=conn.queryOne("SELECT is_lead FROM section_teachers WHERE section_id=:section AND teacher_id=:uid",{section:section,uid:u.id});
+        if(u.role!=='TEACHER'||!t||(lead&&t.is_lead!==1)) throw new HttpError(403,'需要本教学班授课教师；发布仅限主讲');
+      };

@@ -1,0 +1,13 @@
+sqlExamples:
+  - label: 月度销售额（已付款及已发货）
+    sql: "SELECT substr(created_at,1,7) AS month,COUNT(*) AS orders,SUM(quantity*unit_price_cents) AS revenue_cents FROM orders WHERE status IN ('paid','shipped') GROUP BY substr(created_at,1,7) ORDER BY month"
+  - label: 客户销售排行
+    sql: "SELECT c.id,c.name,SUM(o.quantity*o.unit_price_cents) AS revenue_cents FROM customers c JOIN orders o ON o.customer_id=c.id WHERE o.status IN ('paid','shipped') GROUP BY c.id,c.name ORDER BY revenue_cents DESC,c.id LIMIT 20"
+  - label: 商品销量排行
+    sql: "SELECT p.id,p.name,SUM(o.quantity) AS units FROM products p JOIN orders o ON o.product_id=p.id WHERE o.status IN ('paid','shipped') GROUP BY p.id,p.name ORDER BY units DESC,p.id LIMIT 20"
+  - label: 订单状态分布
+    sql: "SELECT status,COUNT(*) AS orders FROM orders GROUP BY status ORDER BY status"
+  - label: 暂无订单的客户
+    sql: "SELECT c.id,c.name FROM customers c LEFT JOIN orders o ON o.customer_id=c.id WHERE o.id IS NULL ORDER BY c.id"
+  - label: 零库存商品
+    sql: "SELECT id,sku,name,stock_quantity FROM products WHERE stock_quantity=0 ORDER BY id"

@@ -41,9 +41,9 @@ export function ActionExecutionSettings({ db, dirty, onSaved, onError }: { db: D
   </Space>
   <Modal title={t('写入账号')} open={open} onCancel={() => setOpen(false)} onOk={() => void saveConnection()} confirmLoading={busy} {...saveModalProps}>
    {error && <Alert type="error" title={error} style={{ marginBottom: 16 }} />}
-   <Form form={form} layout="vertical">
-    <Form.Item name="username" label={t('写入账号')} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
-    <Form.Item name="password" label={t('连接密码')} rules={[{ required: !db.write_connection }]}><Input.Password autoComplete="new-password" placeholder={t('留空保留原密码')} /></Form.Item>
+   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap>
+    <Form.Item name="username" label={<span className="configuration-label-text">{t('写入账号')}</span>} rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
+    <Form.Item name="password" label={<span className="configuration-label-text">{t('连接密码')}</span>} rules={[{ required: !db.write_connection }]}><Input.Password autoComplete="new-password" placeholder={t('留空保留原密码')} /></Form.Item>
    </Form>
   </Modal>
  </>;

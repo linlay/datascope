@@ -1,0 +1,28 @@
+sqlExamples:
+  -
+    label: "教学班与可见选课人数"
+    sql: "SELECT s.id,s.section_no,c.name,s.capacity,COUNT(e.id) AS visible_enrollments FROM sections s JOIN courses c ON c.id=s.course_id LEFT JOIN enrollments e ON e.section_id=s.id AND e.status='enrolled' WHERE s.term_id=2 AND s.status='open' GROUP BY s.id,s.section_no,c.name,s.capacity ORDER BY s.id"
+  -
+    label: "每周课表"
+    sql: "SELECT s.section_no,c.name,m.weekday,m.period_from,m.period_to,r.building,r.room_no FROM enrollments e JOIN sections s ON s.id=e.section_id JOIN courses c ON c.id=s.course_id JOIN section_meetings m ON m.section_id=s.id JOIN rooms r ON r.id=m.room_id WHERE s.term_id=2 AND e.status='enrolled' ORDER BY m.weekday,m.period_from,s.id"
+  -
+    label: "可见成绩与发布状态"
+    sql: "SELECT e.student_id,c.name,a.name AS assessment,g.score,g.status,CASE WHEN r.assessment_id IS NULL THEN 'draft' ELSE 'released' END AS publication FROM grades g JOIN enrollments e ON e.id=g.enrollment_id JOIN sections s ON s.id=e.section_id JOIN courses c ON c.id=s.course_id JOIN assessments a ON a.id=g.assessment_id LEFT JOIN grade_releases r ON r.assessment_id=a.id ORDER BY e.student_id,s.id,a.id"
+  -
+    label: "完整成绩课程通过率"
+    sql: "WITH totals AS (SELECT e.id,s.course_id,SUM(g.score*a.weight)/100.0 AS score FROM enrollments e JOIN sections s ON s.id=e.section_id JOIN assessments a ON a.section_id=s.id JOIN grades g ON g.enrollment_id=e.id AND g.assessment_id=a.id JOIN grade_releases r ON r.assessment_id=a.id WHERE e.status='completed' AND g.status<>'pending' GROUP BY e.id,s.course_id HAVING SUM(a.weight)=100) SELECT c.name,COUNT(*) AS students,SUM(CASE WHEN t.score>=60 THEN 1 ELSE 0 END) AS passed,ROUND(AVG(t.score),2) AS average_score FROM totals t JOIN courses c ON c.id=t.course_id GROUP BY c.id,c.name ORDER BY c.id"
+  -
+    label: "考勤状态分布"
+    sql: "SELECT s.term_id,a.status,COUNT(*) AS records FROM attendance a JOIN enrollments e ON e.id=a.enrollment_id JOIN sections s ON s.id=e.section_id GROUP BY s.term_id,a.status ORDER BY s.term_id,a.status"
+  -
+    label: "联合授课教学班"
+    sql: "SELECT s.section_no,c.name,COUNT(t.teacher_id) AS teachers FROM sections s JOIN courses c ON c.id=s.course_id JOIN section_teachers t ON t.section_id=s.id GROUP BY s.id,s.section_no,c.name HAVING COUNT(t.teacher_id)>1 ORDER BY s.id"
+  -
+    label: "空教学班与停开课程"
+    sql: "SELECT s.section_no,c.name,s.status,COUNT(e.id) AS students FROM sections s JOIN courses c ON c.id=s.course_id LEFT JOIN enrollments e ON e.section_id=s.id AND e.status<>'dropped' GROUP BY s.id,s.section_no,c.name,s.status HAVING COUNT(e.id)=0 ORDER BY s.id"
+  -
+    label: "考试安排"
+    sql: "SELECT s.section_no,c.name,x.exam_date,x.period_from,x.period_to,r.building,r.room_no FROM exams x JOIN sections s ON s.id=x.section_id JOIN courses c ON c.id=s.course_id JOIN rooms r ON r.id=x.room_id WHERE s.term_id=2 ORDER BY x.exam_date,x.period_from,s.id"
+  -
+    label: "重修记录"
+    sql: "SELECT e.student_id,c.name,s.section_no FROM enrollments e JOIN sections s ON s.id=e.section_id JOIN courses c ON c.id=s.course_id WHERE s.term_id=2 AND e.status='enrolled' AND EXISTS(SELECT 1 FROM enrollments old JOIN sections os ON os.id=old.section_id WHERE old.student_id=e.student_id AND os.course_id=s.course_id AND os.term_id=1 AND old.status='completed') ORDER BY e.student_id,c.id"

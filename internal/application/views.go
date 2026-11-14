@@ -52,7 +52,7 @@ func (s *Service) ReadView(ctx context.Context, database, id string) (*view.Defi
 	if err != nil {
 		return nil, err
 	}
-	if !d.MCPEnabled {
+	if !d.MCPEnabled || !d.ViewsAvailable() {
 		return nil, management.ErrDenied
 	}
 	return d.View(id, true)

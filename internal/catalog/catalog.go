@@ -40,6 +40,9 @@ type SQLExample struct {
 }
 
 type Database struct {
+	ViewsEnabled           *bool               `json:"views_enabled,omitempty" yaml:"viewsEnabled,omitempty"`
+	Description            *string             `json:"description,omitempty" yaml:"description,omitempty"`
+	Documentation          *string             `json:"documentation,omitempty" yaml:"documentation,omitempty"`
 	DDLEnabled             *bool               `json:"ddl_enabled,omitempty" yaml:"ddlEnabled,omitempty"`
 	SchemaIdentityVersion  int                 `json:"schema_identity_version,omitempty" yaml:"schemaIdentityVersion,omitempty"`
 	Views                  []view.Definition   `json:"views,omitempty" yaml:"views,omitempty"`
@@ -549,6 +552,8 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				}
 				metadataOnly := old
 				metadataOnly.Name, metadataOnly.DDLEnabled = d.Name, d.DDLEnabled
+				metadataOnly.Description, metadataOnly.Documentation = d.Description, d.Documentation
+				metadataOnly.KnowledgeEnabled, metadataOnly.ViewsEnabled = d.KnowledgeEnabled, d.ViewsEnabled
 				metadataOnly.AuthPolicyFingerprint, metadataOnly.ETag = d.AuthPolicyFingerprint, d.ETag
 				if !reflect.DeepEqual(metadataOnly, d) {
 					svc, err := c.Open(ctx, &d)

@@ -33,6 +33,8 @@ type Service struct {
 	sources          *datasource.Manager
 }
 type Input struct {
+	Capability       string                 `json:"capability,omitempty"`
+	Enabled          *bool                  `json:"enabled,omitempty"`
 	SourceConnection *datasource.Connection `json:"source_connection,omitempty"`
 	ImportTask       *datasource.Task       `json:"import_task,omitempty"`
 
@@ -142,6 +144,8 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 	}
 	require := func(p string) error { return guard.Require(ctx, s.Management, in.DatabaseID, p) }
 	switch action {
+	case "configure_capability":
+		return s.ConfigureCapability(ctx, in)
 	case "list_data_sources", "get_import_run", "save_source_connection", "inspect_source_connection", "delete_source_connection", "save_import_task", "delete_import_task", "run_import_task", "trial_import_task", "stop_import_run":
 		return s.DataSources(ctx, action, in)
 	case "list_ddl_objects", "get_ddl_object", "preview_ddl", "apply_ddl", "get_ddl_execution", "list_ddl_executions":
@@ -224,6 +228,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		d.Actions = in.Database.Actions
 		if in.Database.ActionLibraries != nil {
 			d.ActionLibraries = in.Database.ActionLibraries
+		}
+		if d.WriteEnabled != in.Database.WriteEnabled {
+			d.SetActionTools(in.Database.WriteEnabled)
 		}
 		d.WriteEnabled = in.Database.WriteEnabled
 		d.WriteConnection = in.Database.WriteConnection
@@ -424,8 +431,14 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		case "update_database":
 			if in.Database.Name != "" {
 				d.Name = in.Database.Name
-			} else if in.Database.DDLEnabled == nil {
-				return nil, errors.New("需要数据库名称或 ddl_enabled")
+			} else if in.Database.DDLEnabled == nil && in.Database.Description == nil && in.Database.Documentation == nil {
+				return nil, errors.New("需要数据库名称、简介、使用说明或 ddl_enabled")
+			}
+			if in.Database.Description != nil {
+				d.Description = in.Database.Description
+			}
+			if in.Database.Documentation != nil {
+				d.Documentation = in.Database.Documentation
 			}
 			if in.Database.DDLEnabled != nil {
 				if !u.SystemAdmin {
@@ -598,7 +611,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if old.Driver != in.Database.Driver || old.Path != in.Database.Path || !store.SameConnectionTarget(old.Driver, old.Connection, in.Database.Connection) {
 			return nil, errors.New("连接信息登记后固定；更换数据库目标或凭据引用请新建数据源并重新配置权限")
 		}
-		if !reflect.DeepEqual(old.Views, in.Database.Views) || old.QueryViewID != in.Database.QueryViewID {
+		if !reflect.DeepEqual(old.Views, in.Database.Views) || old.QueryViewID != in.Database.QueryViewID || !reflect.DeepEqual(old.ViewsEnabled, in.Database.ViewsEnabled) {
 			if e := require("view.write"); e != nil {
 				return nil, e
 			}
@@ -611,7 +624,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
-		if old.Name != in.Database.Name || !reflect.DeepEqual(old.Connection, in.Database.Connection) || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
+		if old.Name != in.Database.Name || !reflect.DeepEqual(old.Description, in.Database.Description) || !reflect.DeepEqual(old.Documentation, in.Database.Documentation) || !reflect.DeepEqual(old.Connection, in.Database.Connection) || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
 			if e := require("config.write"); e != nil {
 				return nil, e
 			}
@@ -629,7 +642,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if !maskingChanged && reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
+		if !maskingChanged && reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && reflect.DeepEqual(old.ViewsEnabled, in.Database.ViewsEnabled) && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.Description, in.Database.Description) && reflect.DeepEqual(old.Documentation, in.Database.Documentation) && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
@@ -823,6 +836,7 @@ func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool
 }
 
 type DatabaseView struct {
+	Capabilities   map[string]bool          `json:"capabilities"`
 	SchemaEditable bool                     `json:"schema_editable"`
 	ManagementPath string                   `json:"management_path,omitempty"`
 	AuditPath      string                   `json:"audit_path,omitempty"`
@@ -842,6 +856,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		}
 	}
 	g, _ := s.Management.Grant(ctx, u.ID, d.ID)
+	capabilities := map[string]bool{"actions": d.WriteEnabled, "knowledge": d.KnowledgeAvailable(), "views": d.ViewsAvailable()}
 	if !s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		d.Views = nil
 		d.QueryViewID = ""
@@ -856,7 +871,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	view := DatabaseView{SchemaEditable: s.Management.Can(ctx, u.ID, d.ID, "ddl.write") && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{Capabilities: capabilities, SchemaEditable: s.Management.Can(ctx, u.ID, d.ID, "ddl.write") && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
 	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		if source, e := s.Management.Source(ctx, d.ID); e == nil {
 			view.ManagementPath = source.Path

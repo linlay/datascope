@@ -61,6 +61,9 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			if strings.HasPrefix(method, "resources/") && !slices.Contains(a.Permissions, "query") && slices.Contains(a.Permissions, "action") {
 				permission = "action"
 			}
+			if strings.HasPrefix(method, "resources/") && !slices.Contains(a.Permissions, "query") && !slices.Contains(a.Permissions, "action") && slices.Contains(a.Permissions, "knowledge.read") {
+				permission = "knowledge.read"
+			}
 			if tool == "list_actions" || tool == "describe_action" || tool == "invoke_action" {
 				permission = "action"
 			}

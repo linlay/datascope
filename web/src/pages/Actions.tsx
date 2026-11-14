@@ -1,3 +1,4 @@
+import { CapabilitySwitch } from '../components/CapabilitySwitch';
 import { useEffect, useRef, useState } from 'react';
 import { CopyOutlined, DeleteOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Modal, Select, Space, Switch, Tag, Tooltip, Typography, message } from 'antd';
@@ -142,9 +143,9 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
  };
  const visible = items.filter(action => `${action.name} ${action.title} ${action.description}`.toLowerCase().includes(search.toLowerCase()));
  const canTrial = !!selected && !creating && !dirty && !!currentDB.write_enabled && !!currentDB.permissions?.includes('impersonate') && canWrite;
- return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+ return <div className="configuration-page">
   <div className="action-workspace">
-   <Card className="action-list-panel" title={<Space>{t('动作列表')}<Tag>{items.length}</Tag></Space>} extra={<ActionLibraries db={currentDB} disabled={dirty || locked} onSaved={next => { setCurrentDB(next); onSaved(); }} />}>
+   <Card className="action-list-panel" title={<Space wrap>{t('动作列表')}<Tag>{items.length}</Tag><CapabilitySwitch db={currentDB} capability="actions" disabled={dirty || locked || remoteChanged} onSaved={next => { setCurrentDB(next); onSaved(); }} /></Space>} extra={<ActionLibraries db={currentDB} disabled={dirty || locked} onSaved={next => { setCurrentDB(next); onSaved(); }} />}>
     <div className="action-list-toolbar">
      <Input aria-label={t('搜索动作')} placeholder={t('搜索名称、标题、说明')} value={search} allowClear onChange={event => setSearch(event.target.value)} />
      <Tooltip title={t('新增动作')}><Button type="primary" aria-label={t('新增动作')} icon={<PlusOutlined />} disabled={!canWrite || locked || creating} onClick={() => navigate(() => { setSearch(''); edit(example, true); })} /></Tooltip>
@@ -173,17 +174,17 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} action={<IconButton label={t('刷新')} icon={<ReloadOutlined />} onClick={reload} />} />}
-     {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
+     {draft ? <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
       <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
       <div className="action-fields-grid">
-       <Form.Item name="name" label={t('名称')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/ }]}><Input /></Form.Item>
-       <Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item>
-       <Form.Item name="description" label={t('说明')} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
-       <Form.Item name="view_id" label={t("关联视图")}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
+       <Form.Item name="name" label={<span className="configuration-label-text">{t('名称')}</span>} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/ }]}><Input /></Form.Item>
+       <Form.Item name="title" label={<span className="configuration-label-text">{t('标题')}</span>} rules={[{ required: true }]}><Input /></Form.Item>
+       <Form.Item name="description" label={<span className="configuration-label-text">{t('说明')}</span>} rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
+       <Form.Item name="view_id" label={<span className="configuration-label-text">{t("关联视图")}</span>}><Select allowClear placeholder={t("无关联视图")} options={(currentDB.views || []).filter(v => v.published).map(v => ({ value:v.id, label:v.name }))} /></Form.Item>
        <Form.Item name="confirm" label={<Space size={4}>{t('人工确认')}<ActionConfirmationHelp /></Space>} valuePropName="checked"><Switch /></Form.Item>
       </div>
       <Form.Item name="script" label={<Space size={4}>JavaScript · main(params, context)<HelpTip label={t('动作代码')}>{t('db.session() 连接当前数据库；使用 query/queryOne/update 和静态 SQL。动作自行检查业务权限，人工确认动作先预览再确认。')}{' '}{t('使用 const { fn } = require("./库名称") 引用当前数据库的公共函数。')}</HelpTip><UserGuide scriptReference/></Space>} rules={[{ required: true }]}><CodeEditor height="380px" readOnly={!canWrite || locked} /></Form.Item>
-      <Form.Item label={t('参数定义')}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
+      <Form.Item className="configuration-field-stacked" label={<span className="configuration-label-text">{t('参数定义')}</span>}><ParameterEditor value={parameters} onChange={setParameters} readOnly={!canWrite || locked} /></Form.Item>
      </Form> : <Empty description={t('从左侧选择动作，或新增一个动作。')} />}
     </Space>
    </Card>
@@ -197,5 +198,5 @@ export function Actions({ db, onSaved }: { db: Database; onSaved: () => void }) 
     {result !== undefined && <pre className="audit-detail">{JSON.stringify(result, null, 2)}</pre>}
    </Space>
   </Modal>
- </Space>;
+ </div>;
 }

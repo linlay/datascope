@@ -1,18 +1,19 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { installAutoHideScrollbars, previewScrollbarStyles } from '../autoHideScrollbars';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 
 export interface ViewData { input?: Record<string, unknown>; result?: unknown }
 export type ViewCall = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
 // Opaque-origin frames cannot access platform cookies, storage or network.
 // The host forwards calls using business credentials or authorized platform preview APIs.
-export function ViewFrame({ html, data, onCall }: { html: string; data?: ViewData; onCall?: ViewCall }) {
+export function ViewFrame({ html, data, onCall, style }: { html: string; data?: ViewData; onCall?: ViewCall; style?: CSSProperties }) {
  const frame = useRef<HTMLIFrameElement>(null);
  const latest = useRef({ data, onCall }); latest.current = { data, onCall };
  const channel = useMemo(() => crypto.randomUUID(), [html]);
  const links = useRef(new Set<string>());
  const document = useMemo(() => {
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'";
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"></head><body>${html}</body></html>`;
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"><style>${previewScrollbarStyles}</style></head><body><script>(${installAutoHideScrollbars.toString()})()</script>${html}</body></html>`;
  }, [html]);
  const initialize = () => frame.current?.contentWindow?.postMessage({ type: 'datascope:view:init', channel, data: latest.current.data || {} }, '*');
  useEffect(() => { initialize(); }, [data, channel]);
@@ -51,5 +52,5 @@ export function ViewFrame({ html, data, onCall }: { html: string; data?: ViewDat
   window.addEventListener('message', receive);
   return () => window.removeEventListener('message', receive);
  }, [channel]);
- return <iframe ref={frame} title="HTML 视图预览" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={document} onLoad={initialize} style={{ width: '100%', minHeight: 740, border: '1px solid var(--border-color, #dce5e1)', borderRadius: 12, background: '#f4f7f6' }} />;
+ return <iframe ref={frame} title="HTML 视图预览" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={document} onLoad={initialize} style={{ width: '100%', minHeight: 740, border: '1px solid var(--border-color, #dce5e1)', borderRadius: 12, background: '#f4f7f6', ...style }} />;
 }

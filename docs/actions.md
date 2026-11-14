@@ -171,3 +171,7 @@ SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络�
 Token 仅保留在当前页面内存，不进入 localStorage、配置、请求追踪展示或日志。离开页签销毁认证状态。平台会话只控制工作台入口，业务 MCP 每次独立验证 Token、数据库、工具开关和 action 能力。
 
 正式调用需要明确点击并确认。confirm_required 展示回滚 preview 和现有确认页链接，由本人打开确认页登录执行；工作台不调用确认接口。查询结果使用同一 request_id 调用 invoke_action，并指定 result_only:true；只查询当前业务身份的内存回执。网络故障或 MCP 重启后缺失回执返回 unknown，用户应核对审计和业务数据，工作台不自动重试写入。
+
+## 动作总开关
+
+动作列表表头和 MCP 配置页共用同一总开关（`write_enabled`）。`configure_capability` 的 actions 组原子启停 `list_actions`、`describe_action`、`invoke_action`，保留动作内容及发布状态。需 `action.write`，网络库需独立写入账号。关闭后正式执行及回滚试运行均被拒绝，管理端仍可编辑和发布草稿。

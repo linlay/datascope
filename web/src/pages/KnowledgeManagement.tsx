@@ -1,3 +1,4 @@
+import { CapabilitySwitch } from '../components/CapabilitySwitch';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { EditOutlined, EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Form, Input, Modal, Space, Spin, Switch, Tag, Tooltip, message } from 'antd';
@@ -12,7 +13,7 @@ const KnowledgeContent = lazy(() => import('../components/KnowledgeContent'));
 type Fields = Pick<Knowledge, 'id' | 'name' | 'description' | 'published'> & { content: string };
 const fieldsOf = (item: Pick<Knowledge, 'id' | 'name' | 'description' | 'published' | 'content'>): Fields => ({ id: item.id, name: item.name, description: item.description, published: item.published, content: item.content || '' });
 
-export function KnowledgePage({ db }: { db: Database }) {
+export function KnowledgePage({ db, onSaved }: { db: Database; onSaved: () => void }) {
  const t = useI18n();
  const route = useRoute();
  const [items, setItems] = useState<Knowledge[]>([]);
@@ -103,7 +104,7 @@ export function KnowledgePage({ db }: { db: Database }) {
  };
  const visible = items.filter(item => `${item.id} ${item.name} ${item.description}`.toLowerCase().includes(search.toLowerCase()));
  return <div className="knowledge-workspace">
-  <Card className="knowledge-list-panel" title={<Space>{t('知识列表')}<Tag>{items.length}</Tag></Space>}>
+  <Card className="knowledge-list-panel" title={<Space wrap>{t('知识列表')}<Tag>{items.length}</Tag><CapabilitySwitch db={db} capability="knowledge" disabled={dirty || locked || reading} onSaved={() => onSaved()} /></Space>}>
    <div className="knowledge-list-toolbar">
     <Input aria-label={t('搜索知识列表')} placeholder={t('搜索名称、描述或 ID')} allowClear value={search} onChange={event => setSearch(event.target.value)} />
     <Tooltip title={t('新增知识')}><Button type="primary" aria-label={t('新增知识')} icon={<PlusOutlined />} disabled={!canWrite || locked || creating} onClick={() => navigate(() => { sequence.current++; setReading(false); setSearch(''); edit({ id: crypto.randomUUID(), database_id: db.id, name: '', description: '', content: '', published: false, revision: 0 }, true); })} /></Tooltip>
@@ -121,11 +122,11 @@ export function KnowledgePage({ db }: { db: Database }) {
    <SaveButton loading={saving} disabled={!canWrite || !dirty || locked || reading} onClick={() => void save()} />
   </Space>}>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
-   {draft ? <Form form={form} layout="vertical" disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
+   {draft ? <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap disabled={!canWrite || locked} onValuesChange={(_, values) => setDraft(values)}>
     <div className="knowledge-fields-grid">
-     <Form.Item name="id" label={t('知识 ID')} rules={[{ required: true, pattern: /^[^/]+$/ }]}><Input disabled={!!selected?.revision} /></Form.Item>
-     <Form.Item name="name" label={t('名称')} rules={[{ required: true }]}><Input /></Form.Item>
-     <Form.Item className="resource-description" name="description" label={t('描述')} tooltip={t('作为知识列表和搜索结果的描述发送给模型，可填写用途、适用问题和主要内容。')} rules={[{ required: true }]}><Input.TextArea rows={3} aria-label={t('知识描述')} /></Form.Item>
+     <Form.Item name="id" label={<span className="configuration-label-text">{t('知识 ID')}</span>} rules={[{ required: true, pattern: /^[^/]+$/ }]}><Input disabled={!!selected?.revision} /></Form.Item>
+     <Form.Item name="name" label={<span className="configuration-label-text">{t('名称')}</span>} rules={[{ required: true }]}><Input /></Form.Item>
+     <Form.Item className="resource-description" name="description" label={<span className="configuration-label-text">{t('描述')}</span>} tooltip={t('作为知识列表和搜索结果的描述发送给模型，可填写用途、适用问题和主要内容。')} rules={[{ required: true }]}><Input.TextArea rows={3} aria-label={t('知识描述')} /></Form.Item>
     </div>
     <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
     <div className="content-field-header"><span>{t('正文')} <span className="content-language">Markdown</span></span><IconButton label={preview ? t('编辑正文') : t('预览正文')} icon={preview ? <EditOutlined /> : <EyeOutlined />} disabled={locked} onClick={() => setView(preview?'edit':'preview')} /></div>

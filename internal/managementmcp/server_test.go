@@ -244,3 +244,22 @@ func TestConnectionManagementRoutes(t *testing.T) {
 		t.Fatal("inspect accepted removal")
 	}
 }
+
+func TestDatabaseDocumentationPartialUpdate(t *testing.T) {
+	for _, field := range []string{"description", "documentation"} {
+		for _, value := range []string{`""`, `"业务说明"`} {
+			raw := `{"action":"update","args":{"resourceType":"database","database_id":"default","database":{"id":"default","revision":1,"` + field + `":` + value + `}}}`
+			var in input
+			if err := json.Unmarshal([]byte(raw), &in); err != nil {
+				t.Fatal(err)
+			}
+			domain, args, err := decode("datascope_manage", in)
+			if err != nil || domain != "update_database" {
+				t.Fatalf("partial update rejected: %s %v", raw, err)
+			}
+			if field == "description" && args.Database.Description == nil || field == "documentation" && args.Database.Documentation == nil {
+				t.Fatal("explicit empty field lost")
+			}
+		}
+	}
+}

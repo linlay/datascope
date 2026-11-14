@@ -1,10 +1,12 @@
 import { SaveButton, useSaveModalProps } from './IconButton';
+import { ExportOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Checkbox, Typography, message } from 'antd';
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Checkbox, Tooltip, Typography, message } from 'antd';
 import { databases, managementCall, type AuthConfig, type AuthPolicy, type AuthProvider, type Database } from '../api';
 import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
 import { OneIDKeyInput } from './OneIDConfiguration';
+import { HelpTip } from './HelpTip';
 import { BusinessAccounts } from '../pages/BusinessAccounts';
 
 type Authentication = NonNullable<Database['authentication']>;
@@ -97,9 +99,13 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
  };
  const endpoint = new URL(db.mcp_endpoint || `/mcp/${db.mcp_path || db.id}`, window.location.origin);
  const metadataURL = `${endpoint.origin}/.well-known/oauth-protected-resource${endpoint.pathname}`;
+ const oneIDHelp = mode === 'ONEID' && <HelpTip label={t(source === 'DATABASE' ? '认证服务' : '认证提供方')}>{t('Platform 选择 oneid，客户端直接发送自身的 ID Token，无需为本库跳转 SSO 登录。服务端验签后直接使用业务身份字段作为员工编号；姓名默认读取 name。')}</HelpTip>;
  return <>
   <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-   <Card title={t('业务认证')} extra={user.system_admin ? <Space><Button disabled={!dirty || busy} onClick={() => { setDraft(undefined); setError(''); }}>{t('取消')}</Button><SaveButton type="primary" loading={busy} disabled={!dirty || mode !== 'NONE' && !selectedProvider?.enabled} onClick={() => void saveMode()} /></Space> : undefined}>
+   <Card className="database-authentication-card" title={t('业务认证')} extra={<Space wrap>
+    {user.system_admin && <><Button disabled={!dirty || busy} onClick={() => { setDraft(undefined); setError(''); }}>{t('取消')}</Button><SaveButton type="primary" loading={busy} disabled={!dirty || mode !== 'NONE' && !selectedProvider?.enabled} onClick={() => void saveMode()} /></>}
+    {db.access?.policy.mode === 'OAUTH' && <Tooltip title={metadataURL}><Typography.Link href={metadataURL} target="_blank" rel="noreferrer" aria-label={t('已生效的发现地址')}>{t('发现地址')} <ExportOutlined /></Typography.Link></Tooltip>}
+   </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
      {error && !optionsOpen && <Alert type="error" showIcon title={error} />}
      <Radio.Group aria-label={t('认证方式')} value={displayMode} disabled={!user.system_admin || busy} onChange={e => changeMode(e.target.value)} options={[{ value: 'NONE', label: t('无需认证（none）') }, { value: 'OAUTH', label: t('SSO / MCP OAuth（mcp）') }, { value: 'ONEID', label: t('企业 OneID（oneid）') }, { value: 'TOKEN', label: 'Token / API Key（token）' }]} />
@@ -108,18 +114,19 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
       {source === 'GLOBAL' ? <Space wrap>
        <Typography.Text>{t('认证提供方')}</Typography.Text>
        <Select aria-label={t('认证提供方')} style={{ width: 280, maxWidth: '100%' }} disabled={!user.system_admin || busy} value={selected.provider_id} options={user.system_admin ? available.map(p => ({ value: p.id, label: `${p.name} · ${t(providerLabel(p.type))}` })) : [{ value: selected.provider_id, label: db.access?.provider.name }]} onChange={provider_id => { const p = providers.find(p => p.id === provider_id); patchPolicy({ provider_id, mode: p ? providerMode(p.type) : mode }); }} />
+       {oneIDHelp}
       </Space> : <>
-       <Space wrap><Typography.Text>{t('认证服务')}</Typography.Text><Select aria-label={t('认证服务')} style={{ width: 280, maxWidth: '100%' }} disabled={!user.system_admin || busy} value={selectedProvider?.type} options={providerTypes(displayMode).map(type => ({ value: type, label: t(providerLabel(type)) }))} onChange={type => { const provider = newProvider(displayMode, type); update({ provider, access: { ...selected, mode: providerMode(type), provider_id: provider.id } }); }} /></Space>
-       {(mode === 'ONEID' || mode === 'TOKEN') && <Form layout="vertical" disabled={!user.system_admin || busy} className="auth-connection-form">
-        {(mode === 'ONEID' ? oneIDFields : []).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
+       <Space wrap><Typography.Text>{t('认证服务')}</Typography.Text><Select aria-label={t('认证服务')} style={{ width: 280, maxWidth: '100%' }} disabled={!user.system_admin || busy} value={selectedProvider?.type} options={providerTypes(displayMode).map(type => ({ value: type, label: t(providerLabel(type)) }))} onChange={type => { const provider = newProvider(displayMode, type); update({ provider, access: { ...selected, mode: providerMode(type), provider_id: provider.id } }); }} />{oneIDHelp}</Space>
+       {(mode === 'ONEID' || mode === 'TOKEN') && <Form layout="horizontal" labelAlign="left" labelWrap disabled={!user.system_admin || busy} className="configuration-form auth-connection-form">
+        {(mode === 'ONEID' ? oneIDFields : []).map(([key, label]) => <Form.Item key={key} label={<span className="configuration-label-text">{t(label)}</span>} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
         {mode === 'ONEID' && <OneIDKeyInput jwksUrl={selectedProvider?.jwks_url} publicKeyPem={selectedProvider?.public_key_pem} disabled={!user.system_admin || busy} onChange={patchProvider} />}
-        {mode === 'TOKEN' && <Form.Item label={t('API Key 请求头（留空使用 Bearer）')}><Input aria-label={t('API Key 请求头')} value={selectedProvider?.header_name || ''} onChange={e => patchProvider({ header_name: e.target.value })} placeholder="X-API-Key" /></Form.Item>}
-        {mode === 'ONEID' && optionalFields.filter(([key]) => key !== 'secret_env').map(([key,label]) => <Form.Item key={key} label={t(label)}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
+        {mode === 'TOKEN' && <Form.Item label={<span className="configuration-label-text">{t('API Key 请求头（留空使用 Bearer）')}</span>}><Input aria-label={t('API Key 请求头')} value={selectedProvider?.header_name || ''} onChange={e => patchProvider({ header_name: e.target.value })} placeholder="X-API-Key" /></Form.Item>}
+        {mode === 'ONEID' && optionalFields.filter(([key]) => key !== 'secret_env').map(([key,label]) => <Form.Item key={key} label={<span className="configuration-label-text">{t(label)}</span>}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} /></Form.Item>)}
        </Form>}
-       {enterprise && <Form layout="vertical" disabled={!user.system_admin || busy} className="auth-connection-form">
+       {enterprise && <Form layout="horizontal" labelAlign="left" labelWrap disabled={!user.system_admin || busy} className="configuration-form auth-connection-form">
         <div className="auth-connection-fields">
-         {(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? oauthFields : accountFields).map(([key, label]) => <Form.Item key={key} label={t(label)} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'client_id' ? 'datascope' : 'https://identity.example.com/…'} /></Form.Item>)}
-         {optionalFields.map(([key, label]) => <Form.Item key={key} label={t(label)} tooltip={key === 'secret_env' ? t('填写服务端环境变量名，不在配置中保存密钥明文。') : key === 'business_id_claim' ? t('认证结果中直接用于 SQL 行权限的正整数员工编号字段。') : undefined}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'secret_env' ? 'DATASCOPE_AUTH_ENTERPRISE_SECRET' : undefined} /></Form.Item>)}
+         {(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? oauthFields : accountFields).map(([key, label]) => <Form.Item key={key} label={<span className="configuration-label-text">{t(label)}</span>} required><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'client_id' ? 'datascope' : 'https://identity.example.com/…'} /></Form.Item>)}
+         {optionalFields.map(([key, label]) => <Form.Item key={key} label={<span className="configuration-label-text">{t(label)}</span>} tooltip={key === 'secret_env' ? t('填写服务端环境变量名，不在配置中保存密钥明文。') : key === 'business_id_claim' ? t('认证结果中直接用于 SQL 行权限的正整数员工编号字段。') : undefined}><Input aria-label={t(label)} value={selectedProvider?.[key] || ''} onChange={e => patchProvider({ [key]: e.target.value })} placeholder={key === 'secret_env' ? 'DATASCOPE_AUTH_ENTERPRISE_SECRET' : undefined} /></Form.Item>)}
         </div>
        </Form>}
       </>}
@@ -131,15 +138,12 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
        <Button danger disabled={dirty||busy||db.access?.policy.mode!=='TOKEN'} onClick={()=>Modal.confirm({title:t('撤销 API Key'),content:t('撤销后，该密钥不能继续访问本数据库。'),onOk:()=>manageKey('revoke_database_api_key')})}>{t('撤销 API Key')}</Button>
       </Space>}
      </Space>}
-     {mode === 'OAUTH' && <Alert type="info" showIcon title={t(selectedProvider?.type === 'ENTERPRISE_OAUTH' ? 'Platform 选择 mcp，通过授权发现跳转到企业 SSO 登录，取得访问令牌后访问本库。' : 'Platform 选择 mcp，通过 OAuth 跳转到本库业务账号登录。企业 SSO 请使用企业 SSO 提供方。')} />}
-     {mode === 'ONEID' && <Alert type="info" showIcon title={t('Platform 选择 oneid，客户端直接发送自身的 ID Token，无需为本库跳转 SSO 登录。服务端验签后直接使用业务身份字段作为员工编号；姓名默认读取 name。')} />}
      {(mode === 'NONE' || !usesAccounts) && <Space wrap>
       {(mode === 'NONE' || mode === 'TOKEN') && <><Typography.Text>{t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')}</Typography.Text><InputNumber aria-label={t(mode === 'TOKEN' ? 'Token 业务身份' : '匿名业务身份')} min={0} precision={0} disabled={!user.system_admin || busy} value={selected.business_user_id || 0} onChange={value => patchPolicy({ business_user_id: value || 0 })} /></>}
       <Checkbox.Group disabled={!user.system_admin || busy} value={selected.permissions || []} options={[{ value: 'query', label: t('查询') }, { value: 'knowledge.read', label: t('知识查询') }, { value: 'raw_query', label: t('原始查询') }, { value: 'action', label: t('执行动作') }]} onChange={permissions => patchPolicy({ permissions: permissions as string[] })} />
      </Space>}
      {usesAccounts && user.system_admin && <Button disabled={busy || dirty || !savedLocal} onClick={openOptions}>{t('登录选项')}</Button>}
      {db.access?.policy.mode === 'ACCOUNT' && db.mcp_enabled && <Button href={`#/business-login?database=${encodeURIComponent(db.id)}`} target="_blank" rel="noreferrer">{t('登录并获取个人 Token')}</Button>}
-     {db.access?.policy.mode === 'OAUTH' && <div><Typography.Text type="secondary" style={{ marginInlineEnd: 8 }}>{t('已生效的发现地址')}</Typography.Text><Typography.Link href={metadataURL} target="_blank" rel="noreferrer" style={{ overflowWrap: 'anywhere' }}>{metadataURL}</Typography.Link></div>}
     </Space>
    </Card>
    {usesAccounts && user.system_admin && <Card title={t('本地账号')}><BusinessAccounts key={db.id} db={db}/></Card>}
@@ -153,9 +157,9 @@ export function DatabaseAuthentication({ db, onSaved }: { db: Database; onSaved:
   </Modal>
   <Modal {...saveModalProps} title={t('登录选项')} open={optionsOpen} onCancel={() => setOptionsOpen(false)} onOk={() => void saveOptions()} confirmLoading={busy} destroyOnHidden>
    {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />}
-   <Form form={form} layout="vertical">
-    <Form.Item name="label" label={t('登录页名称')}><Input maxLength={40} placeholder={db.name} /></Form.Item>
-    {db.driver === 'sqlite' && <Form.Item name="employee_directory" label={t('校验演示库员工目录')} valuePropName="checked" tooltip={t('仅用于证券演示库，校验工号、员工编号和在职状态。')}><Switch /></Form.Item>}
+   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap>
+    <Form.Item name="label" label={<span className="configuration-label-text">{t('登录页名称')}</span>}><Input maxLength={40} placeholder={db.name} /></Form.Item>
+    {db.driver === 'sqlite' && <Form.Item name="employee_directory" label={<span className="configuration-label-text">{t('校验演示库员工目录')}</span>} valuePropName="checked" tooltip={t('仅用于证券演示库，校验工号、员工编号和在职状态。')}><Switch /></Form.Item>}
    </Form>
   </Modal>
  </>;

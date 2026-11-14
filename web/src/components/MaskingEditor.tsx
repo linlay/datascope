@@ -30,10 +30,10 @@ export function MaskingEditor({table,column,onCancel,onApply}: {
    <Descriptions size="small" column={1} items={[
     {key:'column',label:t('字段 / 类型'),children:<><Text code>{table}.{column.name}</Text><Text type="secondary"> · {column.type}</Text></>},
    ]}/>
-   <Space orientation="vertical" size={4} style={{width:'100%'}}>
+   <div className="configuration-inline-field">
     <Text>{t('脱敏规则')}</Text>
     <Select aria-label={t('脱敏规则')} style={{width:'100%'}} value={rule.type} options={Object.entries(maskingLabels).map(([value,label])=>({value,label:t(label)}))} onChange={type=>setRule(defaultMasking(type,column.name))}/>
-   </Space>
+   </div>
    {rule.type==='partial'&&<Space wrap size="large">
     <Space><Text>{t('保留前几位')}</Text><InputNumber aria-label={t('保留前几位')} min={0} max={100} precision={0} value={prefix} onChange={value=>setRule({...rule,keep_prefix:value??0})}/></Space>
     <Space><Text>{t('保留后几位')}</Text><InputNumber aria-label={t('保留后几位')} min={0} max={100} precision={0} value={suffix} onChange={value=>setRule({...rule,keep_suffix:value??0})}/></Space>

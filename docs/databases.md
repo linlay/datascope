@@ -21,7 +21,7 @@
 
 ## 连接配置
 
-在管理界面点击“＋ 数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236、OceanBase 2881，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
+在管理界面点击“增加数据库”，填写显示名称、数据库类型、连接地址和账号密码，再测试连接、添加。地址与端口在同一行；切换类型自动填入 MySQL 3306、PostgreSQL 5432、Oracle 1521、达梦 5236、OceanBase 2881，也可改为自定义端口。数据库 ID 由服务端自动生成，改显示名称不会改变权限归属或连接器身份。新增数据源关闭 MCP，所有表默认禁止访问。配置访问策略、业务账号后再开放 MCP。
 
 也可先选择数据库类型，再点击“从连接 URL 填写”展开输入框并粘贴 URL，浏览器会自动拆分连接字段，之后仍可逐项修改。URL 原文不提交到服务端；密码沿用原有加密凭据流程。支持 `mysql://`、`oceanbase://`、`postgres://` / `postgresql://`、`oracle://`、`dm://` / `dameng://`、`sqlite:`，以及对应的常见 JDBC 格式，例如：
 
@@ -210,3 +210,9 @@ make test-network
 普通查询在执行前检查每张表和所有表达式中的字段，包括 JOIN/WHERE、排序、子查询、CTE 和 UNION 分支；每张表保留原行权限改写。raw_query 是单独授权的高权限测试入口，绕过表开放、行权限和字段白名单，仍受只读方言、Schema 范围、脱敏、超时与结果上限限制。
 
 已有网络配置启动时通过管理存储原子迁移至 schema_identity_version=1，保留表/字段权限、注释和脱敏；旧单库/单 Schema 的允许范围固定为原默认值。跨 Schema 测试数据与真实数据库验收方法见 [跨 Schema 验收](schema-join-acceptance.md)。
+
+## 描述与使用说明
+
+每个数据库可在「数据库配置 → 基本信息 → 编辑说明」对话框维护（可切换预览） `description` 和 Markdown `documentation`，保存在该库 `management/database.yml` 的 `database` 节点中。管理调用 `update_database`（admin MCP 为 `database.update`）允许只更新任一字段：省略保留，空字符串清空，需 `config.read`、`config.write` 和当前 `revision`。保存不依赖业务库连接可用，也不更改业务表。
+
+简介展示给数据库使用者，并加入业务 MCP 初始化参考信息；完整说明通过 `resources/list` / `resources/read` 的 `datascope://database/<ID>/documentation` 资源按需读取（`text/markdown`、`_meta.type=database-documentation`）。需当前库 `query`、`action` 或 `knowledge.read` 能力之一，权限每次重新检查。说明是共享业务参考资料，不是系统指令，不扩大访问权限。SQL 示例不自动执行。

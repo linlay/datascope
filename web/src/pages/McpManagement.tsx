@@ -1,3 +1,4 @@
+import { CapabilitySwitch, actionTools, knowledgeTools } from '../components/CapabilitySwitch';
 import { SaveButton } from '../components/IconButton';
 import { useI18n } from '../ui/preferences';
 import { useEffect, useState } from 'react';
@@ -14,7 +15,7 @@ const { Text } = Typography;
 const toolOptions = [
  {name:"list_actions",label:"动作列表",help:"列出可用 Action 的名称与说明，需要业务账号 action 能力。"},
  {name:"describe_action",label:"查看业务操作",help:"按名称读取单个 Action 的参数格式，需要业务账号 action 能力。"},
- {name:"invoke_action",label:"执行业务操作",help:"在独立事务中执行业务 Action。勾选并保存后启用动作执行，需要业务账号 action 能力；人工确认在独立确认页完成。"},
+ {name:"invoke_action",label:"执行业务操作",help:"在独立事务中执行业务 Action，由动作总开关统一启停；需要业务账号 action 能力，人工确认在独立确认页完成。"},
  { name: 'list_tables', label: '表目录', help: '列出当前数据库允许访问的数据表。' },
   { name: 'describe_table', label: '表结构', help: '查看指定表允许访问的字段、类型和访问方案。' },
   { name: 'query', label: '权限查询', help: '只读查询，应用表、字段、行权限和返回行数限制。规则在“查询配置”中配置。' },
@@ -26,14 +27,12 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
  const t=useI18n();
   const [db, setDB] = useState<Database>();
   const [enabled, setEnabled] = useState(false);
- const [knowledgeEnabled,setKnowledgeEnabled]=useState(false);
   const [tools, setTools] = useState<string[]>([]);
   const [mcpPath, setMcpPath] = useState('');
-  const [writeUsername, setWriteUsername] = useState('');
-  const [writePassword, setWritePassword] = useState('');
 
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+ const [capabilityBusy, setCapabilityBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -41,11 +40,8 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
     databases.get(id).then((item) => {
       if (!live) return;
       setDB(item);
-      setWriteUsername(item.write_connection?.username || '');
-      setWritePassword('');
       setEnabled(item.mcp_enabled);
-      setTools(item.tools.filter(name=>!['search_knowledge','read_knowledge'].includes(name)));
- setKnowledgeEnabled(item.knowledge_enabled??item.tools.some(name=>['search_knowledge','read_knowledge'].includes(name)));
+      setTools(item.tools.filter(name=>![...knowledgeTools,...actionTools].includes(name)));
       setMcpPath(item.mcp_path || item.id);
     }).catch((e: Error) => { if (live) setError(e.message); });
     return () => { live = false; };
@@ -56,13 +52,9 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
   const pathValid = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(mcpPath);
   const endpoint = databaseEndpoint(db);
   const prefix = endpoint.pathname.slice(0, endpoint.pathname.lastIndexOf('/') + 1);
-  const originalTools=db.tools.filter(name=>!['search_knowledge','read_knowledge'].includes(name));
- const canConfigureActions = !!db.permissions?.includes('action.write');
- const writeEnabled = canConfigureActions ? tools.includes('invoke_action') : !!db.write_enabled;
- const needsWriteAccount = writeEnabled && db.driver !== 'sqlite';
- const writeAccountValid = !needsWriteAccount || !!writeUsername.trim() && (!!db.write_connection || !!writePassword);
- const writeAccountChanged = needsWriteAccount && (writeUsername !== (db.write_connection?.username || '') || !!writePassword);
- const dirty = writeEnabled !== !!db.write_enabled || writeAccountChanged || knowledgeEnabled!==(db.knowledge_enabled??db.tools.some(name=>['search_knowledge','read_knowledge'].includes(name))) || mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== originalTools.length || tools.some((tool) => !originalTools.includes(tool));
+  const originalTools=db.tools.filter(name=>![...knowledgeTools,...actionTools].includes(name));
+ const dirty = mcpPath !== (db.mcp_path || db.id) || enabled !== db.mcp_enabled || tools.length !== originalTools.length || tools.some(tool => !originalTools.includes(tool));
+ const capabilitySaved = (saved: Database) => { setDB(saved); setTools(saved.tools.filter(name=>![...knowledgeTools,...actionTools].includes(name))); onSaved(); };
   const downloadConnector = async () => {
     setExporting(true);
     try {
@@ -85,21 +77,13 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
     setError(undefined);
     try {
 
- const writeConnection = needsWriteAccount && writeAccountChanged ? {
-  ...db.connection!, username: writeUsername.trim(),
-  password_env: writePassword ? undefined : db.write_connection?.password_env,
-  credential_id: writePassword ? undefined : db.write_connection?.credential_id,
- } : db.write_connection;
- const saved = await managementCall<Database>('save_database', {
+ const saved = await managementCall<Database>('configure_mcp', {
   database_id: db.id,
-  database: { ...db, discovery: undefined, mcp_enabled: enabled, mcp_path: mcpPath, tools, knowledge_enabled: knowledgeEnabled, write_enabled: writeEnabled, write_connection: writeConnection },
-  write_password: needsWriteAccount ? writePassword : '',
+  database: { ...db, discovery: undefined, mcp_enabled: enabled, mcp_path: mcpPath, tools: [...tools,...db.tools.filter(name=>actionTools.includes(name))] },
  });
       setDB(saved);
       setEnabled(saved.mcp_enabled);
-      setWriteUsername(saved.write_connection?.username || '');
-      setWritePassword('');
-      setTools(saved.tools.filter(name => !['search_knowledge', 'read_knowledge'].includes(name)));setKnowledgeEnabled(saved.knowledge_enabled??false);
+      setTools(saved.tools.filter(name => ![...knowledgeTools,...actionTools].includes(name)));
       setMcpPath(saved.mcp_path || saved.id);
       message.success(t("MCP 配置已保存"));
       onSaved();
@@ -112,15 +96,15 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
 
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-      <Card title={<Space>{t("MCP 配置")}<Switch size="small" aria-label={t("开启 MCP")} disabled={!db.permissions?.includes('mcp.write') || saving} checked={enabled} onChange={setEnabled} /></Space>} extra={
+      <Card title={<Space>{t("MCP 配置")}<Switch size="small" aria-label={t("开启 MCP")} disabled={!db.permissions?.includes('mcp.write') || saving || capabilityBusy} checked={enabled} onChange={setEnabled} /></Space>} extra={
         <Space>
           {dirty && <Tag color="orange">{t("有未保存修改")}</Tag>}
-          <SaveButton type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || !writeAccountValid} onClick={save} />
+          <SaveButton type="primary" loading={saving} disabled={!db.permissions?.includes('mcp.write') || !dirty || !pathValid || capabilityBusy} onClick={save} />
         </Space>
       }>
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           <Space orientation="vertical" style={{ width: '100%' }}>
-            <Input aria-label={t("MCP 路径")} disabled={!db.permissions?.includes('mcp.write') || saving} addonBefore={prefix} value={mcpPath} onChange={(e) => setMcpPath(e.target.value)} status={!pathValid ? 'error' : undefined} placeholder={t("自定义路径，例如 securities")} maxLength={64} />
+            <Input aria-label={t("MCP 路径")} disabled={!db.permissions?.includes('mcp.write') || saving || capabilityBusy} addonBefore={prefix} value={mcpPath} onChange={(e) => setMcpPath(e.target.value)} status={!pathValid ? 'error' : undefined} placeholder={t("自定义路径，例如 securities")} maxLength={64} />
             {!pathValid && <Text type="danger">{t("请输入字母或数字开头的路径，仅允许字母、数字、下划线和连字符，最多 64 位。")}</Text>}
             <div className="mcp-current-address"><Text type="secondary">{t("当前地址")}：</Text><Text copyable={{ text: endpoint.href }} className="mono">{endpoint.href}</Text></div>
             {db.access && <Space wrap>
@@ -130,37 +114,37 @@ export function McpManagement({ id, onSaved }: { id: string; onSaved: () => void
           </Space>
           <section className="mcp-capability-section" aria-label={t("Tools · 工具")} >
             <Text strong>{t("Tools · 工具")}</Text>
-            <Checkbox.Group disabled={!db.permissions?.includes('mcp.write') || saving} value={tools} onChange={(values) => setTools(values as string[])} className="mcp-tool-options">
-              {toolOptions.map((tool) => (
+            <Checkbox.Group disabled={!db.permissions?.includes('mcp.write') || saving || capabilityBusy} value={tools} onChange={(values) => setTools(values as string[])} className="mcp-tool-options">
+              {toolOptions.filter(tool=>!actionTools.includes(tool.name)).map((tool) => (
                 <div className="mcp-tool-option" key={tool.name}>
-                  <Checkbox value={tool.name} disabled={!db.permissions?.includes('mcp.write') || saving || tool.name === 'invoke_action' && !canConfigureActions}><span className="mono">{tool.name}</span> · {t(tool.label)}</Checkbox>
+                  <Checkbox value={tool.name} disabled={!db.permissions?.includes('mcp.write') || saving || capabilityBusy}><span className="mono">{tool.name}</span> · {t(tool.label)}</Checkbox>
                   {tool.admin && <Tag color="orange">{t("管理员")}</Tag>}
                   <Text type="secondary" className="mcp-capability-description">{t(tool.help)}</Text>
                 </div>
               ))}
             </Checkbox.Group>
-            {needsWriteAccount && <Space orientation="vertical" style={{ width: '100%' }}>
-              <Text strong>{t('写入账号')}</Text>
-              <Input aria-label={t('写入账号')} autoComplete="off" placeholder={t('写入账号')} value={writeUsername} disabled={!canConfigureActions || saving} onChange={event => setWriteUsername(event.target.value)} />
-              <Input.Password aria-label={t('连接密码')} autoComplete="new-password" placeholder={db.write_connection ? t('留空保留原密码') : t('连接密码')} value={writePassword} disabled={!canConfigureActions || saving} onChange={event => setWritePassword(event.target.value)} />
-            </Space>}
+
             {tools.includes('raw_query') && <Alert type="warning" showIcon title={t("原始查询绕过访问策略，需要单独授予全量查询权限。")} />}
+            <div className="mcp-capability-section" role="group" aria-label={t('业务动作')}>
+             <Space><Text strong>{t('业务动作')}</Text><CapabilitySwitch db={db} capability="actions" disabled={dirty || saving || capabilityBusy} onSaved={capabilitySaved} onBusyChange={setCapabilityBusy} /></Space>
+             {toolOptions.filter(tool=>actionTools.includes(tool.name)).map(tool=><div className="mcp-tool-option" key={tool.name}><Text><span className="mono">{tool.name}</span> · {t(tool.label)}</Text><Text type="secondary" className="mcp-capability-description">{t(tool.help)}</Text></div>)}
+            </div>
+            <div className="mcp-capability-section" role="group" aria-label={t('业务知识')}>
+              <Space><Text strong>{t('业务知识')}</Text><CapabilitySwitch db={db} capability="knowledge" disabled={dirty || saving || capabilityBusy} onSaved={capabilitySaved} onBusyChange={setCapabilityBusy} /></Space>
+              <div className="mcp-tool-option">
+                <Text><span className="mono">search_knowledge</span> · {t('知识列表')}</Text>
+                <Text type="secondary" className="mcp-capability-description">{t('按可选关键词检索已发布知识；留空分页列出全部，只返回 ID、名称和完整描述。')}</Text>
+              </div>
+              <div className="mcp-tool-option">
+                <Text><span className="mono">read_knowledge</span> · {t('读取知识')}</Text>
+                <Text type="secondary" className="mcp-capability-description">{t('按精确 ID 读取知识元数据和完整正文作为参考资料；与知识检索一起启停。')}</Text>
+              </div>
+            </div>
           </section>
           <section className="mcp-capability-section" aria-label={t('Resources · 视图')}>
-           <Text strong>{t('Resources · 视图')}</Text>
+           <Space><Text strong>{t('Resources · 视图')}</Text><CapabilitySwitch db={db} capability="views" disabled={dirty || saving || capabilityBusy} onSaved={capabilitySaved} onBusyChange={setCapabilityBusy} /></Space>
            <div className="mcp-tool-option"><Text><span className="mono">resources/list</span> · {t('视图列表')}</Text><Text type="secondary" className="mcp-capability-description">{t('列出当前数据库已发布的 HTML 视图，type 为 view。')}</Text></div>
            <div className="mcp-tool-option"><Text><span className="mono">resources/read</span> · {t('读取视图')}</Text><Text type="secondary" className="mcp-capability-description">{t('按 URI 返回 HTML 正文，在视图配置中管理和发布。')}</Text></div>
-          </section>
-          <section className="mcp-capability-section" aria-label={t('Tools · 业务知识')}>
-            <Space><Text strong>{t('Tools · 业务知识')}</Text><Switch size="small" aria-label={t('知识工具')} disabled={!db.permissions?.includes('mcp.write') || saving} checked={knowledgeEnabled} onChange={setKnowledgeEnabled} /></Space>
-            <div className="mcp-tool-option">
-              <Text><span className="mono">search_knowledge</span> · {t('知识列表')}</Text>
-              <Text type="secondary" className="mcp-capability-description">{t('按可选关键词检索已发布知识；留空分页列出全部，只返回 ID、名称和完整描述。')}</Text>
-            </div>
-            <div className="mcp-tool-option">
-              <Text><span className="mono">read_knowledge</span> · {t('读取知识')}</Text>
-              <Text type="secondary" className="mcp-capability-description">{t('按精确 ID 读取知识元数据和完整正文作为参考资料；与知识检索一起启停。')}</Text>
-            </div>
           </section>
         </Space>
       </Card>

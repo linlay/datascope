@@ -1,4 +1,5 @@
 :root {
+  --configuration-label-width: 5em;
   --border: rgba(60, 60, 67, 0.12);
   --muted: rgba(60, 60, 67, 0.6);
   --hover: rgba(0, 0, 0, 0.045);
@@ -225,8 +226,8 @@ details > summary {
 .sql-editor { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.7; }
 .sql-preview { min-height: 240px; }
 .sql-preview > .ant-empty { padding-top: 40px; }
-.sql-diff { max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); font-size: 12px; }
-.sql-diff-heading { padding: 8px 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.sql-diff { max-height: 240px; overflow: auto; border: 0; border-radius: 6px; background: var(--code-bg); font-size: 12px; }
+.sql-diff-heading { padding: 8px 12px; color: var(--muted); border-bottom: 0; }
 .sql-diff-lines { min-width: max-content; }
 .sql-diff-line { display: flex; white-space: pre; line-height: 1.8; padding-right: 12px; }
 .sql-diff-line.added { background: #dafbe1; color: #116329; }
@@ -312,7 +313,7 @@ details > summary {
 .workspace-sidebar .ant-menu-item-divider {margin:10px 14px;border-color:var(--border);}
 .workspace-label {padding:22px 20px 14px;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .app-header > .ant-space:last-child {margin-left:auto;}
-.code-editor {border:1px solid var(--border);border-radius:8px;overflow:hidden;line-height:1.65;font-size:13px;}
+.code-editor {border:0;border-radius:8px;overflow:hidden;line-height:1.65;font-size:13px;}
 .parameter-row {border:1px solid var(--border);padding:12px;border-radius:8px;width:100%;}
 @media(max-width:991px){.workspace-sidebar .workspace-label{padding:16px 6px;font-size:10px}.workspace-sidebar .ant-menu-title-content{font-size:11px}.workspace-sidebar .ant-menu-item{padding-inline:6px!important;}.workspace-sidebar .ant-menu-submenu-title{padding-inline:6px!important;}.app-content{padding:12px;}.parameter-row .ant-space{max-width:100%;}}
 .ant-modal-container,.ant-drawer-content {background:#fff!important;}
@@ -499,4 +500,110 @@ details > summary {
 .source-task-editor .ant-card-head {flex-wrap:wrap;}
 @media(max-width:1100px){.source-script-layout{grid-template-columns:minmax(0,1fr)}.source-task-editor .ant-card-head-wrapper{flex-wrap:wrap;gap:12px;padding-block:12px;}}
 
+.database-authentication-card > .ant-card-head .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; padding-block: 8px; }
+.database-authentication-card > .ant-card-head .ant-card-extra { margin-inline-start: auto; }
+
+.database-basic-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px 24px; }
+.database-type-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; min-height: 30px; margin-top: 0; }
+.database-type-controls > .ant-tag { margin: 0; }
+@media (max-width: 767px) { .database-basic-fields { grid-template-columns: minmax(0, 1fr); } }
+
+.database-removal-footer { display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+.markdown-code-block { position: relative; min-width: 0; }
+.knowledge-markdown .markdown-code-block > pre { padding: 14px; }
+.markdown-code-copy.ant-btn { position: absolute; z-index: 1; top: 8px; right: 8px; opacity: 0; pointer-events: none; transition: opacity .15s; }
+.markdown-code-block:hover > .markdown-code-copy,.markdown-code-block:focus-within > .markdown-code-copy { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .markdown-code-copy.ant-btn { opacity: 1; pointer-events: auto; } }
+
 @media(max-width:1280px){.source-workspace .source-script-layout{grid-template-columns:minmax(0,1fr)}}
+
+/* The app owns the viewport; configuration panes own their scrollbars. */
+.app-shell.ant-layout { height: 100dvh; min-height: 0 !important; overflow: hidden; }
+.app-shell > .app-header { flex: 0 0 auto; }
+.app-shell > .workspace-layout { flex: 1; min-height: 0; overflow: hidden; }
+.app-shell .workspace-sidebar .ant-layout-sider-children { position: static; height: 100%; max-height: none; overflow: auto; }
+.app-shell .app-content { min-height: 0; overflow: auto; }
+.app-shell .configuration-content { display: flex; flex-direction: column; overflow: hidden; }
+.configuration-page { display: flex; flex-direction: column; gap: 16px; height: 100%; min-height: 0; }
+.configuration-content .action-workspace,.configuration-content .knowledge-workspace { flex: 1; height: 100%; min-height: 0; align-items: stretch; grid-template-columns: minmax(180px, 280px) minmax(0, 1fr); }
+.configuration-content .action-workspace > .ant-card,.configuration-content .knowledge-workspace > .ant-card { position: static; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.configuration-content .ant-card > .ant-card-head { position: static; flex: 0 0 auto; }
+.configuration-content .action-editor-panel > .ant-card-body,.configuration-content .knowledge-editor-panel > .ant-card-body { flex: 1; min-height: 0; overflow: auto; }
+.configuration-content .action-list-panel > .ant-card-body,.configuration-content .knowledge-list-panel > .ant-card-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.configuration-content .action-list-toolbar,.configuration-content .knowledge-list-toolbar { flex: 0 0 auto; }
+.configuration-content .action-list,.configuration-content .knowledge-list { flex: 1; min-height: 0; max-height: none; overflow: auto; }
+.configuration-split-row.ant-row { flex: 1; display: grid; grid-template-columns: minmax(180px, min(32%, 420px)) minmax(0, 1fr); min-height: 0; margin: 0 !important; gap: 16px; }
+.configuration-split-row > .ant-col { width: auto; max-width: none; min-width: 0; min-height: 0; padding: 0 !important; }
+.configuration-split-row > .ant-col > .ant-card { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
+.configuration-split-row > .ant-col > .ant-card > .ant-card-body { flex: 1; min-height: 0; overflow: auto; }
+.configuration-split-row > .ant-col > .discovery-table-card > .ant-card-body { display: flex; flex-direction: column; overflow: hidden; }
+.configuration-split-row .discovery-table-card > .ant-card-body > .ant-table-wrapper { flex: 1; min-height: 0; overflow: auto; }
+.configuration-split-row .discovery-table-search { flex: 0 0 auto; }
+.database-settings-page { display: flex; flex-direction: column; gap: 16px; }
+.database-settings-page .ant-card > .ant-card-head { position: sticky; top: 0; z-index: 3; background: var(--bg-base); }
+@media(max-width:760px) { .configuration-content .action-workspace,.configuration-content .knowledge-workspace { grid-template-columns: minmax(150px, 30%) minmax(0,1fr); } .configuration-split-row.ant-row { grid-template-columns: minmax(150px, 32%) minmax(0,1fr); gap: 8px; } }
+
+.database-inline-field { display: grid; grid-template-columns: var(--configuration-label-width) minmax(0,1fr); align-items: start; gap: 12px; }
+.database-inline-field > label,.database-inline-field > .ant-typography:first-child { line-height: 30px; }
+.database-inline-field > .ant-typography:last-child { padding-top: 4px; }
+.policy-sql-disclosure { margin-bottom: 0; }
+.policy-sql-label { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.policy-sql-label .ant-tag { margin-inline-end: 0; }
+
+/* Shared horizontal layout for configuration forms, including dialogs. */
+.configuration-form.ant-form .ant-form-item > .ant-form-item-row { flex-flow: row nowrap; align-items: flex-start; }
+.configuration-form.ant-form .ant-form-item-label { flex: 0 0 calc(var(--configuration-label-width) + 56px); max-width: none; padding: 0 12px 0 0; text-align: start; white-space: normal; overflow: visible; }
+.configuration-form.ant-form .ant-form-item-label > label { height: auto; min-height: 30px; line-height: 1.5; align-items: center; white-space: normal; overflow-wrap: anywhere; }
+.configuration-form.ant-form .ant-form-item-control { flex: 1 1 0; min-width: 0; max-width: 100%; }
+.configuration-form.ant-form .ant-form-item-control-input-content > .ant-input-number { width: 100%; }
+.configuration-form.ant-form .ant-form-item:has(textarea) > .ant-form-item-row,
+.configuration-form.ant-form .ant-form-item:has(.code-editor) > .ant-form-item-row,
+.configuration-form.ant-form .configuration-field-stacked > .ant-form-item-row { flex-direction: column; }
+.configuration-form.ant-form .ant-form-item:has(textarea) > .ant-form-item-row > .ant-form-item-label,
+.configuration-form.ant-form .ant-form-item:has(.code-editor) > .ant-form-item-row > .ant-form-item-label,
+.configuration-form.ant-form .configuration-field-stacked > .ant-form-item-row > .ant-form-item-label { flex: 0 0 auto; max-width: 100%; padding: 0 0 8px; }
+.configuration-form.ant-form .ant-form-item:has(textarea) > .ant-form-item-row > .ant-form-item-control,
+.configuration-form.ant-form .ant-form-item:has(.code-editor) > .ant-form-item-row > .ant-form-item-control,
+.configuration-form.ant-form .configuration-field-stacked > .ant-form-item-row > .ant-form-item-control { width: 100%; flex-basis: auto; }
+.configuration-inline-field { display: grid; grid-template-columns: var(--configuration-label-width) minmax(0,1fr); align-items: start; gap: 8px 12px; }
+.configuration-inline-field > .ant-typography:first-child { line-height: 30px; }
+.configuration-field-hint { grid-column: 2; }
+.policy-control { display: grid; grid-template-columns: var(--configuration-label-width) minmax(0,1fr); align-items: center; gap: 8px 12px; }
+@media(max-width:560px) {
+ .configuration-form.ant-form .ant-form-item > .ant-form-item-row { flex-direction: column; }
+ .configuration-form.ant-form .ant-form-item-label { flex: 0 0 auto; max-width: 100%; padding: 0 0 6px; }
+ .configuration-form.ant-form .ant-form-item-control { flex: 0 0 auto; width: 100%; }
+ .configuration-inline-field,.policy-control { grid-template-columns: minmax(0,1fr); }
+ .configuration-field-hint { grid-column: 1; }
+}
+
+.sidebar-capability-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar-capability-status { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.configuration-content .action-list-panel .ant-card-head-wrapper,.configuration-content .knowledge-list-panel .ant-card-head-wrapper { flex-wrap: wrap; gap: 6px; padding-block: 8px; }
+.configuration-content .action-list-panel .ant-card-head-title,.configuration-content .knowledge-list-panel .ant-card-head-title { white-space: normal; padding: 0; }
+
+/* Slim, borderless scrollbars; reveal them only during interaction. */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-track,*::-webkit-scrollbar-corner { background: transparent; border: 0; box-shadow: none; }
+*::-webkit-scrollbar-thumb { background: transparent; border: 0; border-radius: 5px; box-shadow: none; }
+[data-scroll-active="true"] { scrollbar-color: var(--muted) transparent; }
+[data-scroll-active="true"]::-webkit-scrollbar-thumb { background: var(--muted); }
+.code-editor .cm-gutters { border-right: 0; background: transparent; }
+.code-editor .cm-editor { background: var(--code-bg); }
+.code-editor .cm-editor.cm-focused { outline: none; }
+.table-policy-editor { border-top: 0; }
+.policy-sql-disclosure.ant-collapse,.policy-sql-disclosure .ant-collapse-content { border: 0; background: transparent; }
+.policy-sql-disclosure.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding: 6px 0; align-items: center; }
+.policy-sql-disclosure.ant-collapse .ant-collapse-content-box { padding-inline: 0; }
+
+/* Reserve five characters for label text itself; punctuation and help icons
+   occupy separate space rather than stealing a character from the label. */
+.configuration-form.ant-form .ant-form-item-label > label { display: inline-flex; flex-wrap: nowrap; }
+.configuration-form .configuration-label-text { display: inline-block; flex: 0 0 var(--configuration-label-width); width: var(--configuration-label-width); max-width: var(--configuration-label-width); overflow-wrap: anywhere; }
+.configuration-form .ant-form-item-label > label::before,.configuration-form .ant-form-item-label > label::after,.configuration-form .ant-form-item-tooltip { flex-shrink: 0; }
+.configuration-form .ant-form-item:has(textarea) .configuration-label-text,
+.configuration-form .ant-form-item:has(.code-editor) .configuration-label-text,
+.configuration-form .configuration-field-stacked .configuration-label-text { flex-basis: auto; width: auto; max-width: none; }
+@media(max-width:560px) { .configuration-form .configuration-label-text { flex-basis: auto; width: auto; max-width: none; } }

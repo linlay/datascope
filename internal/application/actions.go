@@ -65,13 +65,16 @@ func (s *Service) DescribeAction(ctx context.Context, database, name string) (an
 	definitions := make([]action.Definition, 0, len(d.Actions))
 	for _, a := range d.Actions {
 		if a.IsPublished() {
+			if !d.ViewsAvailable() {
+				a.ViewID = ""
+			}
 			definitions = append(definitions, a)
 		}
 	}
 	out, err := describeActions(definitions, name)
 	if err == nil && name != "" {
 		for _, a := range d.Actions {
-			if a.Name == name && a.ViewID != "" {
+			if a.Name == name && a.ViewID != "" && d.ViewsAvailable() {
 				out.(map[string]any)["view_uri"] = view.URI(d.ID, a.ViewID)
 			}
 		}

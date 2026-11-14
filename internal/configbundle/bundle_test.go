@@ -16,13 +16,19 @@ import (
 )
 
 func TestDeclarativeExamplesImportAndPreserveExistingState(t *testing.T) {
-	for _, name := range []string{"shop", "securities"} {
+	for _, name := range []string{"shop", "securities", "academic", "channel-operations"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "business.sqlite3")
 			args := []string{"../../examples/create_sqlite.py", "--db", path, "../../examples/" + name + "/schema.sqlite.sql"}
 			if name == "securities" {
 				args = append(args, "../../examples/securities/seed.sql")
+			}
+			if name == "academic" {
+				args = []string{"../../examples/academic/generate.py", "--db", path}
+			}
+			if name == "channel-operations" {
+				args = []string{"../../examples/channel-operations/generate.py", "--db", path}
 			}
 			if out, err := exec.Command("python3", args...).CombinedOutput(); err != nil {
 				t.Fatalf("SQL creation: %s %v", out, err)
