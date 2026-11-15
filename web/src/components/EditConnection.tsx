@@ -32,12 +32,12 @@ export function EditConnection({ db, onSaved }: { db: Database; onSaved: () => v
    <Button type="primary" loading={busy} onClick={() => void run(true)}>{t('校验并保存')}</Button>
   </Space>}>
    <Alert type="info" showIcon style={{ marginBottom: 16 }} title={t('用于同一业务库的连接维护。密码留空保留原密码；已有写连接同步地址、端口和 TLS。保存前会重新校验连接及已登记字段结构。')} />
-   <Form form={form} layout="vertical" disabled={busy} onValuesChange={() => setTested(false)}>
-    <Form.Item name={['connection', 'host']} label={t('数据库地址')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
-    <Form.Item name={['connection', 'port']} label={t('端口')} rules={[{ required: true }]}><InputNumber min={1} max={65535} precision={0} /></Form.Item>
-    <Form.Item name={['connection', 'username']} label={t('数据库只读账号')} rules={[{ required: true, whitespace: true }]}><Input autoComplete="off" /></Form.Item>
-    <Form.Item name="password" label={t('数据库密码')}><Input.Password autoComplete="new-password" placeholder={t('留空保留原密码')} /></Form.Item>
-    {(isMySQLDriver(db.driver) || db.driver === 'postgresql') && <Form.Item name={['connection', 'tls_mode']} label={t('连接加密')} rules={[{ required: true }]}>
+   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap disabled={busy} onValuesChange={() => setTested(false)}>
+    <Form.Item name={['connection', 'host']} label={<span className="configuration-label-text">{t('数据库地址')}</span>} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
+    <Form.Item name={['connection', 'port']} label={<span className="configuration-label-text">{t('端口')}</span>} rules={[{ required: true }]}><InputNumber min={1} max={65535} precision={0} /></Form.Item>
+    <Form.Item name={['connection', 'username']} label={<span className="configuration-label-text">{t('数据库只读账号')}</span>} rules={[{ required: true, whitespace: true }]}><Input autoComplete="off" /></Form.Item>
+    <Form.Item name="password" label={<span className="configuration-label-text">{t('数据库密码')}</span>}><Input.Password autoComplete="new-password" placeholder={t('留空保留原密码')} /></Form.Item>
+    {(isMySQLDriver(db.driver) || db.driver === 'postgresql') && <Form.Item name={['connection', 'tls_mode']} label={<span className="configuration-label-text">{t('连接加密')}</span>} rules={[{ required: true }]}>
      <Select options={[{ value: 'verify-full', label: t('TLS：校验证书和主机名') }, ...(db.driver === 'postgresql' ? [{ value: 'require', label: t('TLS：只加密') }] : []), { value: 'disable', label: t('关闭 TLS（可信网络）') }]} />
     </Form.Item>}
    </Form>

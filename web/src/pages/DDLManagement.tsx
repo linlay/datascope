@@ -109,11 +109,11 @@ export default function DDLManagement({db,onSaved}:{db:Database;onSaved:()=>void
   ]}/>
   <Modal title={editTitle} open={!!edit} width={900} styles={{body:{maxHeight:'70vh',overflowY:'auto'}}} okText={t('预览变更')} onOk={()=>void submitEdit()} onCancel={()=>{if(!busy)setEdit(undefined)}} confirmLoading={busy} destroyOnHidden>
    {error&&<Alert type="error" showIcon title={error} style={{marginBottom:16}}/>}
-   <Form form={form} layout="vertical">
-    <Form.Item name="object_type" label={t('对象类型')} rules={[{required:true}]}><Select disabled={edit?.operation!=='create'||edit?.object_type==='column'||edit?.object_type==='constraint'} options={(edit?.object_type==='column'||edit?.object_type==='constraint'?[edit.object_type]:['table','index','view','trigger']).map(value=>({value,label:t(objectLabels[value])}))}/></Form.Item>
-    <Form.Item name="name" label={t('名称')} rules={[{required:true}]}><Input disabled={edit?.operation!=='create'}/></Form.Item>
-    {['column','constraint','index'].includes(editType)&&<Form.Item name="parent_name" label={t('所属表')} rules={[{required:true}]}><Input placeholder={t('物理表名')}/></Form.Item>}
-    {edit?.operation==='rename'?<Form.Item name="new_name" label={t('新名称')} rules={[{required:true}]}><Input/></Form.Item>:<>
+   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap>
+    <Form.Item name="object_type" label={<span className="configuration-label-text">{t('对象类型')}</span>} rules={[{required:true}]}><Select disabled={edit?.operation!=='create'||edit?.object_type==='column'||edit?.object_type==='constraint'} options={(edit?.object_type==='column'||edit?.object_type==='constraint'?[edit.object_type]:['table','index','view','trigger']).map(value=>({value,label:t(objectLabels[value])}))}/></Form.Item>
+    <Form.Item name="name" label={<span className="configuration-label-text">{t('名称')}</span>} rules={[{required:true}]}><Input disabled={edit?.operation!=='create'}/></Form.Item>
+    {['column','constraint','index'].includes(editType)&&<Form.Item name="parent_name" label={<span className="configuration-label-text">{t('所属表')}</span>} rules={[{required:true}]}><Input placeholder={t('物理表名')}/></Form.Item>}
+    {edit?.operation==='rename'?<Form.Item name="new_name" label={<span className="configuration-label-text">{t('新名称')}</span>} rules={[{required:true}]}><Input/></Form.Item>:<>
      {editType==='table'&&edit?.operation==='create'?<>
       <Form.List name="columns" rules={[{validator:async(_,value)=>{if(!value?.length)throw new Error(t('至少添加一个字段'))}}]}>{(fields,{add,remove},{errors})=><Space orientation="vertical" style={{width:'100%'}}>{fields.map(({key,name,...rest})=><Space key={key} align="start" wrap>
        <Form.Item {...rest} name={[name,'name']} rules={[{required:true}]}><Input aria-label={t('字段名')} placeholder={t('字段名')} style={{width:150}}/></Form.Item>
@@ -125,10 +125,10 @@ export default function DDLManagement({db,onSaved}:{db:Database;onSaved:()=>void
       </Space>)}<Form.ErrorList errors={errors}/><Button icon={<PlusOutlined/>} onClick={()=>add({type:'TEXT'})}>{t('新增字段')}</Button></Space>}</Form.List>
       <Space style={{marginTop:16}}><Form.Item name="strict" valuePropName="checked"><Checkbox>STRICT</Checkbox></Form.Item><Form.Item name="without_rowid" valuePropName="checked"><Checkbox>WITHOUT ROWID</Checkbox></Form.Item></Space>
      </>:editType==='index'&&edit?.operation==='create'?<>
-      <Form.Item name="index_columns" label={t('索引字段')} rules={[{required:true}]}><Select mode="tags" options={parentColumns.map(value=>({value,label:value}))}/></Form.Item>
+      <Form.Item name="index_columns" label={<span className="configuration-label-text">{t('索引字段')}</span>} rules={[{required:true}]}><Select mode="tags" options={parentColumns.map(value=>({value,label:value}))}/></Form.Item>
       <Form.Item name="unique" valuePropName="checked"><Checkbox>{t('唯一索引')}</Checkbox></Form.Item>
-      <Form.Item name="where" label={t('索引条件（可选）')}><Input placeholder="status = 1"/></Form.Item>
-     </>:<Form.Item name="sql" label={t(editType==='column'?'字段定义 SQL':editType==='constraint'?'约束定义 SQL':'完整 CREATE 定义 SQL')} rules={[{required:true}]}><CodeEditor language="sql" height="280px"/></Form.Item>}
+      <Form.Item name="where" label={<span className="configuration-label-text">{t('索引条件（可选）')}</span>}><Input placeholder="status = 1"/></Form.Item>
+     </>:<Form.Item name="sql" label={<span className="configuration-label-text">{t(editType==='column'?'字段定义 SQL':editType==='constraint'?'约束定义 SQL':'完整 CREATE 定义 SQL')}</span>} rules={[{required:true}]}><CodeEditor language="sql" height="280px"/></Form.Item>}
     </>}
    </Form>
   </Modal>

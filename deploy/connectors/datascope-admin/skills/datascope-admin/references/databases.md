@@ -91,3 +91,7 @@ MySQL、Oracle、PostgreSQL、达梦均支持同连接允许范围内的跨 Sche
 - `database.update` 的 database 可包含完整 connection，只允许改变 schema、allowed_schemas（MySQL 同步 database）。主机、Service/PG database、账号和凭据保持固定。移除范围会移除该 Schema 的登记表和查询策略。
 
 网络源创建时不读取所有字段；先登记范围、再选表登记和开放。网络策略使用完整 Schema.表名；内部 main."Schema.表名" 映射到对应物理表。raw_query 继续作为单独授权的高权限只读测试入口，绕过表开放、行字段访问策略，保留 Schema 范围和脱敏。
+
+数据库说明：`database.update` 的 `database` 可仅传 `id`、当前 `revision` 以及 `description`（简介）或 `documentation`（Markdown 使用说明）。省略字段保留原值，空字符串清空。需 `config.read` 与 `config.write`，按配置版本检查冲突。字段保存在逐库 `management/database.yml`，面向本库使用者和业务 MCP 共享；完整说明通过 `datascope://database/<数据库 ID>/documentation` 资源按需读取。
+
+功能组总开关：`datascope_manage({action:"set",args:{resourceType:"capability",database_id,capability:"actions"|"knowledge"|"views",enabled:true|false,revision}})`，与 Web 两处开关同源并立即生效。动作组需 action.write，原子调整 write_enabled 及三个动作工具；知识需 knowledge.write 或 mcp.write；视图需 view.write 或 mcp.write。网络动作首次开启可另传 database:{id,revision,write_connection} 与 write_password。操作只调整一组开关，不覆盖定义和发布状态；旧 revision 拒绝。

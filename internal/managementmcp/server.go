@@ -57,6 +57,7 @@ var operations = map[string][]operation{
 		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
 	},
 	"datascope_manage": {
+		{"capability", "set", "configure_capability", "database_id capability enabled revision", "database write_password"},
 		{"ddl", "apply", "apply_ddl", "database_id plan_id request_id", ""},
 		{"discovery", "enroll", "enroll_tables", "database_id revision table_names", ""},
 		{"database", "clone_configuration", "clone_configuration", "database_id clone", ""},
@@ -175,7 +176,7 @@ func decode(tool string, in input) (string, application.Input, error) {
 			case "save_database":
 				required += " name driver path config mcp_enabled mcp_path tools"
 			case "update_database":
-				if _, exists := fields["ddl_enabled"]; !exists {
+				if fields["ddl_enabled"] == nil && fields["description"] == nil && fields["documentation"] == nil {
 					required += " name"
 				}
 			case "save_policy", "validate_policy":

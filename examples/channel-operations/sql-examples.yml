@@ -1,0 +1,31 @@
+sqlExamples:
+  -
+    label: "待发布与失败任务"
+    sql: "SELECT p.id,a.name,v.title,p.status,p.scheduled_at,p.failure_reason FROM publications p JOIN channel_accounts a ON a.id=p.account_id JOIN content_versions v ON v.id=p.version_id WHERE p.status IN('draft','scheduled','failed') ORDER BY p.id"
+  -
+    label: "分平台每日表现"
+    sql: "SELECT a.platform_id,m.metric_date,SUM(m.views) AS reported_views,SUM(m.likes) AS likes,SUM(CASE WHEN m.availability='missing' THEN 1 ELSE 0 END) AS missing_rows FROM publication_daily_metrics m JOIN publications p ON p.id=m.publication_id JOIN channel_accounts a ON a.id=p.account_id GROUP BY a.platform_id,m.metric_date ORDER BY m.metric_date,a.platform_id"
+  -
+    label: "内容传播排行"
+    sql: "SELECT p.id,v.title,a.name,SUM(m.views) AS reported_views,SUM(m.shares) AS shares FROM publications p JOIN content_versions v ON v.id=p.version_id JOIN channel_accounts a ON a.id=p.account_id JOIN publication_daily_metrics m ON m.publication_id=p.id GROUP BY p.id,v.title,a.name ORDER BY reported_views DESC,p.id LIMIT 20"
+  -
+    label: "指标缺失与修订"
+    sql: "SELECT publication_id,metric_date,availability,revision,views FROM publication_daily_metrics WHERE availability='missing' OR revision>1 ORDER BY metric_date,publication_id"
+  -
+    label: "账号最新关注数"
+    sql: "SELECT a.id,a.name,m.metric_date,m.followers_end FROM channel_accounts a JOIN account_daily_metrics m ON m.account_id=a.id WHERE m.metric_date=(SELECT MAX(x.metric_date) FROM account_daily_metrics x WHERE x.account_id=a.id AND x.availability='complete') ORDER BY a.id"
+  -
+    label: "推广消耗与平台转化"
+    sql: "SELECT d.campaign_id,SUM(m.spend_cents) AS spend_cents,SUM(m.clicks) AS clicks,SUM(m.platform_reported_conversions) AS platform_conversions FROM ad_sets d JOIN ad_daily_metrics m ON m.ad_set_id=d.id GROUP BY d.campaign_id ORDER BY d.campaign_id"
+  -
+    label: "站内有效转化与未知归因"
+    sql: "SELECT campaign_id,attribution,event_type,COUNT(*) AS valid_events FROM conversion_events WHERE quality='valid' GROUP BY campaign_id,attribution,event_type ORDER BY campaign_id,attribution,event_type"
+  -
+    label: "待处理评论"
+    sql: "SELECT c.id,a.name,v.title,c.body,c.created_at FROM comments c JOIN publications p ON p.id=c.publication_id JOIN channel_accounts a ON a.id=p.account_id JOIN content_versions v ON v.id=p.version_id WHERE c.state='pending' ORDER BY c.created_at,c.id"
+  -
+    label: "多平台改编与审核"
+    sql: "SELECT c.id,c.topic,v.platform_id,v.revision,v.state,v.title FROM content_items c JOIN content_versions v ON v.content_id=c.id ORDER BY c.id,v.platform_id,v.revision"
+  -
+    label: "累计值修订下降"
+    sql: "WITH s AS(SELECT publication_id,captured_at,cumulative_views,LAG(cumulative_views) OVER(PARTITION BY publication_id ORDER BY captured_at,revision) AS previous FROM publication_metric_snapshots) SELECT * FROM s WHERE cumulative_views<previous ORDER BY publication_id,captured_at"

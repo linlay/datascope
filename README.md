@@ -97,6 +97,8 @@ internal/
 
 DataScope 自有表使用单数大写下划线名称，字段以 `_` 结尾；业务库命名不受影响。YAML 配置字段统一使用小驼峰，如 `mcpEnabled`、`maxRows`、`denyUnless`、`businessUserId`，业务标识与脚本正文保留原值；HTTP JSON 接口格式保持不变。运行时会话、OAuth 授权码 / 刷新凭据和连接保留在内存。完整表结构、认证接口约定与发布清单见 [存储与认证改造](docs/storage-auth-refactor.md)。
 
+「数据来源」在当前目标库下管理外部只读连接、Goja JS 导入任务和运行计划，支持手动、指定时间、固定间隔与每天运行，以及回滚试运行、停止和持久执行记录。入口需要 `config.read` 与 `source.write`，详见[数据来源与脚本导入](docs/data-sources.md)。
+
 常规查询使用业务数据库只读连接；业务 Action 使用显式启用的独立写入连接，见 [业务操作说明](docs/actions.md)。`DATABASE_ALLOWED_ROOTS` 指定允许登记的目录，macOS/Linux 多个目录用 `:` 分隔；默认 `data`。管理库、审计库及其符号链接、硬链接不能注册为业务数据源。原始查询也禁止 ATTACH 和修改连接状态的 PRAGMA，避免从已授权业务库访问内部状态。
 
 配置页面路径统一为 `database-configuration`（数据库配置）、`query-configuration`（查询配置）、`action-configuration`（动作配置）、`knowledge-configuration`（知识配置）、`view-configuration`（视图配置）和 `mcp-configuration`（MCP 配置）。旧简写链接仍可打开，并自动替换为新路径，保留资源选择和查询参数。工作台路径为 `query-workbench`（查询工作台）、`knowledge-workbench`（知识工作台）、`action-workbench`（动作工作台）和 `view-workbench`（视图工作台）；旧 `sql`、`sql-workbench` 链接兼容转为 `query-workbench`。
@@ -132,7 +134,7 @@ SQLite 数据库配置提供“打开 DDL 管理”开关，默认关闭，仅�
 
 初始化管理员是系统恢复入口，拥有全部能力。普通用户不能自行创建平台管理员，不能授予自身没有的能力，不能修改业务身份绑定。平台管理用户与业务员工账号完全独立。每个数据库可使用 DataScope 模拟的独立员工认证域；同名工号在不同数据库中不共享密码、业务身份和权限。演示库中的角色只决定演示业务行权限。
 
-在“数据库配置 → 用户管理”中分开管理平台用户和当前数据库的业务员工账号。业务账号的**业务身份编号**是该数据源 `${userId}` 的可信值，例如证券演示库的 `employees.employee_id`。它不需要对应的平台账号，也不继承平台管理权限。平台用户的数据库授权用于后台管理及控制台；管理员可在有 `impersonate` 权限的改写工作台模拟业务身份。独立业务认证的 MCP 测试请通过业务连接器完成真实员工登录。
+在“数据库配置 → 用户管理”中分开管理平台用户和当前数据库的业务员工账号。业务账号的**业务身份编号**是该数据源 `${userId}` 的可信值，例如证券演示数据库的 `employees.employee_id`。它不需要对应的平台账号，也不继承平台管理权限。平台用户的数据库授权用于后台管理及控制台；管理员可在有 `impersonate` 权限的改写工作台模拟业务身份。独立业务认证的 MCP 测试请通过业务连接器完成真实员工登录。
 
 新增数据库仅需填写显示名称及连接信息，ID 自动生成。网络数据库直接输入密码即可，密码通过独立密钥加密保存，不会写入配置历史或返回给客户端；旧环境变量引用继续兼容。新增数据库默认勾选表目录（list_tables）、表结构（describe_table）、权限查询（query）三个基础工具，MCP 总开关仍默认关闭，所有表默认禁止。先配置访问策略，再打开 MCP。查询用户只获得数据库名称等最小目录信息；连接路径与策略配置只向具备 `config.read` 的用户提供。配置页通常需要同时授予 `config.read` 和对应修改权限。
 
@@ -182,7 +184,7 @@ structure:
 
 HMAC 需要管理存储，首次启用时使用逐库私有 `credentials.key` 派生专用脱敏密钥，再按物理表、字段隔离摘要域。密钥不进入 YAML、API 或前端，不同数据库或字段的摘要不用于跨域关联；相同字段同值在服务重启后保持一致。请与管理状态一起备份密钥文件；启用后密钥丢失会拒绝读取，不自动重新生成。稳定摘要可关联记录，不能视为匿名化，也不提供原文恢复。
 
-### 证券演示库脱敏示例
+### 证券演示数据库脱敏示例
 
 演示库的脱敏规则通过同一字段配置界面设置，规则与业务库原始数据分别保存。已有配置、HMAC 密钥和账号按逐库备份保留；示例导入不会覆盖已有数据源。
 
@@ -239,7 +241,7 @@ OneID 验签支持 JWKS 地址或直接导入／粘贴 RSA `publickey.pem`，两
 
 默认地址为 `http://127.0.0.1:8080/mcp/{mcp_path}`，保留原有分库地址及默认库 `/mcp` 入口。`admin` 为保留路径后缀。
 
-每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`list_actions`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示库。
+每个数据库独立配置基础工具：`list_tables`、`describe_table`、`query`、`raw_query`、`customer_scope`、`list_actions`、`describe_action`、`invoke_action`。前五个沿用已有工具，其中 `customer_scope` 仅适用于证券演示数据库。
 
 HTTP OAuth 的 audience 精确绑定完整地址，管理端令牌与不同数据库的令牌不能混用。业务 MCP 按数据库认证来源重新检查当前业务账号、能力和工具启停；管理 MCP 检查平台账号及管理授权。已有连接不能保留已撤销权限。
 
@@ -298,9 +300,13 @@ API 与 MCP 在同机共享目录，读写使用文件锁；配置提交通过�
 
 业务演示源码、安装工具和模板统一位于 [examples/](examples/README.md)；`internal/` 保留通用技术实现，跨包测试辅助代码位于 `tests/testutil/`。
 
-证券演示库仍支持客户、资金账户、证券账户、交易与持仓等权限改写。结构和说明见 [DDL](examples/securities/schema.sqlite.sql)、[数据字典](examples/securities/docs/data-dictionary.md)、[业务权限说明](examples/securities/docs/permissions.md)。`make init-shop` 可生成三张表的小型商店库。
+证券演示数据库仍支持客户、资金账户、证券账户、交易与持仓等权限改写。结构和说明见 [DDL](examples/securities/schema.sqlite.sql)、[数据字典](examples/securities/docs/data-dictionary.md)、[业务权限说明](examples/securities/docs/permissions.md)。已有大库可用 [缩减脚本](examples/securities/README.md#缩减已有数据库)先备份，再保留最近 20 个交易日的持仓和资金日结；增加 `--trim-ledgers --preserve-account 880000001186` 可同步裁剪旧交易流水，保留关键回归账户历史，本地实测约 47.32 MiB（49.62 MB）。全部客户、账户及权限关系保留，成交统计按明确日期窗口计算。当前本地保留证券、区域销售、高校教务、渠道与社交媒体运营四个演示数据库；每个库的“使用说明”提供自然语言问题、连续追问、角色视角及受控操作说明。商店源码只作为历史开发与测试样例保留，见 [商店示例](examples/shop/README.md)。
 
 分地区销售示例提供 26 张业务表及中文注释，覆盖 7 个大区、24 个月、5 万订单与 15 万条订单明细。`make init-regional-sales` 用 Python 生成 SQLite；设置 `DATASCOPE_EXAMPLE_PASSWORD` 后运行 `make check-example EXAMPLE=regional-sales`、`make import-example EXAMPLE=regional-sales`，由通用导入器加载静态 YAML 配置。完整说明见 [地区销售示例](examples/regional-sales/README.md)。
+
+高校教务示例提供 24 张表、5 个学院、10 个专业、1,000 名学生、80 名教师及两个学期的选课、成绩、考勤和考试安排。`make init-academic` 创建约 14 MiB 的虚构数据；五类角色权限和五个需确认的 Action 覆盖选退课、评分、发布与调教室。生成器检查校历、先修学分、重修、容量和师生教室时间冲突。设置 `DATASCOPE_EXAMPLE_PASSWORD` 后可显式运行 `make check-example EXAMPLE=academic`、`make import-example EXAMPLE=academic`。完整口径和边界见 [高校教务示例](examples/academic/README.md)。
+
+渠道与社交媒体运营示例提供 25 张表，覆盖双品牌、4 个模拟平台、12 个账号、600 个选题和 1,600 次发布任务。`make init-channel-operations` 创建约 22 MiB 的数据，包含平台内容改编、发布流程、指标缺失和累计修订、推广成本、七天最后点击归因及评论处置。六类角色权限和六个需确认的本地 Action 验证协作与账号授权；所有发布、回复均为本地模拟。设置 `DATASCOPE_EXAMPLE_PASSWORD` 后可运行 `make check-example EXAMPLE=channel-operations`、`make import-example EXAMPLE=channel-operations`。详见 [渠道运营示例](examples/channel-operations/README.md)。
 
 ```sh
 make test          # 连接器 VIEW 回归测试 + Go 全部测试 + 前端 TypeScript 检查

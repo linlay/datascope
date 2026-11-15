@@ -13,6 +13,7 @@ coverage.out
 
 /data/*.sqlite3
 /data/legacy/
+/data/backups/
 /data/oauth/
 
 /data/databases.json

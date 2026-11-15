@@ -1,5 +1,7 @@
 # 业务操作 Action
 
+定时从外部数据库读取并转换、导入当前库，使用独立的「数据来源」模块，见[数据来源与脚本导入](data-sources.md)。其 `sources.get`、`db.target` 和进度接口不属于 Action 脚本契约，Action 的单库事务及执行限制保持不变。
+
 Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保存到 `management/actions/<action>.yml`，并使用数据库当前 revision 控制并发保存。每项包含 `name`、`title`、`description`、`confirm`、`parameters`、`script`，以及可选的 `view_id`（YAML 为 `viewId`）和 `published`。
 
 动作、知识与视图列表右侧的开关直接保存发布状态，不提交详情中尚未保存的编辑。新增和复制的动作默认是草稿；旧动作未配置 `published` 时保持已发布。动作取消发布后，业务 MCP 不再列出或描述它，也拒绝直接调用和未完成的确认；平台编辑者仍可查看与回滚试运行。发布与人工确认分别控制“是否可供业务调用”和“调用是否需要本人审核”。人工确认开关旁的帮助入口提供侧边说明。视图被默认查询或动作引用时，需先取消关联才能取消发布。
@@ -169,3 +171,7 @@ SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络�
 Token 仅保留在当前页面内存，不进入 localStorage、配置、请求追踪展示或日志。离开页签销毁认证状态。平台会话只控制工作台入口，业务 MCP 每次独立验证 Token、数据库、工具开关和 action 能力。
 
 正式调用需要明确点击并确认。confirm_required 展示回滚 preview 和现有确认页链接，由本人打开确认页登录执行；工作台不调用确认接口。查询结果使用同一 request_id 调用 invoke_action，并指定 result_only:true；只查询当前业务身份的内存回执。网络故障或 MCP 重启后缺失回执返回 unknown，用户应核对审计和业务数据，工作台不自动重试写入。
+
+## 动作总开关
+
+动作列表表头和 MCP 配置页共用同一总开关（`write_enabled`）。`configure_capability` 的 actions 组原子启停 `list_actions`、`describe_action`、`invoke_action`，保留动作内容及发布状态。需 `action.write`，网络库需独立写入账号。关闭后正式执行及回滚试运行均被拒绝，管理端仍可编辑和发布草稿。

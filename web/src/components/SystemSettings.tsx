@@ -15,15 +15,15 @@ export function SystemSettings({open,onClose}:{open:boolean;onClose:()=>void}){
  return <>
  <Drawer rootClassName="system-settings-drawer" title={t('系统设置')} open={open} onClose={close} size={440}>
   <Space orientation="vertical" size="large" style={{width:'100%'}}>
-   <Space orientation="vertical" style={{width:'100%'}}>
-    <Typography.Text strong>{t('界面语言')}</Typography.Text>
+   <div className="configuration-inline-field">
+    <Typography.Text>{t('界面语言')}</Typography.Text>
     <Select<Language> aria-label={t('界面语言')} value={language} onChange={setLanguage} style={{width:'100%'}} options={[{value:'zh-CN',label:'简体中文'},{value:'en',label:'English'}]}/>
-   </Space>
-   <Space orientation="vertical" style={{width:'100%'}}>
-    <Typography.Text strong>{t('外观')}</Typography.Text>
+   </div>
+   <div className="configuration-inline-field">
+    <Typography.Text>{t('外观')}</Typography.Text>
     <Select<Appearance> aria-label={t('外观')} value={appearance} onChange={setAppearance} style={{width:'100%'}} options={[{value:'system',label:t('跟随系统')},{value:'light',label:t('浅色')},{value:'dark',label:t('深色')}]}/>
-    <Typography.Text type="secondary">{t('设置应用于此浏览器的整个网站。')}</Typography.Text>
-   </Space>
+    <Typography.Text className="configuration-field-hint" type="secondary">{t('设置应用于此浏览器的整个网站。')}</Typography.Text>
+   </div>
    {user.system_admin&&<Card size="small" title={t('平台用户')}>
     <Typography.Paragraph>{t('管理平台账号、密码和数据库访问权限。')}</Typography.Paragraph>
     <Button type="primary" onClick={()=>setUsersOpen(true)}>{t('用户管理')}</Button>

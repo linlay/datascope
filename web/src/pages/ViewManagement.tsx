@@ -1,5 +1,7 @@
+import { CapabilitySwitch } from '../components/CapabilitySwitch';
+import { QueryDisplaySettings } from '../components/QueryDisplaySettings';
 import { useEffect, useRef, useState } from 'react';
-import { CopyOutlined, DeleteOutlined, DownOutlined, EditOutlined, EyeOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, DownOutlined, EyeOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Dropdown, Empty, Form, Input, Modal, Space, Switch, Tag, Tooltip, message } from 'antd';
 import { databases, managementCall, type Database, type ViewDefinition } from '../api';
 import { CodeEditor } from '../components/CodeEditor';
@@ -87,7 +89,7 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
  const visible = items.filter(v => `${v.id} ${v.name} ${v.description}`.toLowerCase().includes(search.toLowerCase()));
  return <>
   <div className="action-workspace">
-   <Card className="action-list-panel" title={<Space>{t('视图列表')}<Tag>{items.length}</Tag></Space>} extra={<Dropdown trigger={['click']} disabled={busy || creating || !templates.length} menu={{ items: templates.map(v => ({ key: v.id, label: v.name })), onClick: ({ key }) => add(templates.find(v => v.id === key)) }}><Button size="small">{t('通用模板')} <DownOutlined /></Button></Dropdown>}>
+   <Card className="action-list-panel" title={<Space wrap>{t('视图列表')}<Tag>{items.length}</Tag><CapabilitySwitch db={current} capability="views" disabled={dirty || busy || remoteChanged} onSaved={next => { setCurrent(next); onSaved(); }} /></Space>} extra={<Dropdown trigger={['click']} disabled={busy || creating || !templates.length} menu={{ items: templates.map(v => ({ key: v.id, label: v.name })), onClick: ({ key }) => add(templates.find(v => v.id === key)) }}><Button size="small">{t('通用模板')} <DownOutlined /></Button></Dropdown>}>
     <div className="action-list-toolbar">
      <Input aria-label={t('搜索视图')} placeholder={t('搜索名称、描述或标识')} value={search} onChange={e => setSearch(e.target.value)} allowClear />
      <Tooltip title={t('新增视图')}><Button type="primary" aria-label={t('新增视图')} icon={<PlusOutlined />} disabled={busy || creating} onClick={() => { setSearch(''); add(); }} /></Tooltip>
@@ -99,6 +101,7 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
     </ul>
    </Card>
    <Card className="action-editor-panel" title={<Space>{creating ? t('新增视图') : original?.name || t('选择视图')}{dirty && <Tag color="orange">{t('未保存')}</Tag>}</Space>} extra={<Space wrap>
+    <QueryDisplaySettings db={current} onSaved={onSaved} disabled={busy || dirty || creating || remoteChanged} />
     <IconButton label={t('刷新')} icon={<ReloadOutlined />} disabled={busy} onClick={reload} />
     {draft && <>
      <Button size="small" icon={<CopyOutlined />} disabled={busy || creating || dirty} onClick={() => add({ ...original!, name: `${original!.name} · ${t('副本')}` })}>{t('复制视图')}</Button>
@@ -108,18 +111,20 @@ export default function ViewManagement({ db, onSaved }: { db: Database; onSaved:
     <SaveButton disabled={!dirty || remoteChanged} loading={busy} onClick={() => void save()} />
    </Space>}>
     {(error || remoteChanged) && <Alert type={error ? 'error' : 'warning'} showIcon title={error || t('配置已更新，请重新载入后继续。')} style={{ marginBottom: 16 }} />}
-    {draft ? <Form form={form} layout="vertical" disabled={busy} onValuesChange={(_, values) => setDraft({ ...values, type: 'view' })}>
+    {draft ? <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap disabled={busy} onValuesChange={(_, values) => setDraft({ ...values, type: 'view' })}>
      <div className="action-fields-grid">
-      <Form.Item name="id" label={t('标识')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ }]}><Input disabled={!creating} /></Form.Item>
-      <Form.Item name="name" label={t('名称')} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
-      <Form.Item name="description" label={t('描述')}><Input.TextArea rows={3} maxLength={2000} /></Form.Item>
+      <Form.Item name="id" label={<span className="configuration-label-text">{t('标识')}</span>} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ }]}><Input disabled={!creating} /></Form.Item>
+      <Form.Item name="name" label={<span className="configuration-label-text">{t('名称')}</span>} rules={[{ required: true, whitespace: true }]}><Input /></Form.Item>
+      <Form.Item name="description" label={<span className="configuration-label-text">{t('描述')}</span>}><Input.TextArea rows={3} maxLength={2000} /></Form.Item>
      </div>
      <Form.Item name="published" valuePropName="checked" hidden><Switch /></Form.Item>
-     <div className="content-field-header"><span>HTML</span><IconButton label={t(mode === 'preview' ? '编辑 HTML' : '预览 HTML')} icon={mode === 'preview' ? <EditOutlined /> : <EyeOutlined />} disabled={busy} onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')} /></div>
-     <Form.Item name="html" rules={[{ required: true, message: t('请输入 HTML') }]} hidden={mode === 'preview'}><CodeEditor language="html" height="440px" readOnly={busy} /></Form.Item>
-     {mode === 'preview' && <ViewFrame html={draft.html} />}
+     <div className="content-field-header"><span>HTML</span><IconButton label={t('预览 HTML')} icon={<EyeOutlined />} disabled={busy} onClick={() => setMode('preview')} /></div>
+     <Form.Item name="html" rules={[{ required: true, message: t('请输入 HTML') }]}><CodeEditor language="html" height="440px" readOnly={busy} /></Form.Item>
     </Form> : <Empty description={t('从左侧选择视图，或新增视图。')} />}
    </Card>
   </div>
+  <Modal centered title={t('预览 HTML')} open={mode === 'preview' && !!draft} onCancel={() => setMode('edit')} width={1200} destroyOnHidden footer={<Button onClick={() => setMode('edit')}>{t('关闭')}</Button>} styles={{ body: { height: 'min(70dvh, calc(100dvh - 180px))', overflow: 'hidden' } }}>
+   {draft && <ViewFrame html={draft.html} style={{ display: 'block', height: '100%', minHeight: 0, boxSizing: 'border-box' }} />}
+  </Modal>
  </>;
 }

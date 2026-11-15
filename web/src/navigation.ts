@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect } from 'react';
 import { Modal } from 'antd';
 
-export type Page = 'database' | 'ddl' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql-workbench' | 'table' | 'mcp' | 'audit';
+export type Page = 'data-runs' | 'sources' | 'database' | 'ddl' | 'tables' | 'actions' | 'views' | 'knowledge' | 'knowledge-workbench' | 'action-workbench' | 'view-workbench' | 'sql-workbench' | 'table' | 'mcp' | 'audit';
 export interface Route { page: Page; selection?: string; params: URLSearchParams }
 // Public paths describe the page's purpose; internal page keys remain stable.
 const pagePaths: Record<Page, string> = {
+ sources: 'data-sources',
+ 'data-runs': 'data-run-history',
  database: 'database-configuration',
  ddl: 'ddl-management',
  tables: 'query-configuration',
@@ -32,6 +34,12 @@ export function readRoute(hash = window.location.hash): Route {
  if (page === 'database' && params.get('tab') === 'audit') { page = 'audit'; params.delete('tab'); }
  let selection: string | undefined;
  try { selection = rawSelection ? decodeURIComponent(rawSelection) : undefined; } catch { /* An invalid bookmark falls back to the page's default selection. */ }
+ if (page === 'sources' && (params.get('sourceTab') === 'runs' || params.get('taskTab') === 'history')) {
+  page = 'data-runs';
+  if (selection) params.set('task', selection);
+  selection = undefined;
+  params.delete('sourceTab'); params.delete('taskTab'); params.delete('newTask');
+ }
  return { page, selection, params };
 }
 

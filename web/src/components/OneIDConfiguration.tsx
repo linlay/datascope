@@ -10,12 +10,12 @@ export function OneIDKeyInput({ jwksUrl, publicKeyPem, onChange, disabled }: {
  const [source, setSource] = useState(publicKeyPem ? 'PEM' : 'JWKS');
  useEffect(() => { if (publicKeyPem) setSource('PEM'); else if (jwksUrl) setSource('JWKS'); }, [publicKeyPem, jwksUrl]);
  return <>
-  <Form.Item label={t('验签公钥来源')}>
+  <Form.Item label={<span className="configuration-label-text">{t('验签公钥来源')}</span>}>
    <Radio.Group disabled={disabled} value={source} onChange={e => { setSource(e.target.value); onChange({ jwks_url: '', public_key_pem: '' }); }} options={[{ value: 'JWKS', label: t('JWKS 地址') }, { value: 'PEM', label: 'publickey.pem' }]} />
   </Form.Item>
-  {source === 'JWKS' ? <Form.Item label={t('签名公钥地址（JWKS）')} required>
+  {source === 'JWKS' ? <Form.Item label={<span className="configuration-label-text">{t('签名公钥地址（JWKS）')}</span>} required>
    <Input disabled={disabled} aria-label={t('签名公钥地址（JWKS）')} value={jwksUrl || ''} onChange={e => onChange({ jwks_url: e.target.value, public_key_pem: '' })} placeholder="https://identity.example.com/oidc/jwks" />
-  </Form.Item> : <Form.Item label={t('RSA 公钥（PEM）')} required>
+  </Form.Item> : <Form.Item label={<span className="configuration-label-text">{t('RSA 公钥（PEM）')}</span>} required>
    <Space orientation="vertical" style={{ width: '100%' }}>
     <Upload disabled={disabled} accept=".pem,.pub" showUploadList={false} beforeUpload={async file => {
      if (file.size > 64 * 1024) { message.error(t('公钥文件不能超过 64 KiB')); return false; }

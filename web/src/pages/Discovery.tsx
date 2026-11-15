@@ -110,13 +110,13 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
   {title:t("当前数据库内容"),dataIndex:'after',ellipsis:true,width:200},
   {title:t("人工说明 / 处理"),width:220,render:(_,change)=>change.manual!==undefined?<Space orientation="vertical"><Text>{change.manual||'（空）'}</Text>{change.conflict&&<Tag color="orange">{t("与人工说明存在差异")}</Tag>}{comparison==='pending'?<Select aria-label={t("处理注释 {0}{1}", {"0":(change.table),"1":(change.column?`.${change.column}`:'')})} style={{width:180}} value={choices[changeKey(change)]?'source':'manual'} onChange={value=>setChoices({...choices,[changeKey(change)]:value==='source'})} options={[{value:'manual',label:t("保留人工说明")},{value:'source',label:t("采用数据库新注释")}]}/>:<Tag>{t("已确认的结构变化")}</Tag>}</Space>:<Text type="secondary">{change.kind==='added'?t("确认后登记，默认关闭"):t("确认后更新结构")}</Text>},
  ];
- return <Space className="discovery-page" orientation="vertical" size="middle" style={{width:'100%'}}>
+ return <div className="discovery-page configuration-page">
   {!state?.version&&<Alert type="info" title={t('点击“检查表结构”加载数据库的表和字段。')}/>}
   {state?.error&&<Alert type="error" title={t('结构检查失败，已保留原配置')} description={state.error}/>}
   {pending&&<Alert type="warning" showIcon title={t("数据库结构与当前配置不一致，发现 {0} 项变化", {"0":(pending.changes.length)})} description={t("当前配置保持不变，请先查看对比，再确认更新。")} action={<Button disabled={busy} onClick={()=>{setChoices({});setComparison('pending')}}>{t("查看对比")}</Button>}/>}
   {remoteChanged&&<Alert type="warning" title={t("配置已在其他窗口更新，请刷新配置后继续。")}/>}
   {error&&<Alert type="error" showIcon title={t("操作失败")} description={error} closable onClose={()=>setError(undefined)}/>}
-  <Row gutter={[16,16]}>
+  <Row className="configuration-split-row" gutter={[16,16]}>
    <Col xs={24} xl={8}><Card className="discovery-table-card" title={<Space size={6}>{t('数据表')}{dirty&&<Tooltip title={t('未保存')}><Badge status="warning" aria-label={t('未保存')}/></Tooltip>}</Space>} extra={<Space className="discovery-table-actions" role="toolbar" aria-label={t('数据表操作')} size={2} wrap>
     <IconButton label={t('重新载入配置')} help={t('重新读取已保存的设置，不检查业务数据库。')} icon={<ReloadOutlined/>} disabled={busy} onClick={()=>{
      const reload=()=>run(()=>databases.get(id),t('配置已刷新'));
@@ -186,5 +186,5 @@ export function DiscoveryPage({ id, onSaved }: {id:string;onSaved:()=>void}) {
     <Input.TextArea aria-label={t("注释")} rows={5} value={editor.annotation.comment??editor.source} onChange={e=>setEditor({...editor,annotation:{...editor.annotation,comment:e.target.value}})}/>
    </Space>}
   </Modal>
- </Space>;
+ </div>;
 }

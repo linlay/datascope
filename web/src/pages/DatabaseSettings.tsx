@@ -1,17 +1,16 @@
+import { DatabaseDocumentation, DatabaseDocumentationSettings } from '../components/DatabaseDocumentation';
 import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
 import { EditConnection } from '../components/EditConnection';
 import { DatabaseIcon } from '../components/DatabaseIcon';
 import { SaveButton } from '../components/IconButton';
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Descriptions, Input, Modal, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Card, Descriptions, Input, Modal, Space, Switch, Tag, Typography, message } from 'antd';
 import { navigate } from '../navigation';
 import { managementCall, type Database } from '../api';
 import { driverLabels } from '../components/ConnectionFields';
 import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
 import { DatabaseAuthentication } from '../components/DatabaseAuthentication';
-import { DatabaseClone } from '../components/DatabaseClone';
-import { QueryDisplaySettings } from '../components/QueryDisplaySettings';
 
 export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; onSaved: () => void; onRemoved: (id: string) => void }) {
  const t = useI18n();
@@ -42,45 +41,51 @@ export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; on
   finally { setBusy(false); }
  };
  const connection = db?.connection;
- return <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+ return <div className="database-settings-page">
   {!db && <Alert type="info" title={t('先添加数据库，再配置表、字段与访问权限。')} />}
   {error && <Alert type="error" showIcon title={t('操作失败')} description={error} closable onClose={() => setError(undefined)} />}
   {db && can('config.read') && <>
    <Card title={t('基本信息')} extra={<Space wrap>
-    {user.system_admin && <Button danger disabled={busy} onClick={() => { setRemoveError(undefined); setRemoveOpen(true); }}>{t('移除数据源')}</Button>}
-    <DatabaseClone db={db} onSaved={onSaved} />
-    {user.system_admin && db.connection && <EditConnection key={db.id} db={db} onSaved={onSaved} />}
     <Button onClick={() => setDetailsOpen(true)}>{t('存储详情')}</Button>
+    <DatabaseDocumentationSettings key={db.id} db={db} onSaved={onSaved} />
     <Button loading={busy} onClick={() => void run(() => managementCall('test_connection', { database_id: db.id }), t('数据库连接正常'))}>{t('测试连接')}</Button>
     <SaveButton type="primary" loading={busy} disabled={!can('config.write') || !name.trim() || name === db.name} onClick={() => void run(() => managementCall('update_database', { database_id: db.id, database: { id: db.id, revision: db.revision, name: name.trim() } }), t('数据库名称已保存'))} />
    </Space>}>
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-     <div><Typography.Text>{t('显示名称')}</Typography.Text><Input aria-label={t('数据库显示名称')} style={{ marginTop: 8, maxWidth: 480, display: 'block' }} value={name} disabled={!can('config.write')} onChange={e => setName(e.target.value)} /></div>
-     {db.driver==='sqlite'&&<Space wrap>
-      <Typography.Text>{t('打开 DDL 管理')}</Typography.Text>
-      <Switch aria-label={t('打开 DDL 管理')} checked={!!db.ddl_enabled} loading={busy} disabled={!user.system_admin} onChange={enabled=>void run(()=>managementCall('update_database',{database_id:db.id,database:{id:db.id,revision:db.revision,ddl_enabled:enabled}}),t('DDL 管理设置已保存'))}/>
-      {db.ddl_enabled&&<Button onClick={()=>navigate('ddl')}>{t('进入 DDL 管理')}</Button>}
-     </Space>}
-     <Descriptions column={{ xs: 1, md: 2 }} items={[
-      { key: 'type', label: t('数据库类型'), children: <Space size={6}><DatabaseIcon driver={db.driver}/>{t(driverLabels[db.driver] || db.driver)}</Space> },
-      ...(connection ? [
-       { key: 'address', label: t('数据库地址'), children: `${connection.host}:${connection.port}` },
-       ...(connection.database ? [{ key: 'database', label: t('数据库名称'), children: connection.database }] : []),
-       ...(connection.service_name ? [{ key: 'service', label: t('服务名称'), children: connection.service_name }] : []),
-       { key: 'schema', label: 'Schema', children: connection.schema },
-       { key: 'username', label: t('连接账号'), children: connection.username },
-      ] : [{ key: 'file', label: t('数据库文件'), children: db.path.split(/[\\/]/).pop() }]),
-     ]} />
+     <div className="database-basic-fields">
+      <div className="database-inline-field"><label htmlFor="database-display-name">{t('显示名称')}</label>
+       <Input id="database-display-name" aria-label={t('数据库显示名称')} value={name} disabled={!can('config.write')} onChange={e => setName(e.target.value)} />
+      </div>
+      <div className="database-inline-field"><Typography.Text>{t('数据库类型')}</Typography.Text>
+       <div className="database-type-controls">
+        <Tag aria-label={t('数据库类型')}><Space size={6}><DatabaseIcon driver={db.driver}/>{t(driverLabels[db.driver] || db.driver)}</Space></Tag>
+        {db.driver==='sqlite'&&<Space wrap>
+         <Typography.Text>{t('打开 DDL 管理')}</Typography.Text>
+         <Switch aria-label={t('打开 DDL 管理')} checked={!!db.ddl_enabled} loading={busy} disabled={!user.system_admin} onChange={enabled=>void run(()=>managementCall('update_database',{database_id:db.id,database:{id:db.id,revision:db.revision,ddl_enabled:enabled}}),t('DDL 管理设置已保存'))}/>
+         {db.ddl_enabled&&<Button onClick={()=>navigate('ddl')}>{t('进入 DDL 管理')}</Button>}
+        </Space>}
+       </div>
+      </div>
+      <div className="database-inline-field"><Typography.Text>{t('描述')}</Typography.Text><Typography.Paragraph type="secondary" style={{ marginBottom: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{db.description || t('暂无简介')}</Typography.Paragraph></div>
+      <div className="database-inline-field"><Typography.Text>{t('使用说明')}</Typography.Text><div><DatabaseDocumentation key={db.id} db={db} label={t('查看')} /></div></div>
+     </div>
+     {connection && <Descriptions column={{ xs: 1, md: 2 }} items={[
+      { key: 'address', label: t('数据库地址'), children: `${connection.host}:${connection.port}` },
+      ...(connection.database ? [{ key: 'database', label: t('数据库名称'), children: connection.database }] : []),
+      ...(connection.service_name ? [{ key: 'service', label: t('服务名称'), children: connection.service_name }] : []),
+      { key: 'schema', label: 'Schema', children: connection.schema },
+      { key: 'username', label: t('连接账号'), children: connection.username },
+     ]} />}
     </Space>
    </Card>
    {connection&&<SchemaScopeSettings db={db} onSaved={onSaved} disabled={!can('config.write')}/> }
-   <QueryDisplaySettings key={db.id} db={db} onSaved={onSaved} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
+   {user.system_admin && <div className="database-removal-footer"><Button danger disabled={busy} onClick={() => { setRemoveError(undefined); setRemoveOpen(true); }}>{t('移除数据源')}</Button></div>}
    <Modal title={t('移除数据源')} open={removeOpen} confirmLoading={busy} okButtonProps={{ danger: true }} okText={t('确认移除')} onOk={() => void remove()} onCancel={() => { if (!busy) setRemoveOpen(false); }}>
     <p>{t('确认从 DataScope 移除“{0}”（{1}）？业务数据库及其中的数据会保留。', {'0': db.name, '1': db.id})}</p>
     {removeError && <Alert type="error" showIcon title={removeError} />}
    </Modal>
-   <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button>}>
+   <Modal title={t('存储详情')} open={detailsOpen} onCancel={() => setDetailsOpen(false)} width={840} footer={<Space>{user.system_admin && db.connection && <EditConnection key={db.id} db={db} onSaved={onSaved} />}<Button onClick={() => setDetailsOpen(false)}>{t('关闭')}</Button></Space>}>
     <Descriptions column={1} items={[
      { key: 'id', label: t('数据库 ID'), children: <Typography.Text copyable>{db.id}</Typography.Text> },
      ...(db.driver === 'sqlite' ? [{ key: 'business', label: t('业务数据文件'), children: <Typography.Text copyable style={{ overflowWrap: 'anywhere' }}>{db.path}</Typography.Text> }] : []),
@@ -89,5 +94,5 @@ export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; on
     ]} />
    </Modal>
   </>}
- </Space>;
+ </div>;
 }
