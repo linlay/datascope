@@ -101,22 +101,22 @@ export function AuditPage({databases}:{databases:Database[]}){
  </Space>;
  return <Space orientation="vertical" style={{width:'100%'}} size="middle">
   <Card title={t('操作日志')}>
-   <Form className="configuration-form" form={form} layout="horizontal" labelAlign="left" labelWrap initialValues={{database:defaultScope}} onFinish={apply}>
+   <Form className="query-form" form={form} layout="horizontal" labelAlign="left" labelWrap initialValues={{database:defaultScope}} onFinish={apply}>
     <Row gutter={[16,0]}>
-     <Col xs={24} sm={12} lg={6}><Form.Item name="database" label={<span className="configuration-label-text">{t('数据库')}</span>}><Select aria-label={t('筛选数据库')} showSearch optionFilterProp="label" options={[...(user.system_admin?[{value:'',label:t('全部数据库与平台日志')},{value:'__platform__',label:t('仅平台操作')}]:[]),...allowed.map(db=>({value:db.id,label:db.name}))]}/></Form.Item></Col>
-     <Col xs={24} sm={12} lg={4}><Form.Item name="status" label={<span className="configuration-label-text">{t('状态')}</span>}><Select aria-label={t('筛选状态')} placeholder={t('全部状态')} allowClear options={Object.entries(statusLabels).map(([value,label])=>({value,label:t(label)}))}/></Form.Item></Col>
-     <Col xs={24} lg={8}><Form.Item name="range" label={<span className="configuration-label-text">{t('时间范围')}</span>}><DatePicker.RangePicker showTime style={{width:'100%'}} format="YYYY-MM-DD HH:mm:ss" placeholder={[t('开始时间'),t('结束时间')]}/></Form.Item></Col>
-     <Col xs={24} lg={6}><Form.Item name="query" label={<span className="configuration-label-text">{t('关键词')}</span>}><Input aria-label={t('筛选关键词')} placeholder={t('搜索 SQL、错误或操作详情')} allowClear maxLength={300}/></Form.Item></Col>
+     <Col xs={24} sm={12} lg={6}><Form.Item name="database" label={<span className="configuration-label-text">{t('数据库')}</span>}><Select className="query-person" aria-label={t('筛选数据库')} showSearch optionFilterProp="label" options={[...(user.system_admin?[{value:'',label:t('全部数据库与平台日志')},{value:'__platform__',label:t('仅平台操作')}]:[]),...allowed.map(db=>({value:db.id,label:db.name}))]}/></Form.Item></Col>
+     <Col xs={24} sm={12} lg={4}><Form.Item name="status" label={<span className="configuration-label-text">{t('状态')}</span>}><Select className="query-short" aria-label={t('筛选状态')} placeholder={t('全部状态')} allowClear options={Object.entries(statusLabels).map(([value,label])=>({value,label:t(label)}))}/></Form.Item></Col>
+     <Col xs={24} lg={8}><Form.Item name="range" label={<span className="configuration-label-text">{t('时间范围')}</span>}><DatePicker.RangePicker showTime className="query-range" format="YYYY-MM-DD HH:mm:ss" placeholder={[t('开始时间'),t('结束时间')]}/></Form.Item></Col>
+     <Col xs={24} lg={6}><Form.Item name="query" label={<span className="configuration-label-text">{t('关键词')}</span>}><Input className="query-search" aria-label={t('筛选关键词')} placeholder={t('搜索 SQL、错误或操作详情')} allowClear maxLength={300}/></Form.Item></Col>
     </Row>
     <Collapse ghost activeKey={advanced?['filters']:[]} onChange={keys=>setAdvancedView(keys.includes('filters')?'open':'closed')} items={[{
      key:'filters',
      label:<Space>{t('高级筛选')}{advancedCount>0&&<Tag color="blue">{t('{count} 项生效',{count:advancedCount})}</Tag>}</Space>,
      children:<Row gutter={[16,0]}>
-      <Col xs={24} sm={12} lg={8}><Form.Item name="actor_id" label={<span className="configuration-label-text">{t('操作用户')}</span>}><Select aria-label={t('筛选操作用户')} placeholder={t('全部用户')} allowClear showSearch optionFilterProp="label" options={(result?.actors??[]).map(id=>({value:id,label:actorName(id)}))}/></Form.Item></Col>
-      <Col xs={24} sm={12} lg={8}><Form.Item name="kind" label={<span className="configuration-label-text">{t('操作类型')}</span>}><Select aria-label={t('筛选操作类型')} placeholder={t('全部类型')} allowClear showSearch optionFilterProp="label" options={(result?.kinds??[]).map(kind=>({value:kind,label:kindLabels[kind]?`${t(kindLabels[kind])} · ${kind}`:kind}))}/></Form.Item></Col>
-      <Col xs={24} sm={12} lg={8}><Form.Item name="source" label={<span className="configuration-label-text">{t('来源')}</span>}><Select aria-label={t('筛选来源')} placeholder={t('全部来源')} allowClear showSearch optionFilterProp="label" options={(result?.sources??[]).map(source=>({value:source,label:t(sourceLabels[source]??source)}))}/></Form.Item></Col>
-      <Col xs={24} sm={12}><Form.Item name="request_id" label={<span className="configuration-label-text">{t('请求 ID')}</span>}><Input aria-label={t('筛选请求 ID')} placeholder={t('关联同一次操作')} allowClear maxLength={200}/></Form.Item></Col>
-      <Col xs={24} sm={12}><Form.Item name="tool" label={<span className="configuration-label-text">{t('工具 / 动作')}</span>}><Input aria-label={t('筛选工具')} placeholder={t('例如 query、save_policy')} allowClear maxLength={200}/></Form.Item></Col>
+      <Col xs={24} sm={12} lg={8}><Form.Item name="actor_id" label={<span className="configuration-label-text">{t('操作用户')}</span>}><Select className="query-person" aria-label={t('筛选操作用户')} placeholder={t('全部用户')} allowClear showSearch optionFilterProp="label" options={(result?.actors??[]).map(id=>({value:id,label:actorName(id)}))}/></Form.Item></Col>
+      <Col xs={24} sm={12} lg={8}><Form.Item name="kind" label={<span className="configuration-label-text">{t('操作类型')}</span>}><Select className="query-person" aria-label={t('筛选操作类型')} placeholder={t('全部类型')} allowClear showSearch optionFilterProp="label" options={(result?.kinds??[]).map(kind=>({value:kind,label:kindLabels[kind]?`${t(kindLabels[kind])} · ${kind}`:kind}))}/></Form.Item></Col>
+      <Col xs={24} sm={12} lg={8}><Form.Item name="source" label={<span className="configuration-label-text">{t('来源')}</span>}><Select className="query-short" aria-label={t('筛选来源')} placeholder={t('全部来源')} allowClear showSearch optionFilterProp="label" options={(result?.sources??[]).map(source=>({value:source,label:t(sourceLabels[source]??source)}))}/></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item name="request_id" label={<span className="configuration-label-text">{t('请求 ID')}</span>}><Input className="query-id" aria-label={t('筛选请求 ID')} placeholder={t('关联同一次操作')} allowClear maxLength={200}/></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item name="tool" label={<span className="configuration-label-text">{t('工具 / 动作')}</span>}><Input className="query-search" aria-label={t('筛选工具')} placeholder={t('例如 query、save_policy')} allowClear maxLength={200}/></Form.Item></Col>
      </Row>,
     }]}/>
     <Space style={{marginTop:12}}><Button type="primary" htmlType="submit" loading={busy}>{t('查询')}</Button><Button disabled={busy} onClick={()=>{form.resetFields();apply({database:defaultScope})}}>{t('重置')}</Button></Space>
@@ -130,8 +130,8 @@ export function AuditPage({databases}:{databases:Database[]}){
     {title:t('操作用户'),dataIndex:'actor_id',width:160,render:(_,event)=>eventActor(event)},
     {title:t('来源'),dataIndex:'source',width:130,render:value=>t(sourceLabels[value]??value)},
     {title:t('操作类型'),dataIndex:'kind',render:kind=><Space orientation="vertical" size={0}><Typography.Text>{t(kindLabels[kind]??kind)}</Typography.Text>{kindLabels[kind]&&<Typography.Text type="secondary" className="mono">{kind}</Typography.Text>}</Space>},
-    {title:t('状态'),dataIndex:'status',width:100,render:status=><Tag color={status==='success'?'green':status==='failed'?'red':status==='running'?'blue':'orange'}>{t(statusLabels[status]??status)}</Tag>},
-    {title:t('返回行数'),dataIndex:'rows',width:90},
+    {title:t('状态'),align:'center',dataIndex:'status',width:100,render:status=><Tag color={status==='success'?'green':status==='failed'?'red':status==='running'?'blue':'orange'}>{t(statusLabels[status]??status)}</Tag>},
+    {title:t('返回行数'),align:'right',dataIndex:'rows',width:90},
    ]} expandable={{expandedRowRender:detail,expandedRowKeys:route.selection?[route.selection]:[],onExpand:(expanded,event)=>selectResource(expanded?event.id:undefined)}}/>
   </Card>
  </Space>;

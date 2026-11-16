@@ -70,7 +70,7 @@ export function App() {
   const pages = group.filter(page => visiblePages.includes(page));
   if (!pages.length) return;
   if (navigationItems.length) navigationItems.push({ type: 'divider', key: `section-${index}` });
-  navigationItems.push(...pages.map(key => ({ key, icon: icons[key], label: current && ['actions', 'knowledge', 'views'].includes(key) ? <span className="sidebar-capability-label"><span>{t(titles[key])}</span><span className="sidebar-capability-status">{t(capabilityEnabled(current,key as 'actions'|'knowledge'|'views') ? '已打开' : '打开')}</span></span> : t(titles[key]) })));
+  navigationItems.push(...pages.map(key => ({ key, icon: icons[key], label: current && ['actions', 'knowledge', 'views'].includes(key) ? <span className="sidebar-capability-label"><span>{t(titles[key])}</span>{capabilityEnabled(current,key as 'actions'|'knowledge'|'views') && <span className="sidebar-capability-status">{t('已打开')}</span>}</span> : t(titles[key]) })));
  });
  const activePage=!current&&user.system_admin&&route.page!=='audit'?'database':visiblePages.includes(route.page)?route.page:route.page==='ddl'&&visiblePages.includes('database')?'database':visiblePages[0];
  useEffect(()=>{if(current&&activePage&&activePage!==route.page)navigate(activePage,undefined,{database:dbID},true);},[current,activePage,route.page,dbID]);

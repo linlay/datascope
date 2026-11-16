@@ -60,7 +60,7 @@ export function AddDatabase({ sources, onClose, onAdded }: { sources: Database[]
   } catch (e) { if (e instanceof Error) setError(e.message); }
   finally { setBusy(false); }
  };
- return <Modal title={t('增加数据库')} open centered width={720} destroyOnHidden
+ return <Modal title={t('增加数据库')} open centered width={640} destroyOnHidden
   styles={{ body: { maxHeight: 'calc(100dvh - 240px)', overflowY: 'auto', paddingRight: 8 } }}
   closable={!pending} maskClosable={!pending} onCancel={() => { if (!pending) { if (created) onAdded(created); else onClose(); } }}
   footer={created ? <Button disabled={pending} onClick={() => onAdded(created)}>{t('保留新库，稍后配置')}</Button> : <Space>

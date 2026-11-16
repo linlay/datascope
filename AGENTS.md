@@ -1,3 +1,7 @@
+# Git 提交说明
+
+- 每次 Git 提交的说明（commit message）不少于 20 个字，并清楚描述本次变更。
+
 # 推送前的 Dockerfile 约定
 
 - 推送本工程前，按目标远程仓库的 URL 确认平台。内网 GitLab 使用内网版作为根目录的 `Dockerfile`，公网版保留为 `Dockerfile.public`。GitHub 使用公网版作为根目录的 `Dockerfile`，内网版保留为 `Dockerfile.internal`。
