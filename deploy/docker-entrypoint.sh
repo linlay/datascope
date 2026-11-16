@@ -6,18 +6,12 @@ umask 077
 mkdir -p \
   "$(dirname "${MANAGEMENT_DB_PATH}")" \
   "$(dirname "${AUDIT_DB_PATH}")" \
-  "$(dirname "${SQLITE_PATH}")" \
   "$(dirname "${OAUTH_KEY_PATH}")" \
   "${DATABASE_CONFIG_DIR}"
 
-if [ ! -e "${SQLITE_PATH}" ]; then
-  if [ "${INITIALIZE_DEMO_DATA:-true}" = "true" ]; then
-    echo "Initializing demo database at ${SQLITE_PATH}"
-    gen-data -db "${SQLITE_PATH}" -schema /app/sql/schema.sqlite.sql -dictionary ""
-  else
-    echo "Database does not exist: ${SQLITE_PATH}" >&2
-    exit 1
-  fi
+if [ -n "${SQLITE_PATH:-}" ] && [ ! -f "${SQLITE_PATH}" ]; then
+  echo "Configured SQLite database does not exist: ${SQLITE_PATH}; create it before starting the service" >&2
+  exit 1
 fi
 
 admin-api &

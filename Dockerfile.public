@@ -19,7 +19,7 @@ RUN go mod download
 COPY . ./
 RUN go build -trimpath -ldflags="-s -w" -o /out/mcp-server ./cmd/mcp-server \
     && go build -trimpath -ldflags="-s -w" -o /out/admin-api ./cmd/admin-api \
-    && go build -trimpath -ldflags="-s -w" -o /out/gen-data ./cmd/gen-data
+    && go build -trimpath -ldflags="-s -w" -o /out/import-config ./cmd/import-config
 
 FROM docker.io/library/nginx:1.28.0-alpine AS runtime
 RUN rm -f /etc/nginx/conf.d/default.conf
@@ -30,8 +30,6 @@ COPY --from=web-build /src/web/dist/ /usr/share/nginx/html/
 COPY config/ ./config/
 COPY deploy/connectors/ ./deploy/connectors/
 COPY docs/ ./docs/
-COPY fixtures/ ./fixtures/
-COPY sql/ ./sql/
 COPY deploy/nginx.docker.conf /etc/nginx/conf.d/datascope.conf
 COPY deploy/nginx.proxy_params /etc/nginx/proxy_params
 COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -39,8 +37,8 @@ COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENV MANAGEMENT_DB_PATH=/app/data/management.sqlite \
     AUDIT_DB_PATH=/app/data/audit.sqlite \
     DATABASE_ALLOWED_ROOTS=/app/data \
-    SQLITE_PATH=/app/data/securities_demo.sqlite3 \
-    REWRITE_CONFIG=/app/config/rewrite.yml \
+    SQLITE_PATH="" \
+    REWRITE_CONFIG="" \
     DATABASE_CONFIG_DIR=/app/config/databases \
     DATABASE_CATALOG=/app/data/databases.json \
     OAUTH_KEY_PATH=/app/data/oauth/signing.pem \
@@ -50,8 +48,7 @@ ENV MANAGEMENT_DB_PATH=/app/data/management.sqlite \
     MCP_SERVER_URL=http://127.0.0.1:18080/mcp \
     MCP_RESOURCE_URL=http://localhost:8080/mcp \
     OAUTH_ISSUER=http://localhost:8080 \
-    SESSION_COOKIE_SECURE=false \
-    INITIALIZE_DEMO_DATA=true
+    SESSION_COOKIE_SECURE=false
 
 VOLUME ["/app/data"]
 EXPOSE 8080

@@ -7,9 +7,9 @@ description: 管理 DataScope 数据库登记、SQLite DDL、访问策略、MCP 
 
 | 工具 | 用途 | 资源 |
 | --- | --- | --- |
-| `datascope_query` | 查询管理状态 | database、ddl、policy、user、business_account、grant、knowledge、view、audit |
-| `datascope_manage` | 创建与修改 | database、ddl、policy、mcp、action、user、business_account、grant、knowledge、view |
-| `datascope_inspect` | 连接测试、策略校验、改写与 DDL 预览 | database、ddl、policy、action |
+| `datascope_query` | 查询管理状态 | database、ddl、discovery、authentication、policy、user、business_account、grant、knowledge、view、action、audit |
+| `datascope_manage` | 创建与修改 | database、ddl、discovery、annotation、authentication、policy、mcp、action、user、business_account、grant、knowledge、view |
+| `datascope_inspect` | 连接测试、策略校验、改写与 DDL 预览 | database、connection、ddl、policy、action |
 
 按当前任务读取对应 reference，其中包含支持的动作、必需参数、权限及示例。不要将全部资源与动作任意组合；服务端拒绝不支持的组合和无关参数。
 

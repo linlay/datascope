@@ -58,10 +58,28 @@ func (s *Store) BeginAction(ctx context.Context) (*ActionTx, error) {
 }
 
 type ActionTx struct {
-	s       *Store
-	tx      *sql.Tx
-	Count   int
-	release func()
+	s              *Store
+	tx             *sql.Tx
+	Count          int
+	release        func()
+	statementLimit int
+}
+
+// BeginImport uses the existing SQL guards and dialect adapters with a separate
+// budget. An import remains one transaction; Action budgets are unchanged.
+func (s *Store) BeginImport(ctx context.Context, write bool) (*ActionTx, error) {
+	if write {
+		t, err := s.BeginAction(ctx)
+		if t != nil {
+			t.statementLimit = 100000
+		}
+		return t, err
+	}
+	tx, err := s.beginReadOnly(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ActionTx{s: s, tx: tx, statementLimit: 100000}, nil
 }
 
 func (t *ActionTx) unlock() {
@@ -73,6 +91,12 @@ func (t *ActionTx) unlock() {
 func (t *ActionTx) Commit() error   { defer t.unlock(); return t.tx.Commit() }
 func (t *ActionTx) Rollback() error { defer t.unlock(); return t.tx.Rollback() }
 func actionStatement(query string, write bool) (string, error) {
+	return scopedActionStatement(query, write, false)
+}
+
+// Import connections delegate network Schema scope to the dialect compiler.
+// Legacy Actions and all SQLite statements keep their original scope guard.
+func scopedActionStatement(query string, write, networkImport bool) (string, error) {
 	p := parser.NewParser(strings.NewReader(query))
 	n, e := p.ParseStatement()
 	if e != nil {
@@ -106,14 +130,14 @@ func actionStatement(query string, write bool) (string, error) {
 	_, e = parser.Walk(parser.VisitFunc(func(n parser.Node) (parser.Node, error) {
 		switch x := n.(type) {
 		case *parser.QualifiedTableName:
-			if x.Schema != nil && !strings.EqualFold(x.Schema.Name, "main") {
+			if x.Schema != nil && !strings.EqualFold(x.Schema.Name, "main") && !networkImport {
 				return nil, errors.New("禁止跨库 SQL")
 			}
 			if strings.HasPrefix(strings.ToLower(x.Name.Name), "sqlite_") {
 				return nil, errors.New("不能访问 SQLite 内部表")
 			}
 		case *parser.InsertStatement:
-			if x.Schema != nil && !strings.EqualFold(x.Schema.Name, "main") {
+			if x.Schema != nil && !strings.EqualFold(x.Schema.Name, "main") && !networkImport {
 				return nil, errors.New("禁止跨库 INSERT")
 			}
 		case *parser.QualifiedTableFunctionName:
@@ -193,10 +217,18 @@ func (t *ActionTx) prepare(ctx context.Context, query string, write bool, args [
 		ev.Binds = args
 		ev.ExecutedSQL = query
 	}
-	if t.Count > 50 {
-		e = errors.New("一次 action 最多 50 条 SQL")
+	limit := t.statementLimit
+	if limit == 0 {
+		limit = 50
+	}
+	if t.Count > limit {
+		if t.statementLimit == 0 {
+			e = errors.New("一次 action 最多 50 条 SQL")
+		} else {
+			e = fmt.Errorf("一次执行最多 %d 条 SQL", limit)
+		}
 	} else {
-		query, e = actionStatement(query, write)
+		query, e = scopedActionStatement(query, write, t.statementLimit > 0 && t.s.engine != nil)
 	}
 	if e == nil && t.s.engine != nil {
 		if write {

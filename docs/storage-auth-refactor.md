@@ -75,12 +75,12 @@ go run ./cmd/migrate-state -data-dir data
 | ACCOUNT | BUSINESS_ACCOUNT | 当前库 account.yml |
 | ACCOUNT | ENTERPRISE_ACCOUNT_API | 企业账号密码验证接口 |
 | OAUTH | DEMO_OAUTH | 当前库本地业务账号 |
-| OAUTH | ENTERPRISE_OAUTH | 企业授权、令牌、UserInfo 地址 |
-| ONEID | ONEID | Desktop ID Token，经配置的 JWKS 验签并映射业务身份 |
+| OAUTH | ENTERPRISE_OAUTH | 跳转企业 SSO 登录，以访问令牌调用 UserInfo 校验身份 |
+| ONEID | ONEID | 客户端自身 ID Token，经配置的 JWKS 或 PEM 公钥验签并映射业务身份 |
 | TOKEN | STATIC_TOKEN | 逐库哈希校验的 Bearer/API Key，绑定固定业务身份及能力 |
 | NONE | 无 | 配置的固定业务身份及能力 |
 
-业务页面对应 Platform 的 none、mcp、oneid、token 四项，旧 ACCOUNT 保留为 Token 下的账号密码方式。OneID、公钥缓存、凭据请求头及部署配置示例见 [业务 MCP 认证](business-authentication.md)。
+业务页面对应 Platform 的 none、mcp、oneid、token 四项，SSO 跳转登录使用 mcp，企业 OneID 直接使用客户端 ID Token；旧 ACCOUNT 保留为 Token 下的账号密码方式。OneID、公钥缓存、凭据请求头及部署配置示例见 [业务 MCP 认证](business-authentication.md)。
 
 企业提供方字段、HTTPS 与 loopback HTTP 限制保持现有接口约定。企业账号接口接收 POST JSON username/password，返回可信 sub、username、employee_id、name、active；身份与能力不由客户端自行指定。`subject_claim` 默认 sub，`business_id_claim` 默认 employee_id。企业 OAuth 使用 code + S256 PKCE、一次性 state，再请求 UserInfo。企业密钥仍只引用 `DATASCOPE_AUTH_*` 环境变量。
 

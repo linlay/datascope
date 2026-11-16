@@ -38,13 +38,13 @@ func main() {
 }
 
 func run() error {
-	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", "data/securities_demo.sqlite3"), "可选初始 SQLite 路径；空值禁用演示库导入")
+	dbPath := flag.String("db", envflag.StringAllowEmpty("SQLITE_PATH", ""), "可选初始 SQLite 路径；空值禁用演示库导入")
 	addr := flag.String("addr", envflag.String("ADMIN_API_ADDR", "127.0.0.1:8081"), "HTTP 监听地址")
 	mcpURL := flag.String("mcp-url", envflag.String("MCP_SERVER_URL", "http://127.0.0.1:8080/mcp"), "被检查的 MCP server 端点")
-	fixtures := flag.String("fixtures-dir", envflag.String("FIXTURES_DIR", "fixtures"), "权限与改写验收案例目录，用于校验 MCP")
+	fixtures := flag.String("fixtures-dir", envflag.String("FIXTURES_DIR", ""), "权限与改写验收案例目录，用于校验 MCP")
 	userHeader := flag.String("mcp-user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "MCP server 信任的用户身份请求头")
 	queryTimeout := flag.Duration("query-timeout", envflag.Duration("QUERY_TIMEOUT", store.DefaultQueryTimeout), "单条查询超时")
-	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", "config/rewrite.yml"), "SQL 改写规则配置文件")
+	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", ""), "SQL 改写规则配置文件")
 	asOf := flag.String("as-of", envflag.String("REWRITE_AS_OF", store.DefaultAsOf.Format(time.RFC3339)), "授权过期判断的参考时间（RFC 3339），需与 MCP server 一致")
 	flag.Parse()
 	asOfTime, err := time.Parse(time.RFC3339, *asOf)
@@ -75,9 +75,6 @@ func run() error {
 		return err
 	}
 	defer catalogue.CloseQueryCache()
-	if err = platform.InitializeDemoRealm(context.Background(), catalogue, envflag.String("OAUTH_DEMO_PASSWORD", "")); err != nil {
-		return err
-	}
 
 	inspector := &adminapi.Inspector{
 		Endpoint:    *mcpURL,
@@ -147,6 +144,10 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	imports := app.DataSourceManager()
+	importDone := make(chan struct{})
+	go func() { defer close(importDone); imports.RunScheduler(ctx) }()
+	defer func() { stop(); <-importDone; imports.Close() }()
 	scanInterval, err := time.ParseDuration(envflag.String("DISCOVERY_INTERVAL", "5m"))
 	if err != nil || scanInterval < 0 {
 		return fmt.Errorf("DISCOVERY_INTERVAL 必须为非负时长")

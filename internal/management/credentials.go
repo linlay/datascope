@@ -97,6 +97,23 @@ func (s *Store) SealDatabaseCredential(id, password string) (DatabaseCredential,
 	}
 	return DatabaseCredential{DatabaseID: id, Ciphertext: aead.Seal(nonce, nonce, []byte(password), []byte(id))}, nil
 }
+
+// OpenDatabaseCredential opens a sealed external-source credential with the
+// owning database's key. Ciphertext is never exposed in management responses.
+func (s *Store) OpenDatabaseCredential(id string, sealed []byte) (string, error) {
+	aead, err := s.credentialCipher(id, false)
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) < aead.NonceSize() {
+		return "", errors.New("外部连接凭据无效")
+	}
+	plain, err := aead.Open(nil, sealed[:aead.NonceSize()], sealed[aead.NonceSize():], []byte(id))
+	if err != nil {
+		return "", errors.New("无法解密外部连接凭据，请检查密钥备份")
+	}
+	return string(plain), nil
+}
 func (s *Store) DatabasePassword(ctx context.Context, id string) (string, error) {
 	source, err := s.credentialSource(id, false)
 	if err != nil {

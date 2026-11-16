@@ -1,0 +1,415 @@
+version: 1
+schemes:
+    - scheme: CUSTOM
+      name: 地区销售权限
+      description: 总部、大区、分公司、本人四级范围；明细沿单据过滤
+tables:
+    - table: cities
+      columns:
+        - id
+        - province_id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.province_id, t.name FROM main.cities t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: customer_contacts
+      columns:
+        - id
+        - customer_id
+        - name
+        - job_title
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.customer_id, t.name, t.job_title FROM main.customer_contacts t WHERE t.customer_id IN (SELECT c.id FROM main.customers c WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=c.region_id) OR (s.scope_type='OFFICE' AND s.office_id=c.office_id) OR (s.scope_type='SELF' AND c.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: customers
+      columns:
+        - id
+        - customer_no
+        - name
+        - city_id
+        - region_id
+        - office_id
+        - owner_employee_id
+        - channel_id
+        - segment
+        - acquired_date
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.customer_no, t.name, t.city_id, t.region_id, t.office_id, t.owner_employee_id, t.channel_id, t.segment, t.acquired_date FROM main.customers t WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.owner_employee_id=${userId})))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: departments
+      columns:
+        - id
+        - office_id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.office_id, t.name FROM main.departments t WHERE t.office_id IN (SELECT o.id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: employee_scopes
+      columns:
+        - id
+        - employee_id
+        - scope_type
+        - region_id
+        - office_id
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.employee_id, t.scope_type, t.region_id, t.office_id FROM main.employee_scopes t WHERE t.employee_id=${userId} OR EXISTS (SELECT 1 FROM main.employee_scopes s WHERE s.employee_id=${userId} AND s.scope_type='ALL')
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: employees
+      columns:
+        - id
+        - employee_no
+        - name
+        - department_id
+        - office_id
+        - region_id
+        - role
+        - active
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.employee_no, t.name, t.department_id, t.office_id, t.region_id, t.role, t.active FROM main.employees t WHERE t.id=${userId} OR EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))) AND EXISTS (SELECT 1 FROM main.employees a WHERE a.id=${userId} AND a.active=1 AND a.role<>'SALES')
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: inventory_balances
+      columns:
+        - id
+        - warehouse_id
+        - product_id
+        - on_hand
+        - reserved
+        - snapshot_date
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.warehouse_id, t.product_id, t.on_hand, t.reserved, t.snapshot_date FROM main.inventory_balances t WHERE t.warehouse_id IN (SELECT w.id FROM main.warehouses w WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=w.region_id) OR (s.scope_type='OFFICE' AND s.office_id=w.office_id) OR (s.scope_type='SELF' AND w.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: payment_allocations
+      columns:
+        - id
+        - payment_id
+        - order_id
+        - amount_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.payment_id, t.order_id, t.amount_cents FROM main.payment_allocations t WHERE t.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId})))) AND t.payment_id IN (SELECT p.id FROM main.payments p WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=p.region_id) OR (s.scope_type='OFFICE' AND s.office_id=p.office_id) OR (s.scope_type='SELF' AND p.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: payments
+      columns:
+        - id
+        - customer_id
+        - region_id
+        - office_id
+        - owner_employee_id
+        - paid_date
+        - method
+        - amount_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.customer_id, t.region_id, t.office_id, t.owner_employee_id, t.paid_date, t.method, t.amount_cents FROM main.payments t WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.owner_employee_id=${userId})))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: price_lists
+      columns:
+        - id
+        - region_id
+        - name
+        - valid_from
+        - valid_to
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.region_id, t.name, t.valid_from, t.valid_to FROM main.price_lists t WHERE t.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: product_categories
+      columns:
+        - id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.name FROM main.product_categories t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: product_prices
+      columns:
+        - id
+        - price_list_id
+        - product_id
+        - price_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.price_list_id, t.product_id, t.price_cents FROM main.product_prices t WHERE t.price_list_id IN (SELECT pl.id FROM main.price_lists pl WHERE pl.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: products
+      columns:
+        - id
+        - sku
+        - name
+        - category_id
+        - brand
+        - list_price_cents
+        - standard_cost_cents
+        - active
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.sku, t.name, t.category_id, t.brand, t.list_price_cents, t.standard_cost_cents, t.active FROM main.products t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: provinces
+      columns:
+        - id
+        - region_id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.region_id, t.name FROM main.provinces t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: refunds
+      columns:
+        - id
+        - return_id
+        - payment_id
+        - refund_date
+        - amount_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.return_id, t.payment_id, t.refund_date, t.amount_cents FROM main.refunds t WHERE t.return_id IN (SELECT r.id FROM main.sales_returns r WHERE r.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId}))))) AND t.payment_id IN (SELECT p.id FROM main.payments p WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=p.region_id) OR (s.scope_type='OFFICE' AND s.office_id=p.office_id) OR (s.scope_type='SELF' AND p.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: regions
+      columns:
+        - id
+        - code
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.code, t.name FROM main.regions t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_channels
+      columns:
+        - id
+        - code
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.code, t.name FROM main.sales_channels t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_offices
+      columns:
+        - id
+        - region_id
+        - city_id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT o.id, o.region_id, o.city_id, o.name FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_order_items
+      columns:
+        - id
+        - order_id
+        - product_id
+        - quantity
+        - unit_price_cents
+        - unit_cost_cents
+        - discount_cents
+        - net_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.order_id, t.product_id, t.quantity, t.unit_price_cents, t.unit_cost_cents, t.discount_cents, t.net_cents FROM main.sales_order_items t WHERE t.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_orders
+      columns:
+        - id
+        - order_no
+        - customer_id
+        - region_id
+        - office_id
+        - owner_employee_id
+        - channel_id
+        - order_date
+        - due_date
+        - status
+        - total_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.order_no, t.customer_id, t.region_id, t.office_id, t.owner_employee_id, t.channel_id, t.order_date, t.due_date, t.status, t.total_cents FROM main.sales_orders t WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.owner_employee_id=${userId})))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_return_items
+      columns:
+        - id
+        - return_id
+        - order_item_id
+        - quantity
+        - amount_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.return_id, t.order_item_id, t.quantity, t.amount_cents FROM main.sales_return_items t WHERE t.return_id IN (SELECT r.id FROM main.sales_returns r WHERE r.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId})))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_returns
+      columns:
+        - id
+        - order_id
+        - return_date
+        - reason
+        - status
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.order_id, t.return_date, t.reason, t.status FROM main.sales_returns t WHERE t.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: sales_targets
+      columns:
+        - id
+        - month
+        - region_id
+        - office_id
+        - owner_employee_id
+        - target_cents
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.month, t.region_id, t.office_id, t.owner_employee_id, t.target_cents FROM main.sales_targets t WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.owner_employee_id=${userId})))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: schema_comments
+      columns:
+        - table_name
+        - column_name
+        - comment_zh
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.table_name, t.column_name, t.comment_zh FROM main.schema_comments t
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: shipment_items
+      columns:
+        - id
+        - shipment_id
+        - order_item_id
+        - quantity
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.shipment_id, t.order_item_id, t.quantity FROM main.shipment_items t WHERE t.shipment_id IN (SELECT sh.id FROM main.shipments sh WHERE sh.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId})))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: shipments
+      columns:
+        - id
+        - order_id
+        - warehouse_id
+        - shipped_date
+        - delivered_date
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.order_id, t.warehouse_id, t.shipped_date, t.delivered_date FROM main.shipments t WHERE t.order_id IN (SELECT o.id FROM main.sales_orders o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.owner_employee_id=${userId}))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份
+    - table: warehouses
+      columns:
+        - id
+        - region_id
+        - office_id
+        - name
+      scheme: CUSTOM
+      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      alternative: ""
+      divergent: false
+      passthrough: false
+      sql: SELECT t.id, t.region_id, t.office_id, t.name FROM main.warehouses t WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=t.region_id) OR (s.scope_type='OFFICE' AND s.office_id=t.office_id) OR (s.scope_type='SELF' AND t.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))
+      denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
+      denyMessage: 需要有效的本库在职员工身份

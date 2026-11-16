@@ -1,5 +1,7 @@
 # 业务操作 Action
 
+定时从外部数据库读取并转换、导入当前库，使用独立的「数据来源」模块，见[数据来源与脚本导入](data-sources.md)。其 `sources.get`、`db.target` 和进度接口不属于 Action 脚本契约，Action 的单库事务及执行限制保持不变。
+
 Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保存到 `management/actions/<action>.yml`，并使用数据库当前 revision 控制并发保存。每项包含 `name`、`title`、`description`、`confirm`、`parameters`、`script`，以及可选的 `view_id`（YAML 为 `viewId`）和 `published`。
 
 动作、知识与视图列表右侧的开关直接保存发布状态，不提交详情中尚未保存的编辑。新增和复制的动作默认是草稿；旧动作未配置 `published` 时保持已发布。动作取消发布后，业务 MCP 不再列出或描述它，也拒绝直接调用和未完成的确认；平台编辑者仍可查看与回滚试运行。发布与人工确认分别控制“是否可供业务调用”和“调用是否需要本人审核”。人工确认开关旁的帮助入口提供侧边说明。视图被默认查询或动作引用时，需先取消关联才能取消发布。
@@ -102,17 +104,13 @@ function main(params, context) {
 
 已有 `run(args, ctx)`、ES Modules 和 `db.one/db.all/db.exec`、`my.one/my.all` SQL 标签模板继续通过旧路径执行；`my.*` 仅在旧路径继续应用原查询策略。新 `main` 脚本及其库使用 CommonJS，不能混用两套契约。
 
-证券案例包全部 18 个 Action、3 个公共库已采用新契约。已有安装可仅升级脚本，保留参数、确认开关、发布状态、视图、写入开关、MCP 配置与账号授权：
-
-```sh
-# 加载与服务相同的环境变量后执行
- go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts -check
- go run ./cmd/install-demo-actions -database securities_demo -migrate-scripts
-```
+证券案例包的 18 个 Action 和 3 个公共库保存在 `examples/securities/actions.yml`。新库使用通用配置导入器，已有库通过管理界面或管理 MCP 更新相应 Action 与公共库；更新提高配置 revision 并使旧预览失效。
 
 实际迁移前会备份逐库管理配置，通过 revision 检查一次保存全部脚本；重复迁移无变更。不提交证券业务数据，不重装视图或重新授权账号。源码升级后需构建并重启 API/MCP 服务，使新脚本由新执行器运行。
 
 ## 动作 AI 助手
+
+助手按当前草稿入口选择契约：main 使用 db.session()、静态 SQL 字符串与 CommonJS，旧 run 保留标签模板路径，不自动迁移权限语义。两条路径均检查可达公共库中的读取，拒绝相对已保存动作新增或修改绕过普通查询策略的 SELECT；新读取需手工编写并审核。建议仅更新草稿，不自动保存或执行。assist_action 暂不暴露为管理 MCP 工具，外部客户端可通过动作保存与回滚试运行完成编写验证。
 
 admin-api 的 `DATASCOPE_AI_ENDPOINT` 可填写以 `/v1` 结尾的网关基址或完整的 Chat Completions 端点，模型需支持 JSON 对象响应。`DATASCOPE_AI_MODEL` 选择模型，`DATASCOPE_AI_KEY` 仅配置在服务端，`DATASCOPE_AI_TIMEOUT` 默认为 120s，限制等待首个有效输出和后续连续空闲的时间。客户端请求流式响应，每段正文或推理增量都会重新计时。助手在流结束并校验完整 JSON 后返回建议。兼容完整 JSON 对象外层的 Markdown 代码块；流已明确返回 `finish_reason=stop` 时，允许正常 EOF 代替 `[DONE]`，并处理末尾省略空行的完整事件。缺少 stop、输出截断、过滤、工具调用替代正文、无正文、响应结构或建议字段错误分别返回可诊断原因，不返回提供商原始正文。`finish_reason=length` 时需提高提供商输出 token 上限或缩短需求；格式错误需核对模型的 JSON 输出能力。如果错误仍显示 30s，检查部署环境是否显式设置了旧值；改为 `DATASCOPE_AI_TIMEOUT=120s` 并重启 admin-api（容器环境变量变化时重新创建容器）。首段输出更慢时可进一步调整。空闲时限不是整次请求总时限，入口代理需覆盖完整生成及可能的一次自动修正；仓库 Docker 配置为管理调用预留 600s，外层网关也需相应配置。使用外部模型时，动作草稿与选定的结构元数据会发送到该端点。服务端记录模型、耗时、状态和提供商返回的 token 用量。
 
@@ -160,7 +158,7 @@ MCP 进程持有唯一内存缓存，API 的确认页和平台试运行通过权
 
 SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络库使用共享连接和 AST 编译，并有各驱动 SQL 编译/绑定测试。接入真实 MySQL、PostgreSQL、Oracle、达梦写账号后，仍需在目标库验收其账号权限、字段精度、锁和超时行为；测试未配置实际写账号时不代表已做真实库写入验收。
 
-证券演示库已提供可显式安装的 18 个操作，见 [完整案例](securities-actions.md)；涉及的结构、状态值和发布步骤见 [发布清单](securities-actions-release.md)。
+证券演示库已提供可显式安装的 18 个操作，见 [完整案例](../examples/securities/docs/actions.md)；涉及的结构、状态值和发布步骤见 [发布清单](../examples/securities/docs/actions-release.md)。
 
 ## 工作台正式调用
 
@@ -173,3 +171,7 @@ SQLite 已有事务、权限、幂等、确认和并发端到端回归；网络�
 Token 仅保留在当前页面内存，不进入 localStorage、配置、请求追踪展示或日志。离开页签销毁认证状态。平台会话只控制工作台入口，业务 MCP 每次独立验证 Token、数据库、工具开关和 action 能力。
 
 正式调用需要明确点击并确认。confirm_required 展示回滚 preview 和现有确认页链接，由本人打开确认页登录执行；工作台不调用确认接口。查询结果使用同一 request_id 调用 invoke_action，并指定 result_only:true；只查询当前业务身份的内存回执。网络故障或 MCP 重启后缺失回执返回 unknown，用户应核对审计和业务数据，工作台不自动重试写入。
+
+## 动作总开关
+
+动作列表表头和 MCP 配置页共用同一总开关（`write_enabled`）。`configure_capability` 的 actions 组原子启停 `list_actions`、`describe_action`、`invoke_action`，保留动作内容及发布状态。需 `action.write`，网络库需独立写入账号。关闭后正式执行及回滚试运行均被拒绝，管理端仍可编辑和发布草稿。

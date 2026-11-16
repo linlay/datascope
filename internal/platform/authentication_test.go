@@ -170,6 +170,27 @@ func TestGlobalAuthenticationBindingsAndAllBusinessModes(t *testing.T) {
 		}
 	}
 	must(t, f.m.SaveAuthConfig(f.ctx, cfg))
+	// Enterprise SSO is discovered through MCP OAuth, with a browser login at
+	// the enterprise issuer rather than a request for the client's ID token.
+	req, _ = http.NewRequest("POST", server.URL+"/mcp/default", strings.NewReader(`{}`))
+	res, e = http.DefaultClient.Do(req)
+	must(t, e)
+	res.Body.Close()
+	challenge := res.Header.Get("WWW-Authenticate")
+	if res.StatusCode != http.StatusUnauthorized || !strings.Contains(challenge, `resource_metadata="http://127.0.0.1/.well-known/oauth-protected-resource/mcp/default"`) {
+		t.Fatalf("SSO discovery challenge: %d %q", res.StatusCode, challenge)
+	}
+	res, e = http.Get(server.URL + "/.well-known/oauth-protected-resource/mcp/default")
+	must(t, e)
+	var metadata struct {
+		Resource             string   `json:"resource"`
+		AuthorizationServers []string `json:"authorization_servers"`
+	}
+	must(t, json.NewDecoder(res.Body).Decode(&metadata))
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || metadata.Resource != "http://127.0.0.1/mcp/default" || len(metadata.AuthorizationServers) != 1 || metadata.AuthorizationServers[0] != identity.URL {
+		t.Fatalf("SSO must advertise enterprise issuer: %d %+v", res.StatusCode, metadata)
+	}
 	oauthSession := connectMCP(t, server.URL+"/mcp/default", "enterprise-token")
 	out, e = callMCP(t, oauthSession, "query", map[string]any{"sql": "SELECT id FROM items ORDER BY id"})
 	must(t, e)

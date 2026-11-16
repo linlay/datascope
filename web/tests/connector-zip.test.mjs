@@ -6,16 +6,17 @@ import { buildConnectorZip } from '../src/connectorZip.ts';
 const endpoint = new URL('https://mcp.example.com/mcp/custom-route');
 const cases = [
   ['NONE', 'none', undefined],
-  ['OAUTH', 'mcp', undefined],
-  ['ONEID', 'oneid', { Authorization: 'Bearer ${ONEID_TOKEN}' }],
+  ['OAUTH', 'mcp', undefined, undefined, 'DEMO_OAUTH'],
+  ['OAUTH', 'mcp', undefined, undefined, 'ENTERPRISE_OAUTH'],
+  ['ONEID', 'oneid', { Authorization: 'Bearer ${ONEID_TOKEN}' }, undefined, 'ONEID'],
   ['TOKEN', 'token', { Authorization: 'Bearer ${API_KEY}' }],
   ['TOKEN', 'token', { 'X-API-Key': '${API_KEY}' }, 'X-API-Key'],
   ['ACCOUNT', 'token', { Authorization: 'Bearer ${BUSINESS_TOKEN}' }],
 ];
-for (const [mode, authMode, headers, header] of cases) {
-  test(`export ${mode} with ${header || 'default headers'}`, () => {
+for (const [mode, authMode, headers, header, providerType] of cases) {
+  test(`export ${mode} ${providerType || ''} with ${header || 'default headers'}`, () => {
     const db = { id: 'A'.repeat(64), name: '业务库', revision: 7, mcp_enabled: true,
-      access: { policy: { mode }, revision: 3, provider: { header_name: header, secret_env: 'PRIVATE_ENV_NAME' } } };
+      access: { policy: { mode }, revision: 3, provider: { type: providerType, header_name: header, secret_env: 'PRIVATE_ENV_NAME' } } };
     const { bytes } = buildConnectorZip(db, endpoint);
     const files = unzipSync(bytes);
     const read = name => JSON.parse(strFromU8(files[name]));
@@ -46,4 +47,7 @@ test('export requires an enabled service, resolved policy and distributable endp
   assert.throws(() => buildConnectorZip({ mcp_enabled: true }, endpoint), /认证配置/);
   assert.throws(() => buildConnectorZip(db, new URL('http://remote.test/mcp')), /HTTPS/);
   assert.throws(() => buildConnectorZip(db, new URL('https://remote.test/mcp?token=secret')), /查询参数/);
+  const oneID = { ...db, access: { policy: { mode: 'ONEID' } } };
+  assert.throws(() => buildConnectorZip(oneID, new URL('https://remote.test:8443/mcp')), /OneID/);
+  assert.throws(() => buildConnectorZip(oneID, new URL('http://127.0.0.1/mcp')), /OneID/);
 });

@@ -1,0 +1,220 @@
+version: 1
+actions:
+  -
+    name: "submit_version"
+    title: "提交内容审核"
+    description: "仅负责编辑或被分配协作方；只提交 draft 版本，不改写已有发布内容。"
+    confirm: true
+    parameters:
+      version_id:
+        type: "integer"
+        description: "平台内容版本编号"
+        min: 1
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),v=conn.queryOne("SELECT id,content_id,state FROM content_versions WHERE id=:id",{id:params.version_id});
+       if(!v)throw new HttpError(403,'内容版本不存在');const c=ops.content(v.content_id);
+       if(!((u.role==='EDITOR'&&c.editor_id===u.id)||(u.role==='PARTNER'&&c.partner_id===u.id)))throw new HttpError(403,'只能提交分配给本人的内容');
+       if(v.state!=='draft')throw new HttpError(403,'仅草稿可以提交审核');
+       const used=conn.queryOne("SELECT COUNT(*) AS n FROM publications WHERE version_id=:id AND status<>'draft'",{id:v.id});if(used.n)throw new HttpError(403,'已有发布流程，不能修改历史版本');
+       const n=conn.update("UPDATE content_versions SET state='submitted' WHERE id=:id AND state='draft'",{id:v.id}).rowsAffected;if(n!==1)throw new HttpError(403,'版本状态已变化');
+       return {version_id:v.id,state:'submitted',reason:params.reason};
+      }
+  -
+    name: "review_version"
+    title: "审核内容版本"
+    description: "所属团队负责人审核待审版本，作者不得自审；不直接执行平台发布。"
+    confirm: true
+    parameters:
+      version_id:
+        type: "integer"
+        description: "待审核版本编号"
+        min: 1
+      decision:
+        type: "string"
+        description: "审核决定"
+        enum:
+          - "approved"
+          - "rejected"
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),v=conn.queryOne("SELECT id,content_id,state,author_id FROM content_versions WHERE id=:id",{id:params.version_id});
+       if(!v)throw new HttpError(403,'内容版本不存在');ops.manage(u,ops.content(v.content_id));
+       if(v.author_id===u.id)throw new HttpError(403,'作者不能审核本人内容');if(v.state!=='submitted')throw new HttpError(403,'仅待审内容可以审核');
+       const n=conn.update("UPDATE content_versions SET state=:state,reviewed_by=:uid,review_note=:note WHERE id=:id AND state='submitted'",{state:params.decision,uid:u.id,note:params.reason,id:v.id}).rowsAffected;if(n!==1)throw new HttpError(403,'版本状态已变化');
+       return {version_id:v.id,state:params.decision,reason:params.reason};
+      }
+  -
+    name: "schedule_publication"
+    title: "安排发布排期"
+    description: "有效 OPERATE 授权内，将已审核且平台品牌匹配的草稿任务排期；不调用真实平台。"
+    confirm: true
+    parameters:
+      publication_id:
+        type: "integer"
+        description: "发布任务编号"
+        min: 1
+      scheduled_at:
+        type: "string"
+        description: "未来北京时间，格式 YYYY-MM-DDTHH:mm:ss+08:00"
+        pattern: "^202[0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\+08:00$"
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),p=conn.queryOne("SELECT p.id,p.status,p.revision,p.account_id,v.state,v.platform_id,a.platform_id AS account_platform,a.brand_id,x.brand_id AS campaign_brand,x.start_date,x.end_date,x.id AS campaign_id FROM publications p JOIN content_versions v ON v.id=p.version_id JOIN content_items c ON c.id=v.content_id JOIN campaigns x ON x.id=c.campaign_id JOIN channel_accounts a ON a.id=p.account_id WHERE p.id=:id",{id:params.publication_id});
+       if(!p)throw new HttpError(403,'发布任务不存在');ops.operate(u,p.account_id,context);
+       if(p.status!=='draft'||p.state!=='approved')throw new HttpError(403,'需要草稿任务及已审核内容');
+       if(p.platform_id!==p.account_platform||p.brand_id!==p.campaign_brand)throw new HttpError(403,'内容平台或品牌不匹配');
+       const ca=conn.queryOne("SELECT account_id FROM campaign_accounts WHERE campaign_id=:cid AND account_id=:aid",{cid:p.campaign_id,aid:p.account_id});if(!ca)throw new HttpError(403,'账号未参与该活动');
+       const when=new Date(params.scheduled_at),now=new Date(context.now),day=params.scheduled_at.slice(0,10);
+       if(!Number.isFinite(when.getTime())||when.getTime()<=now.getTime()||ops.stamp({now:when.toISOString()})!==params.scheduled_at||day<p.start_date||day>p.end_date)throw new HttpError(403,'排期必须为有效的活动期内未来时间');
+       const n=conn.update("UPDATE publications SET status='scheduled',scheduled_at=:stamp,revision=revision+1 WHERE id=:id AND status='draft' AND revision=:revision",{stamp:params.scheduled_at,id:p.id,revision:p.revision}).rowsAffected;if(n!==1)throw new HttpError(403,'任务已变化');
+       conn.update("INSERT INTO publication_events(publication_id,actor_id,from_status,to_status,occurred_at,note) VALUES(:id,:uid,'draft','scheduled',:stamp,:note)",{id:p.id,uid:u.id,stamp:ops.stamp(context),note:params.reason});
+       return {publication_id:p.id,status:'scheduled',scheduled_at:params.scheduled_at,reason:params.reason};
+      }
+  -
+    name: "record_publication_result"
+    title: "记录模拟发布结果"
+    description: "仅到达计划时间的 scheduled 任务；记录本地成功或失败及状态历史，不执行真实发布。"
+    confirm: true
+    parameters:
+      publication_id:
+        type: "integer"
+        description: "发布任务编号"
+        min: 1
+      result:
+        type: "string"
+        description: "模拟发布结果"
+        enum:
+          - "published"
+          - "failed"
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),p=conn.queryOne("SELECT id,account_id,status,scheduled_at,revision FROM publications WHERE id=:id",{id:params.publication_id});
+       if(!p)throw new HttpError(403,'发布任务不存在');ops.operate(u,p.account_id,context);
+       if(p.status!=='scheduled'||new Date(p.scheduled_at).getTime()>new Date(context.now).getTime())throw new HttpError(403,'任务未排期或尚未到发布时间');
+       const stamp=ops.stamp(context),success=params.result==='published';
+       const n=conn.update("UPDATE publications SET status=:state,published_at=:published,external_post_id=:external,failure_reason=:failure,revision=revision+1 WHERE id=:id AND status='scheduled' AND revision=:revision",{state:params.result,published:success?stamp:null,external:success?'SIM-REC-'+p.account_id+'-'+p.id:null,failure:success?null:params.reason,id:p.id,revision:p.revision}).rowsAffected;if(n!==1)throw new HttpError(403,'任务已变化');
+       conn.update("INSERT INTO publication_events(publication_id,actor_id,from_status,to_status,occurred_at,note) VALUES(:id,:uid,'scheduled',:state,:stamp,:note)",{id:p.id,uid:u.id,state:params.result,stamp:stamp,note:params.reason});
+       return {publication_id:p.id,status:params.result,reason:params.reason};
+      }
+  -
+    name: "moderate_comment"
+    title: "处理评论"
+    description: "有效账号运营授权内，处理 pending 评论；回复只保存本地文本。"
+    confirm: true
+    parameters:
+      comment_id:
+        type: "integer"
+        description: "待处理评论编号"
+        min: 1
+      decision:
+        type: "string"
+        description: "审核处置"
+        enum:
+          - "approve"
+          - "hide"
+          - "reply"
+      reply_text:
+        type: "string"
+        description: "回复内容，选择 reply 时必填且非空；其他决定填空字符串"
+        maxLength: 500
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),c=conn.queryOne("SELECT c.id,c.state,p.account_id,p.status AS publication_status FROM comments c JOIN publications p ON p.id=c.publication_id WHERE c.id=:id",{id:params.comment_id});
+       if(!c)throw new HttpError(403,'评论不存在');ops.operate(u,c.account_id,context);
+       if(c.state!=='pending'||c.publication_status!=='published')throw new HttpError(403,'只处理公开内容的待审评论');
+       if((params.decision==='reply'&&!params.reply_text.trim())||(params.decision!=='reply'&&params.reply_text!==''))throw new HttpError(403,'回复文本与处置类型不匹配');
+       const state=params.decision==='approve'?'visible':params.decision==='hide'?'hidden':'replied';
+       const n=conn.update("UPDATE comments SET state=:state,reply_text=:reply,handled_by=:uid WHERE id=:id AND state='pending'",{state:state,reply:params.decision==='reply'?params.reply_text:null,uid:u.id,id:c.id}).rowsAffected;if(n!==1)throw new HttpError(403,'评论已被处理');
+       conn.update("INSERT INTO moderation_events(comment_id,actor_id,action,occurred_at,reason) VALUES(:id,:uid,:action,:stamp,:reason)",{id:c.id,uid:u.id,action:params.decision,stamp:ops.stamp(context),reason:params.reason});
+       return {comment_id:c.id,state:state,reason:params.reason};
+      }
+  -
+    name: "reassign_editor"
+    title: "调整负责编辑"
+    description: "负责人将本团队选题分配给同团队有效编辑，保留作者与已有发布历史。"
+    confirm: true
+    parameters:
+      content_id:
+        type: "integer"
+        description: "选题编号"
+        min: 1
+      editor_id:
+        type: "integer"
+        description: "新负责编辑编号"
+        min: 1
+      expected_version:
+        type: "integer"
+        description: "当前选题 version，用于检测并发变更"
+        min: 1
+      reason:
+        type: "string"
+        description: "操作原因或审核说明"
+        maxLength: 300
+        pattern: "\\S"
+    script: |
+      const conn=db.session();
+      const ops=require("./operations");
+      function main(params,context){
+       const u=ops.actor(context),c=ops.content(params.content_id);ops.manage(u,c);
+       const editor=conn.queryOne("SELECT id,team_id,role,active FROM users WHERE id=:id",{id:params.editor_id});
+       if(!editor||editor.active!==1||editor.role!=='EDITOR'||editor.team_id!==c.team_id)throw new HttpError(403,'需要同团队有效编辑');
+       if(c.editor_id===editor.id)throw new HttpError(403,'负责编辑未变化');
+       const n=conn.update("UPDATE content_items SET editor_id=:editor,version=version+1 WHERE id=:id AND version=:expected",{editor:editor.id,id:c.id,expected:params.expected_version}).rowsAffected;if(n!==1)throw new HttpError(403,'选题分工已变化，请重新预览');
+       return {content_id:c.id,before:c.editor_id,after:editor.id,reason:params.reason};
+      }
+actionLibraries:
+  -
+    name: "operations"
+    title: "运营身份与账号校验"
+    description: "独立校验团队、角色、账号状态及有效 OPERATE 授权"
+    script: |
+      const conn=db.session();
+      exports.actor=function(context){const u=conn.queryOne("SELECT id,team_id,role FROM users WHERE id=:id AND active=1",{id:context.userId});if(!u)throw new HttpError(403,'需要有效运营身份');return u;};
+      exports.stamp=function(context){return new Date(new Date(context.now).getTime()+8*3600000).toISOString().slice(0,19)+'+08:00';};
+      exports.content=function(id){const c=conn.queryOne("SELECT id,team_id,editor_id,partner_id,version FROM content_items WHERE id=:id",{id:id});if(!c)throw new HttpError(403,'选题不存在');return c;};
+      exports.manage=function(u,c){if(u.role!=='ADMIN'&&!(u.role==='LEAD'&&u.team_id===c.team_id))throw new HttpError(403,'需要所属团队负责人');};
+      exports.operate=function(u,account,context){
+       const a=conn.queryOne("SELECT id,status FROM channel_accounts WHERE id=:id",{id:account});
+       if(!a||a.status!=='active')throw new HttpError(403,'渠道账号暂停或不存在');
+       if(u.role==='ADMIN')return;
+       if(u.role!=='LEAD'&&u.role!=='OPERATOR')throw new HttpError(403,'需要账号运营角色');
+       const day=exports.stamp(context).slice(0,10);
+       const g=conn.queryOne("SELECT access FROM account_grants WHERE user_id=:uid AND account_id=:aid AND valid_from<=:day AND (valid_to IS NULL OR valid_to>:day)",{uid:u.id,aid:account,day:day});
+       if(!g||g.access!=='OPERATE')throw new HttpError(403,'缺少有效 OPERATE 授权');
+      };

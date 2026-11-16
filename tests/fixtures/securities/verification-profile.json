@@ -1,0 +1,63 @@
+{
+  "adminId": 175,
+  "identityColumn": "customer_no",
+  "permissionQuery": "SELECT customer_no FROM customers ORDER BY customer_no",
+  "identityProbe": "SELECT customer_no FROM customers",
+  "writeProbe": "DELETE FROM customers",
+  "sampleQueries": [
+    {
+      "name": "客户总数",
+      "sql": "SELECT COUNT(*) AS n FROM customers"
+    },
+    {
+      "name": "各营业部客户数",
+      "sql": "SELECT department_code,COUNT(DISTINCT customer_no) AS n FROM fund_accounts GROUP BY department_code ORDER BY department_code"
+    },
+    {
+      "name": "证券成交 JOIN",
+      "sql": "SELECT t.id,c.name,s.code,t.amount_cents FROM trades t JOIN customers c ON c.customer_no=t.customer_no JOIN securities s ON s.code=t.security_code ORDER BY t.id LIMIT 20"
+    },
+    {
+      "name": "CTE 资金汇总",
+      "sql": "WITH s AS (SELECT customer_no,SUM(amount_cents) AS total FROM cash_flows GROUP BY customer_no) SELECT * FROM s ORDER BY customer_no LIMIT 10"
+    },
+    {
+      "name": "员工范围",
+      "sql": "SELECT employee_id,emp_no,name,status FROM employees ORDER BY employee_id"
+    }
+  ],
+  "forbiddenQueries": [
+    {
+      "name": "拒绝 DELETE",
+      "sql": "DELETE FROM customers"
+    },
+    {
+      "name": "拒绝 PRAGMA",
+      "sql": "PRAGMA writable_schema=ON"
+    },
+    {
+      "name": "拒绝多语句",
+      "sql": "SELECT 1; DROP TABLE users"
+    },
+    {
+      "name": "拒绝 CTE 写入",
+      "sql": "WITH x AS (SELECT 1) DELETE FROM customers"
+    },
+    {
+      "name": "拒绝表值函数",
+      "sql": "SELECT * FROM pragma_table_info('users')"
+    },
+    {
+      "name": "拒绝 IN 表名",
+      "sql": "SELECT 1 WHERE 1 IN customers"
+    },
+    {
+      "name": "拒绝 schema 限定",
+      "sql": "SELECT * FROM main.customers"
+    },
+    {
+      "name": "拒绝 CTE 覆盖表名",
+      "sql": "WITH customers AS (SELECT 1 AS id) SELECT * FROM customers"
+    }
+  ]
+}

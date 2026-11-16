@@ -54,7 +54,7 @@ func (h handlers) actionViewResult(name string) *mcp.CallToolResult {
 	if h.opts.Catalog != nil {
 		if d, err := h.opts.Catalog.Get(h.opts.DatabaseID); err == nil {
 			for _, a := range d.Actions {
-				if a.Name == name {
+				if a.Name == name && d.ViewsAvailable() {
 					return viewResult(d.ID, a.ViewID)
 				}
 			}

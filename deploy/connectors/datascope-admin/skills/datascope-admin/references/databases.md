@@ -1,5 +1,11 @@
 # 数据库与 MCP
 
+## 编辑连接与移除数据源
+
+已有网络库先 database.get 获取当前配置。使用 `datascope_inspect({action:"test_edited_connection",args:{resourceType:"database",database_id,database,password?}})` 测试候选连接，通过后使用 `datascope_manage({action:"edit_connection",args:{resourceType:"database",database_id,database,password?}})` 保存；两者均仅系统管理员可用。database 必须带匹配的 id、最新 revision 和 connection，connection 从当前配置复制后修改 host、port、username、tls_mode。仅这些连接字段可编辑，密码省略或留空保留；不能切换驱动、目标 database、service_name 或 Schema 范围，SQLite 不支持此操作。保存会再次测试连接、已登记字段结构与独立写连接，并递增版本。与 database.test_connection（测试已保存连接）及 connection.test（测试新建连接）不同，候选连接测试还验证现有结构兼容性，且不保存密码或配置。密码不要回显。
+
+显式要求移除登记时，使用 `datascope_manage({action:"remove",args:{resourceType:"database",database_id}})`，仅系统管理员可用。只移除数据源登记，保留业务数据文件；随后 database.list 核对。不要用移除操作代替暂时关闭 MCP。
+
 所有调用使用 `{action,args}`；下表参数均位于 args，另加对应 `resourceType`。除列出的可选参数外，其余参数必需；不接受 null 或无关参数。数字使用 JSON number，布尔值使用 true/false。
 
 | 工具 | resourceType | action | 参数 | 权限 |
@@ -85,3 +91,7 @@ MySQL、Oracle、PostgreSQL、达梦均支持同连接允许范围内的跨 Sche
 - `database.update` 的 database 可包含完整 connection，只允许改变 schema、allowed_schemas（MySQL 同步 database）。主机、Service/PG database、账号和凭据保持固定。移除范围会移除该 Schema 的登记表和查询策略。
 
 网络源创建时不读取所有字段；先登记范围、再选表登记和开放。网络策略使用完整 Schema.表名；内部 main."Schema.表名" 映射到对应物理表。raw_query 继续作为单独授权的高权限只读测试入口，绕过表开放、行字段访问策略，保留 Schema 范围和脱敏。
+
+数据库说明：`database.update` 的 `database` 可仅传 `id`、当前 `revision` 以及 `description`（简介）或 `documentation`（Markdown 使用说明）。省略字段保留原值，空字符串清空。需 `config.read` 与 `config.write`，按配置版本检查冲突。字段保存在逐库 `management/database.yml`，面向本库使用者和业务 MCP 共享；完整说明通过 `datascope://database/<数据库 ID>/documentation` 资源按需读取。
+
+功能组总开关：`datascope_manage({action:"set",args:{resourceType:"capability",database_id,capability:"actions"|"knowledge"|"views",enabled:true|false,revision}})`，与 Web 两处开关同源并立即生效。动作组需 action.write，原子调整 write_enabled 及三个动作工具；知识需 knowledge.write 或 mcp.write；视图需 view.write 或 mcp.write。网络动作首次开启可另传 database:{id,revision,write_connection} 与 write_password。操作只调整一组开关，不覆盖定义和发布状态；旧 revision 拒绝。

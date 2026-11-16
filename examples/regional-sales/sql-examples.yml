@@ -1,0 +1,126 @@
+sqlExamples:
+    - label: 01 地区月度销售、毛利、环比与同比
+      sql: |-
+        WITH monthly AS (
+         SELECT o.region_id, substr(o.order_date,1,7) AS month,
+         SUM(i.net_cents) AS revenue, SUM(i.net_cents-i.quantity*i.unit_cost_cents) AS gross_profit
+         FROM sales_orders o JOIN sales_order_items i ON i.order_id=o.id
+         WHERE o.status NOT IN ('cancelled','pending') GROUP BY o.region_id,substr(o.order_date,1,7)
+        ), trends AS (
+         SELECT region_id,month,revenue,gross_profit,
+         LAG(revenue,1) OVER (PARTITION BY region_id ORDER BY month) AS previous_month,
+         LAG(revenue,12) OVER (PARTITION BY region_id ORDER BY month) AS previous_year,
+         SUM(revenue) OVER (PARTITION BY region_id ORDER BY month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cumulative_revenue
+         FROM monthly
+        )
+        SELECT r.name, t.month, t.revenue/100.0 AS revenue_yuan,t.gross_profit/100.0 AS gross_profit_yuan,
+         ROUND(100.0*(t.revenue-t.previous_month)/NULLIF(t.previous_month,0),2) AS mom_pct,
+         ROUND(100.0*(t.revenue-t.previous_year)/NULLIF(t.previous_year,0),2) AS yoy_pct,
+         t.cumulative_revenue/100.0 AS cumulative_yuan
+        FROM trends t JOIN regions r ON r.id=t.region_id ORDER BY t.month DESC,r.id
+    - label: 02 各地区商品销售 Top 5 与贡献率
+      sql: |-
+        WITH product_sales AS (
+         SELECT o.region_id,i.product_id,SUM(i.net_cents) AS revenue,SUM(i.quantity) AS quantity
+         FROM sales_orders o JOIN sales_order_items i ON i.order_id=o.id
+         WHERE o.status NOT IN ('cancelled','pending') GROUP BY o.region_id,i.product_id
+        ), ranked AS (
+         SELECT region_id,product_id,revenue,quantity,DENSE_RANK() OVER (PARTITION BY region_id ORDER BY revenue DESC) AS ranking,
+         SUM(revenue) OVER (PARTITION BY region_id) AS region_revenue FROM product_sales
+        )
+        SELECT r.name AS region,p.name AS product,x.ranking,x.quantity,x.revenue/100.0 AS revenue_yuan,
+         ROUND(100.0*x.revenue/NULLIF(x.region_revenue,0),2) AS contribution_pct
+        FROM ranked x JOIN regions r ON r.id=x.region_id JOIN products p ON p.id=x.product_id
+        WHERE x.ranking<=5 ORDER BY r.id,x.ranking
+    - label: 03 销售目标达成率（先聚合后关联，避免重复累计）
+      sql: |-
+        WITH actual AS (
+         SELECT owner_employee_id,substr(order_date,1,7) AS month,SUM(total_cents) AS revenue
+         FROM sales_orders WHERE status NOT IN ('cancelled','pending') GROUP BY owner_employee_id,substr(order_date,1,7)
+        ), target AS (
+         SELECT owner_employee_id,month,SUM(target_cents) AS target FROM sales_targets GROUP BY owner_employee_id,month
+        )
+        SELECT e.employee_no,e.name,t.month,t.target/100.0 AS target_yuan,COALESCE(a.revenue,0)/100.0 AS revenue_yuan,
+         ROUND(100.0*COALESCE(a.revenue,0)/t.target,2) AS achievement_pct
+        FROM target t JOIN employees e ON e.id=t.owner_employee_id
+        LEFT JOIN actual a ON a.owner_employee_id=t.owner_employee_id AND a.month=t.month
+        ORDER BY t.month DESC,achievement_pct DESC LIMIT 100
+    - label: 04 净销售、回款、退款与应收账龄
+      sql: |-
+        WITH paid AS (SELECT order_id,SUM(amount_cents) AS amount FROM payment_allocations GROUP BY order_id),
+        returned AS (SELECT r.order_id,SUM(i.amount_cents) AS amount FROM sales_returns r JOIN sales_return_items i ON i.return_id=r.id WHERE r.status='received' GROUP BY r.order_id),
+        refunded AS (SELECT r.order_id,SUM(f.amount_cents) AS amount FROM refunds f JOIN sales_returns r ON r.id=f.return_id GROUP BY r.order_id),
+        receivable AS (
+         SELECT o.id,o.region_id,o.due_date,o.total_cents-COALESCE(rt.amount,0) AS net_sales,
+         COALESCE(p.amount,0)-COALESCE(rf.amount,0) AS net_paid,
+         o.total_cents-COALESCE(rt.amount,0)-COALESCE(p.amount,0)+COALESCE(rf.amount,0) AS balance
+         FROM sales_orders o LEFT JOIN paid p ON p.order_id=o.id LEFT JOIN returned rt ON rt.order_id=o.id LEFT JOIN refunded rf ON rf.order_id=o.id
+         WHERE o.status NOT IN ('cancelled','pending')
+        )
+        SELECT r.name,SUM(x.net_sales)/100.0 AS net_sales_yuan,SUM(x.net_paid)/100.0 AS net_paid_yuan,
+         SUM(x.balance)/100.0 AS balance_yuan,
+         SUM(CASE WHEN x.balance>0 AND julianday('2026-10-31')-julianday(x.due_date) BETWEEN 1 AND 30 THEN x.balance ELSE 0 END)/100.0 AS overdue_1_30_yuan,
+         SUM(CASE WHEN x.balance>0 AND julianday('2026-10-31')-julianday(x.due_date)>30 THEN x.balance ELSE 0 END)/100.0 AS overdue_over_30_yuan
+        FROM receivable x JOIN regions r ON r.id=x.region_id GROUP BY r.id,r.name ORDER BY balance_yuan DESC
+    - label: 05 客户 RFM 分层（NTILE 分位评分）
+      sql: |-
+        WITH customer_metrics AS (
+         SELECT customer_id,CAST(julianday('2026-10-31')-julianday(MAX(order_date)) AS INTEGER) AS recency_days,
+         COUNT(*) AS frequency,SUM(total_cents) AS monetary
+         FROM sales_orders WHERE status NOT IN ('cancelled','pending') GROUP BY customer_id
+        ), scored AS (
+         SELECT customer_id,recency_days,frequency,monetary,
+         NTILE(5) OVER (ORDER BY recency_days DESC) AS r_score,
+         NTILE(5) OVER (ORDER BY frequency) AS f_score,
+         NTILE(5) OVER (ORDER BY monetary) AS m_score FROM customer_metrics
+        )
+        SELECT c.customer_no,c.name,s.recency_days,s.frequency,s.monetary/100.0 AS monetary_yuan,s.r_score,s.f_score,s.m_score,
+         CASE WHEN s.r_score>=4 AND s.f_score>=4 AND s.m_score>=4 THEN '高价值活跃客户' WHEN s.r_score<=2 AND s.m_score>=4 THEN '高价值流失风险' ELSE '常规客户' END AS customer_segment
+        FROM scored s JOIN customers c ON c.id=s.customer_id ORDER BY s.monetary DESC LIMIT 100
+    - label: 06 商品销售贡献累计占比（帕累托分析）
+      sql: |-
+        WITH totals AS (
+         SELECT i.product_id,SUM(i.net_cents) AS revenue FROM sales_order_items i JOIN sales_orders o ON o.id=i.order_id
+         WHERE o.status NOT IN ('cancelled','pending') GROUP BY i.product_id
+        )
+        SELECT p.sku,p.name,t.revenue/100.0 AS revenue_yuan,
+         ROUND(100.0*SUM(t.revenue) OVER (ORDER BY t.revenue DESC,t.product_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)/SUM(t.revenue) OVER (),2) AS cumulative_pct
+        FROM totals t JOIN products p ON p.id=t.product_id ORDER BY t.revenue DESC,t.product_id
+    - label: 07 分批发货完成率与退货率
+      sql: |-
+        WITH shipped AS (SELECT order_item_id,SUM(quantity) AS qty FROM shipment_items GROUP BY order_item_id),
+        returned AS (SELECT i.order_item_id,SUM(i.quantity) AS qty FROM sales_return_items i JOIN sales_returns r ON r.id=i.return_id WHERE r.status='received' GROUP BY i.order_item_id)
+        SELECT g.name,SUM(i.quantity) AS ordered_qty,SUM(COALESCE(s.qty,0)) AS shipped_qty,SUM(COALESCE(r.qty,0)) AS received_return_qty,
+         ROUND(100.0*SUM(COALESCE(s.qty,0))/SUM(i.quantity),2) AS shipment_pct,
+         ROUND(100.0*SUM(COALESCE(r.qty,0))/NULLIF(SUM(COALESCE(s.qty,0)),0),2) AS return_pct
+        FROM sales_orders o JOIN sales_order_items i ON i.order_id=o.id JOIN regions g ON g.id=o.region_id
+        LEFT JOIN shipped s ON s.order_item_id=i.id LEFT JOIN returned r ON r.order_item_id=i.id
+        WHERE o.status NOT IN ('cancelled','pending') GROUP BY g.id,g.name ORDER BY g.id
+    - label: 08 地区渠道交叉统计与 HAVING 筛选
+      sql: |-
+        SELECT r.name AS region,c.name AS channel,COUNT(DISTINCT o.customer_id) AS active_customers,
+         COUNT(*) AS order_count,SUM(o.total_cents)/100.0 AS revenue_yuan,ROUND(AVG(o.total_cents)/100.0,2) AS avg_order_yuan
+        FROM sales_orders o JOIN regions r ON r.id=o.region_id JOIN sales_channels c ON c.id=o.channel_id
+        WHERE o.status NOT IN ('cancelled','pending') GROUP BY r.id,r.name,c.id,c.name
+        HAVING COUNT(*)>=10 ORDER BY revenue_yuan DESC
+    - label: 09 订单与退货事件 UNION ALL（月度业务事件）
+      sql: |-
+        WITH events AS (
+         SELECT region_id,substr(order_date,1,7) AS month,'SALE' AS event_type,total_cents AS amount FROM sales_orders WHERE status NOT IN ('cancelled','pending')
+         UNION ALL
+         SELECT o.region_id,substr(r.return_date,1,7) AS month,'RETURN' AS event_type,-i.amount_cents AS amount
+         FROM sales_returns r JOIN sales_orders o ON o.id=r.order_id JOIN sales_return_items i ON i.return_id=r.id WHERE r.status='received'
+        )
+        SELECT region_id,month,SUM(CASE WHEN event_type='SALE' THEN amount ELSE 0 END)/100.0 AS sales_yuan,
+         -SUM(CASE WHEN event_type='RETURN' THEN amount ELSE 0 END)/100.0 AS returns_yuan,SUM(amount)/100.0 AS net_event_yuan
+        FROM events GROUP BY region_id,month ORDER BY month DESC,region_id
+    - label: 10 相关子查询：超过本地区平均金额的订单
+      sql: |-
+        WITH regional_average AS (
+         SELECT region_id,AVG(total_cents) AS avg_total FROM sales_orders
+         WHERE status NOT IN ('cancelled','pending') GROUP BY region_id
+        )
+        SELECT o.order_no,o.order_date,o.region_id,o.total_cents/100.0 AS total_yuan
+        FROM sales_orders o WHERE o.status NOT IN ('cancelled','pending')
+        AND o.total_cents>(SELECT x.avg_total FROM regional_average x WHERE x.region_id=o.region_id)
+        ORDER BY o.total_cents DESC LIMIT 30

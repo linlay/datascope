@@ -35,6 +35,7 @@ type AuthProvider struct {
 	UsernameClaim   string `json:"username_claim,omitempty" yaml:"usernameClaim,omitempty"`
 	BusinessIDClaim string `json:"business_id_claim,omitempty" yaml:"businessIdClaim,omitempty"`
 	JWKSURL         string `json:"jwks_url,omitempty" yaml:"jwksUrl,omitempty"`
+	PublicKeyPEM    string `json:"public_key_pem,omitempty" yaml:"publicKeyPem,omitempty"`
 	Audience        string `json:"audience,omitempty" yaml:"audience,omitempty"`
 	HeaderName      string `json:"header_name,omitempty" yaml:"headerName,omitempty"`
 }
@@ -199,8 +200,22 @@ func validateAuthProvider(p AuthProvider) error {
 	if p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) {
 		return fmt.Errorf("认证密钥需使用 DATASCOPE_AUTH_ 开头的环境变量")
 	}
-	if p.Type == "ONEID" && (!authURL(p.Issuer) || !authURL(p.JWKSURL) || strings.TrimSpace(p.Audience) == "") {
-		return fmt.Errorf("OneID 需要有效的 issuer、JWKS 地址和 audience")
+	if p.Type == "ONEID" {
+		if !authURL(p.Issuer) || strings.TrimSpace(p.Audience) == "" {
+			return fmt.Errorf("OneID 需要有效的 issuer 和 audience")
+		}
+		hasJWKS, hasPEM := strings.TrimSpace(p.JWKSURL) != "", strings.TrimSpace(p.PublicKeyPEM) != ""
+		if hasJWKS == hasPEM {
+			return fmt.Errorf("OneID 的 JWKS 地址与 PEM 公钥必须且只能配置一种")
+		}
+		if hasJWKS && !authURL(p.JWKSURL) {
+			return fmt.Errorf("OneID JWKS 地址需要 HTTPS 或本机测试地址")
+		}
+		if hasPEM {
+			if _, err := parseOneIDPublicKey(p.PublicKeyPEM); err != nil {
+				return err
+			}
+		}
 	}
 	if p.Type == "STATIC_TOKEN" && (p.SecretEnv != "" && !regexpEnv.MatchString(p.SecretEnv) || !validTokenHeader(p.HeaderName)) {
 		return fmt.Errorf("Token 需要有效的自定义请求头（留空使用 Bearer）；旧环境变量引用须以 DATASCOPE_AUTH_ 开头")
@@ -514,6 +529,7 @@ func externalID(provider, subject string) int64 {
 	sum := sha256.Sum256([]byte(provider + "/" + subject))
 	return int64(binary.BigEndian.Uint64(sum[:8])&((1<<52)-1)) + 1
 }
+
 func (r ResolvedAuth) Identity(database string, claims map[string]any) (BusinessAccount, error) {
 	subjectKey := r.Provider.SubjectClaim
 	if subjectKey == "" {

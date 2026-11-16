@@ -1,6 +1,6 @@
 // Package rewrite turns AI-generated SELECT statements into permission-scoped
 // SQL. The only transformation is structural: every table in FROM / JOIN is
-// replaced by the subquery configured for that table (config/rewrite.yml).
+// replaced by the subquery supplied in that table's rewrite configuration.
 package rewrite
 
 import (

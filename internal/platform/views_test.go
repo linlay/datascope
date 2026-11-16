@@ -12,6 +12,7 @@ import (
 	"datascope-server/internal/application"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/view"
+	securitiesviews "datascope-server/tests/testutil/securities/views"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -19,7 +20,7 @@ func TestViewConfigurationPersistenceReferencesAndAuthorization(t *testing.T) {
 	f := setup(t)
 	d, err := f.c.Get("default")
 	must(t, err)
-	d.Views = view.DemoViews()
+	d.Views = append(view.Templates(), securitiesviews.Templates()...)
 	d.QueryViewID = "query"
 	_, err = f.app.Call(f.readerContext(), "configure_views", application.Input{DatabaseID: d.ID, Database: d})
 	if err == nil {

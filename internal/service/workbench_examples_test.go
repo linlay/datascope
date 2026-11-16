@@ -11,7 +11,7 @@ import (
 
 // Validate the optional securities YAML examples against the demo schema.
 func TestWorkbenchExamples(t *testing.T) {
-	data, err := os.ReadFile("../../fixtures/databases/securities_demo/management/sql-examples.yml")
+	data, err := os.ReadFile("../../examples/securities/sql-examples.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

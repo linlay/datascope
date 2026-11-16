@@ -1,5 +1,5 @@
 // Package adminapi is the backend JSON API for the super-admin console. It
-// reads the demo database directly (rows are not filtered by business
+// reads registered databases directly (rows are not filtered by business
 // permissions), previews rewrites, and inspects the MCP server as an MCP
 // client.
 package adminapi

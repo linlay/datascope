@@ -1,6 +1,6 @@
 # HTML 视图配置与证券案例
 
-左侧「视图配置」位于「知识配置」与「MCP 配置」之间。视图是完整 HTML，可内嵌 CSS 和 JavaScript；每个数据库独立保存，类型固定为 `view`。支持新增、复制、通用模板、编辑、发布、隔离预览和真实业务预览。「复制视图」将当前已保存视图复制为未发布的新草稿，自动生成不重复的标识，保存后才新增。「通用模板」仅提供不绑定业务表、账号或动作名的查询与动作界面；证券账户详情属于演示案例，仅由显式演示安装器安装，不列入通用模板。
+左侧「视图配置」位于「知识配置」与「MCP 配置」之间。视图是完整 HTML，可内嵌 CSS 和 JavaScript；每个数据库独立保存，类型固定为 `view`。支持新增、复制、通用模板、编辑、发布、隔离预览和真实业务预览。「复制视图」将当前已保存视图复制为未发布的新草稿，自动生成不重复的标识，保存后才新增。「通用模板」仅提供不绑定业务表、账号或动作名的查询与动作界面；证券账户详情属于演示配置，仅在显式导入新库时安装，不列入通用模板。
 
 工具区提供独立「视图工作台」，与视图配置使用相同的 `config.read`、`view.write` 权限。配置页的工作台图标直接定位当前视图，工作台的编辑图标返回对应配置。
 
@@ -10,7 +10,7 @@
 
 工作台地址如 `#/view-workbench/securities_account?database=default`；身份预览模式追加 `mode=identity` 和 `identity=<业务身份编号>`；真实业务模式追加 `mode=business`，源码页签追加 `detailView=html`。选择、模式和页签支持刷新与前进后退；Token 和模拟数据只保存在当前页面内存，不进入地址。退出业务身份、切换视图或离开页面时清除旧预览，并丢弃迟到的读取响应。
 
-默认查询视图在「数据库配置 → 查询展示设置」统一设置，可选择已发布视图，或选择「使用原始查询结果」取消推荐。此设置仅为 MCP 查询提供展示推荐，不影响 SQL 工作台的结果表格。单个视图详情仅编辑标识、名称、描述和 HTML。
+默认查询视图在「视图配置 → MCP 展示推荐」对话框中设置，可选择已发布视图，或选择「使用原始查询结果」取消推荐。此设置仅为 MCP 查询提供展示推荐，不影响 SQL 工作台的结果表格。单个视图详情仅编辑标识、名称、描述和 HTML。
 
 ## 配置与存储
 
@@ -78,13 +78,13 @@ const result = await datascope.callTool('query', {
 ## 安装证券完整案例
 
 ```sh
-make install-demo-actions
+make import-example EXAMPLE=securities
 ```
 
 安装器现同时安装六个已发布视图：`query`（通用查询）、`action`（动作预览与结果）、`securities_account`（证券账户详情）、`securities_customers`（客户列表）、`securities_rankings`（客户多项排名）、`securities_customer`（客户详情）。未配置默认查询视图时设置为 `query`，18 个演示 Action 关联 `action`。重装幂等；已修改同名视图默认拒绝覆盖，`-replace` 才替换。现有密码、查询权限和自定义动作保留。若只需补充案例且不追加业务账号能力：
 
 ```sh
-go run ./cmd/install-demo-actions -accounts ''
+make check-example EXAMPLE=securities
 ```
 
 新环境先按照 README 初始化完整证券库。单独从模板创建证券 HTML 不会安装 Action 或授予业务能力。
@@ -115,8 +115,12 @@ E0121 的查询范围更广，但不能直接修改其他经理账户。无 acti
 
 ```sh
 set -a; . ./.env; set +a
-go run ./cmd/install-demo-views -database securities_demo -check
-go run ./cmd/install-demo-views -database securities_demo
+make check-example EXAMPLE=securities
+make import-example EXAMPLE=securities
 ```
 
 仅显式指定 `-replace` 才更新已有同名证券视图。安装后刷新控制台即可加载新配置，无需重新登录。
+
+## 视图总开关
+
+列表表头与 MCP 配置页共用 `views_enabled`（YAML：`viewsEnabled`）。关闭时不再发现或读取 HTML 资源，默认查询展示推荐暂停；未指定视图的 SQL 查询继续，显式请求已关闭视图会被拒绝。使用说明资源保持独立。保留视图正文、发布状态和引用；重新开启恢复展示。旧配置未设置本字段时，有已发布视图即视为开启。编辑和本地预览不依赖此开关。

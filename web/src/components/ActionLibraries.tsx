@@ -76,13 +76,13 @@ export function ActionLibraries({ db, disabled, onSaved }: { db: Database; disab
      {draft && <IconButton label={t('删除')} icon={<DeleteOutlined />} danger disabled={!canWrite || busy} onClick={() => Modal.confirm({ title: t('删除公共函数？'), content: t('仍被动作或其他库引用的公共库不能删除。'), onOk: () => creating ? edit(items[0]) : persist(items.filter(item => item.name !== selectedName)) })} />}
     </Space>
     {error && <Alert type="error" showIcon title={error} />}
-    {draft ? <Form name="action-library" form={form} layout="vertical" disabled={!canWrite || busy} onValuesChange={(_, values) => setDraft(values)}>
+    {draft ? <Form className="configuration-form" name="action-library" form={form} layout="horizontal" labelAlign="left" labelWrap disabled={!canWrite || busy} onValuesChange={(_, values) => setDraft(values)}>
      <div className="action-fields-grid">
-      <Form.Item name="name" label={t('库名称')} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ }]}><Input disabled={!creating} /></Form.Item>
-      <Form.Item name="title" label={t('标题')} rules={[{ required: true }]}><Input /></Form.Item>
-      <Form.Item name="description" label={t('说明')}><Input /></Form.Item>
+      <Form.Item name="name" label={<span className="configuration-label-text">{t('库名称')}</span>} rules={[{ required: true, pattern: /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/ }]}><Input disabled={!creating} /></Form.Item>
+      <Form.Item name="title" label={<span className="configuration-label-text">{t('标题')}</span>} rules={[{ required: true }]}><Input /></Form.Item>
+      <Form.Item name="description" label={<span className="configuration-label-text">{t('说明')}</span>}><Input /></Form.Item>
      </div>
-     <Form.Item name="script" label="JavaScript · CommonJS" rules={[{ required: true }]}><CodeEditor height="420px" readOnly={!canWrite || busy} /></Form.Item>
+     <Form.Item name="script" label={<span className="configuration-label-text">JavaScript · CommonJS</span>} rules={[{ required: true }]}><CodeEditor height="420px" readOnly={!canWrite || busy} /></Form.Item>
     </Form> : <Empty description={t('选择或新增一个公共函数。')} />}
    </Space>
   </Modal>

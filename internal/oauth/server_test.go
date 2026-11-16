@@ -29,7 +29,8 @@ import (
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
-	"datascope-server/internal/testutil"
+	"datascope-server/tests/testutil"
+	"datascope-server/tests/testutil/securities/permissions"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 )
@@ -50,7 +51,7 @@ func setupMode(t *testing.T, managed bool) *env {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { st.Close() })
-	cfg, e := rewrite.LoadConfig("../../config/rewrite.yml")
+	cfg, e := rewrite.LoadConfig("../../examples/securities/rewrite.yml")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -81,7 +82,7 @@ func setupMode(t *testing.T, managed bool) *env {
 	a.Config.Handler = as.Handler(http.NotFoundHandler())
 	a.Start()
 	t.Cleanup(a.Close)
-	server := mcpserver.New(svc, mcpserver.Options{AuthMode: "oauth", Debug: true})
+	server := mcpserver.New(svc, mcpserver.Options{AuthMode: "oauth", Debug: true, ReferenceScope: permissions.VisibleCustomerIDs})
 	if managed {
 		m.Config.Handler, e = mcpserver.ManagedHTTPHandler(catalogue, st, mcpserver.Options{AuthMode: "oauth"}, "oauth", issuer, resource, "/mcp")
 	} else {
@@ -262,7 +263,7 @@ func TestOAuthPKCERefreshAndMCP(t *testing.T) {
 		t.Fatal("admin raw query denied")
 	}
 	code(t, e, id, "E0176")
-	in := &adminapi.Inspector{Endpoint: e.resource, Service: e.svc, FixturesDir: "../../fixtures", Token: e.as.SignEmployee}
+	in := &adminapi.Inspector{CurrentUserID: 175, Endpoint: e.resource, Service: e.svc, FixturesDir: "../../tests/fixtures/securities", Token: e.as.SignEmployee}
 	report, err := in.Verify(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -508,7 +509,7 @@ func TestManagedEndpointOAuthDiscoveryLoginAndAudience(t *testing.T) {
 		})
 	}
 	// The management inspector must request the same audience as the scoped URL.
-	in := &adminapi.Inspector{Endpoint: e.resource, Service: e.svc, Token: e.as.SignEmployee}
+	in := &adminapi.Inspector{CurrentUserID: 175, Endpoint: e.resource, Service: e.svc, Token: e.as.SignEmployee}
 	in.TokenForDatabase = func(ctx context.Context, userID int64, databaseID string) (string, error) {
 		d, err := e.catalog.Get(databaseID)
 		if err != nil {
