@@ -3,6 +3,7 @@ package management
 import (
 	"bytes"
 	"context"
+	"datascope-server/internal/requesttiming"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -38,8 +39,26 @@ func emptyState() *sourceState {
 }
 
 // A stable sibling lock protects both readers and writers across processes.
-// No generation is cached: API and MCP observe the same committed files.
+// MCP may reuse a private snapshot within a single HTTP request only.
 func (s *Source) withState(ctx context.Context, write bool, fn func(*sourceState) error) error {
+	defer requesttiming.Start(ctx, "config_state")()
+	if snapshot := snapshotFrom(ctx); snapshot != nil {
+		if !write {
+			return snapshot.read(ctx, s, fn)
+		}
+		// A request that publishes must never reuse its pre-write state or auth.
+		snapshot.disabled.Store(true)
+	}
+	return s.withStateUncached(ctx, write, fn)
+}
+
+func (s *Source) withStateUncached(ctx context.Context, write bool, fn func(*sourceState) error) error {
+	return s.withStateMode(ctx, write, false, fn)
+}
+
+// cached is reserved for the immutable request snapshot loader. Ordinary
+// callbacks and all writes continue to receive freshly loaded mutable state.
+func (s *Source) withStateMode(ctx context.Context, write, cached bool, fn func(*sourceState) error) error {
 	for {
 		if s.owner != nil {
 			if err := s.owner.recoverPending(ctx); err != nil {
@@ -59,7 +78,15 @@ func (s *Source) withState(ctx context.Context, write bool, fn func(*sourceState
 			if err := recoverPublication(s.Path); err != nil {
 				return err
 			}
-			state, err := readState(s.Path)
+			var state *sourceState
+			var err error
+			if cached && !write {
+				state, err = s.cachedState(ctx)
+			} else {
+				readDone := requesttiming.Start(ctx, "read_state")
+				state, err = readState(s.Path)
+				readDone()
+			}
 			if err != nil {
 				return err
 			}
@@ -86,6 +113,7 @@ func fileLock(ctx context.Context, path string, fn func() error) error {
 		return err
 	}
 	defer f.Close()
+	waitDone := requesttiming.Start(ctx, "lock_wait")
 	// Nonblocking polling keeps cancellation effective while another process saves.
 	for {
 		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
@@ -93,15 +121,19 @@ func fileLock(ctx context.Context, path string, fn func() error) error {
 			break
 		}
 		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN {
+			waitDone()
 			return err
 		}
 		select {
 		case <-ctx.Done():
+			waitDone()
 			return ctx.Err()
 		case <-lockRetry():
 		}
 	}
+	waitDone()
 	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	defer requesttiming.Start(ctx, "lock_hold")()
 	return fn()
 }
 

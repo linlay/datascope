@@ -87,6 +87,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer catalogue.CloseQueryCache()
 
 	app := &application.Service{ManagementMCPURL: strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin", Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}
 	opts := mcpserver.Options{Management: manager, Application: app, AuthMode: authMode, UserHeader: *userHeader, DefaultUserID: *defaultUserID, Debug: *debug, IdentityStore: st}

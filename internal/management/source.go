@@ -12,16 +12,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"sync"
 	"time"
 
 	"datascope-server/internal/audit"
 )
 
 type Source struct {
-	owner *Store
-	Path  string
-	Audit *audit.Store
-	ID    string
+	owner       *Store
+	Path        string
+	Audit       *audit.Store
+	ID          string
+	cacheMu     sync.Mutex
+	stateCache  *sourceState
+	stateDigest [32]byte
 }
 
 func (s *Source) Close() {
@@ -103,6 +107,7 @@ func (s *Store) HasRegisteredSources(ctx context.Context) (bool, error) {
 }
 
 func (s *Store) RemoveSource(ctx context.Context, id string) error {
+	invalidateRequestSnapshot(ctx)
 	return fileLock(ctx, s.Path+".config.lock", func() error {
 		if err := s.recoverPendingLocked(ctx); err != nil {
 			return err
@@ -256,6 +261,7 @@ func (s *Store) RecordsForDatabase(ctx context.Context, bucket, database string)
 }
 
 func (s *Store) updateRecords(ctx context.Context, bucket, kind, database string, fn func([]Record) ([]Record, error), credentials ...DatabaseCredential) error {
+	invalidateRequestSnapshot(ctx)
 	if bucket != "databases" && bucket != "knowledge" {
 		return fmt.Errorf("不支持的正式配置类型 %q", bucket)
 	}

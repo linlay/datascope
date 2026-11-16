@@ -6,7 +6,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
+	"datascope-server/internal/requesttiming"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -79,6 +82,9 @@ type Catalog struct {
 	runtimeMu      sync.Mutex
 	discoveryState map[string]*discoveryRuntime
 	mu             sync.Mutex
+	queryMu        sync.Mutex
+	queryServices  map[string]*queryEntry
+	queryClosed    bool
 }
 
 // Bootstrap imports legacy JSON or the initial rewrite rules only once.
@@ -239,7 +245,28 @@ func (c *Catalog) AllowsMCPResource(base, resource string) bool {
 }
 
 func (c *Catalog) ByMCPPath(segment string) (*Database, error) {
-	items, err := c.List()
+	return c.ByMCPPathContext(context.Background(), segment)
+}
+
+func (c *Catalog) ByMCPPathContext(ctx context.Context, segment string) (*Database, error) {
+	var items []Database
+	var err error
+	if c.Management != nil {
+		// Most endpoints use the database ID. Resolve that source directly,
+		// but never make the old ID route an alias for a renamed MCP route.
+		if validID.MatchString(segment) {
+			d, err := c.getManagedConfiguration(ctx, segment)
+			if err == nil && d.MCPRoute() == segment {
+				return d, nil
+			}
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+		}
+		items, err = c.listManaged(ctx)
+	} else {
+		items, err = c.List()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +286,12 @@ func configFilename(d Database) string {
 }
 
 func (c *Catalog) Get(id string) (*Database, error) {
+	return c.GetContext(context.Background(), id)
+}
+
+func (c *Catalog) GetContext(ctx context.Context, id string) (*Database, error) {
 	if c.Management != nil {
-		return c.getManaged(context.Background(), id)
+		return c.getManaged(ctx, id)
 	}
 	items, err := c.List()
 	if err != nil {
@@ -300,7 +331,9 @@ func (c *Catalog) Open(ctx context.Context, d *Database) (*service.QueryService,
 	if err != nil {
 		return nil, err
 	}
+	serviceDone := requesttiming.Start(ctx, "service_initialize")
 	svc, err := service.New(ctx, st, &cfg, c.AsOf)
+	serviceDone()
 	if err != nil {
 		st.Close()
 		return nil, err
@@ -550,6 +583,7 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				if d.Driver != old.Driver || d.Path != old.Path || !store.SameConnectionTarget(d.Driver, d.Connection, old.Connection) {
 					return fmt.Errorf("连接目标登记后固定，请新建数据源")
 				}
+				syncWriterSchemaScope(&d, old)
 				metadataOnly := old
 				metadataOnly.Name, metadataOnly.DDLEnabled = d.Name, d.DDLEnabled
 				metadataOnly.Description, metadataOnly.Documentation = d.Description, d.Documentation

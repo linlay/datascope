@@ -74,6 +74,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	defer catalogue.CloseQueryCache()
 
 	inspector := &adminapi.Inspector{
 		Endpoint:    *mcpURL,

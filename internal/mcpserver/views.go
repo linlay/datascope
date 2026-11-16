@@ -17,7 +17,7 @@ func documentationURI(database string) string {
 }
 
 func (h handlers) viewResources(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-	d, err := h.opts.Catalog.Get(h.opts.DatabaseID)
+	d, err := h.opts.Catalog.GetContext(ctx, h.opts.DatabaseID)
 	if err != nil {
 		return nil, err
 	}

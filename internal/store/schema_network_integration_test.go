@@ -40,7 +40,7 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 			c := &catalog.Catalog{Path: filepath.Join(t.TempDir(), "catalog"), Timeout: 10 * time.Second, AsOf: store.DefaultAsOf}
 			fixture.Connection.AllowedSchemas = []string{fixture.FirstSchema, fixture.SecondSchema}
 			fixture.Connection.Schema = ""
-			if (driver == "mysql" || driver == "oceanbase") {
+			if driver == "mysql" || driver == "oceanbase" {
 				fixture.Connection.Database = ""
 			}
 			if err := c.Add(ctx, catalog.Database{ID: "schema_join", Name: "Schema acceptance", Driver: driver, Connection: &fixture.Connection}); err != nil {
@@ -132,6 +132,7 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 				}
 			}
 			call("SELECT * FROM "+recordsA, false)
+			call("SELECT COUNT(*), SUM(id), MIN(id), MAX(id), AVG(id) FROM "+recordsA, false)
 			call("SELECT * FROM "+recordsB, true)
 			joins := []string{
 				fmt.Sprintf("SELECT o.order_id,c.customer_name FROM %s o JOIN %s c ON c.customer_id=o.customer_id", orders, customers),
@@ -173,9 +174,13 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 			}
 			revoked.Store.Close()
 			// Removing a schema is independently enforced by the raw test execution path.
+			d, err = c.Get(d.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			d.Connection.AllowedSchemas = []string{fixture.FirstSchema}
 			d.Connection.Schema = fixture.FirstSchema
-			if (driver == "mysql" || driver == "oceanbase") {
+			if driver == "mysql" || driver == "oceanbase" {
 				d.Connection.Database = fixture.FirstSchema
 			}
 			if err := c.Save(ctx, *d); err != nil {
@@ -187,6 +192,20 @@ func TestSchemaJoinNetworkIntegration(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer scoped.Close()
+			aggregate, aggregateErr := scoped.RawQuery(ctx, "SELECT COUNT(*) AS n, SUM(id) AS total, MIN(id) AS lo, MAX(id) AS hi FROM "+recordsA, 10)
+			if aggregateErr != nil || aggregate.RowCount != 1 {
+				t.Fatalf("default-schema aggregate: %+v %v", aggregate, aggregateErr)
+			}
+			for _, column := range []string{"n", "total", "lo", "hi"} {
+				// Oracle/DM fold unquoted aliases; normalize for this assertion.
+				value, ok := aggregate.Rows[0][column]
+				if !ok {
+					value = aggregate.Rows[0][strings.ToUpper(column)]
+				}
+				if fmt.Sprint(value) != "1" {
+					t.Fatalf("incorrect aggregate %s: %v", column, value)
+				}
+			}
 			if _, err := scoped.RawQuery(ctx, joins[0], 10); err == nil {
 				t.Fatal("raw query escaped schema whitelist")
 			}

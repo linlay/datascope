@@ -5,6 +5,7 @@ import (
 	"datascope-server/internal/audit"
 	"datascope-server/internal/guard"
 	"datascope-server/internal/management"
+	"datascope-server/internal/requesttiming"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"slices"
 	"strconv"
@@ -20,7 +21,9 @@ func businessMiddleware(server *mcp.Server, h handlers) {
 			if h.opts.Catalog == nil {
 				return nil, management.ErrDenied
 			}
-			d, err := h.opts.Catalog.Get(h.opts.DatabaseID)
+			getDone := requesttiming.Start(ctx, "business_get")
+			d, err := h.opts.Catalog.GetContext(ctx, h.opts.DatabaseID)
+			getDone()
 			if err != nil {
 				return nil, err
 			}

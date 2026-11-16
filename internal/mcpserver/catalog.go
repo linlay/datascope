@@ -5,6 +5,7 @@ import (
 	"datascope-server/internal/audit"
 	"datascope-server/internal/catalog"
 	"datascope-server/internal/management"
+	"datascope-server/internal/requesttiming"
 	"datascope-server/internal/service"
 	"datascope-server/internal/store"
 	"fmt"
@@ -30,6 +31,9 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 	}
 	publicMeta := metadataRoot + strings.TrimRight(resourceURL.Path, "/")
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stateless HTTP requests share no configuration snapshots. Long-lived
+		// stdio transports keep resolving their live configuration on each call.
+		r = r.WithContext(management.WithRequestSnapshot(r.Context()))
 		if r.URL.Path == "/healthz" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"status":"ok"}`))
@@ -54,11 +58,13 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		}
 		var d *catalog.Database
 		var err error
+		routeDone := requesttiming.Start(r.Context(), "route_lookup")
 		if segment == "" {
-			d, err = c.Get("default")
+			d, err = c.GetContext(r.Context(), "default")
 		} else {
-			d, err = c.ByMCPPath(segment)
+			d, err = c.ByMCPPathContext(r.Context(), segment)
 		}
+		routeDone()
 		if err != nil {
 			http.Error(w, "数据库不存在", 404)
 			return
@@ -105,7 +111,9 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 		selected.AuthMode = authMode
 		// Open a query service only for tool calls. Knowledge tools and protocol
 		// discovery do not depend on query policies or a live data connection.
+		buildDone := requesttiming.Start(r.Context(), "handler_build")
 		h, err := HTTPHandlerWithManagement(ManagedServer(c, d.ID, nil, selected), identity, authMode, endpointIssuer, endpointResource, endpoint, true, opts.Management, d.ID, c)
+		buildDone()
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -116,7 +124,7 @@ func ManagedHTTPHandler(c *catalog.Catalog, identity *store.Store, opts Options,
 
 		h.ServeHTTP(w, r)
 	})
-	return audit.HTTPHandler(c.Audit, "database-mcp", handler), nil
+	return timingHandler(audit.HTTPHandler(c.Audit, "database-mcp", handler)), nil
 }
 
 // ManagedServer applies the same live catalog rules to long-lived transports
@@ -129,7 +137,10 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 	server := New(svc, opts)
 	server.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			d, err := c.Get(id)
+			requesttiming.Method(ctx, method)
+			getDone := requesttiming.Start(ctx, "middleware_get")
+			d, err := c.GetContext(ctx, id)
+			getDone()
 			if err != nil {
 				return nil, err
 			}
@@ -159,6 +170,7 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				return list, nil
 			case "tools/call":
 				call := req.(*mcp.CallToolRequest)
+				requesttiming.Tool(ctx, call.Params.Name)
 				if !enabled(call.Params.Name) {
 					return nil, fmt.Errorf("该数据库未开启接口 %s", call.Params.Name)
 				}
@@ -166,11 +178,39 @@ func ManagedServer(c *catalog.Catalog, id string, svc *service.QueryService, opt
 				if call.Params.Name == "search_knowledge" || call.Params.Name == "read_knowledge" {
 					return next(ctx, method, req)
 				}
-				current, err := c.Open(ctx, d)
+				meta := audit.From(ctx)
+				meta.DatabaseID, meta.PolicyVersion = d.ID, d.Revision
+				ctx = audit.With(ctx, meta)
+				auditor := c.Audit
+				if c.Management != nil {
+					auditor = c.Management.AuditFor(d.ID)
+				}
+				event, _ := auditor.Start(ctx, "query.initialize", "")
+				initializeDone := requesttiming.Start(ctx, "query_initialize")
+				var current *service.QueryService
+				var release func()
+				var hit bool
+				if call.Params.Name == "query" || call.Params.Name == "raw_query" || call.Params.Name == "list_tables" || call.Params.Name == "describe_table" {
+					current, release, hit, err = c.AcquireQuery(ctx, d)
+				} else {
+					current, err = c.Open(ctx, d)
+					if err == nil {
+						release = func() { current.Store.Close() }
+					}
+				}
+				initializeDone()
+				requesttiming.QueryCache(ctx, hit)
+				if event != nil {
+					event.Detail = map[string]any{"cache_hit": hit}
+				}
+				_ = auditor.Finish(event, err)
 				if err != nil {
 					return nil, err
 				}
-				defer current.Store.Close()
+				defer func() {
+					defer requesttiming.Start(ctx, "query_release")()
+					release()
+				}()
 				ctx = context.WithValue(ctx, serviceContextKey{}, current)
 			}
 			return next(ctx, method, req)

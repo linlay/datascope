@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"datascope-server/internal/audit"
+	"datascope-server/internal/requesttiming"
 	"datascope-server/internal/rewrite"
 	"datascope-server/internal/store"
 	"encoding/json"
@@ -46,6 +47,7 @@ type Discovery struct {
 // OpenStore deliberately does not compile policies: inspection must remain
 // available when the source schema has made an old policy invalid.
 func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, error) {
+	defer requesttiming.Start(ctx, "store_open")()
 	if c.Management != nil && d.Driver == "sqlite" {
 		if err := c.Management.ValidatePath(d.Path); err != nil {
 			return nil, err
