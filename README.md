@@ -341,3 +341,5 @@ make build         # 服务、通用配置导入器、迁移工具与前端构�
 - 数据库需启用 `query` 工具，并在该数据库的独立业务账号域中为员工账号配置业务身份。连接器 ID 当前为默认库的 `datascope`；按库拼装的连接器下载尚未提供。
 
 网络数据源支持同一连接、允许 Schema 范围内的跨 Schema JOIN，包含 MySQL、Oracle、PostgreSQL、达梦、OceanBase（MySQL 模式）。数据库管理分别配置默认 Schema（可空）和允许范围，查询管理选择登记表、配置开放权限。所有网络表使用 Schema＋表名标识；Oracle Service name 仍必填。网络源只为所选表读取完整结构，已登记网络表目录按页显示；SQLite 保持原有单库发现与查询行为。详情见 [数据源配置](docs/databases.md#schema-范围与选表) 和 [跨 Schema 验收](docs/schema-join-acceptance.md)。
+
+本地需要体验外部数据导入时，见 [Oracle / PostgreSQL / MySQL 导入案例](examples/data-imports/README.md)。案例使用真实数据库来源与虚构事件，显式安装增量脚本及每 2/3/5 分钟的计划，可验证回滚、更新、软删除与重放。

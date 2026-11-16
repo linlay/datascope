@@ -607,3 +607,7 @@ details > summary {
 .configuration-form .ant-form-item:has(.code-editor) .configuration-label-text,
 .configuration-form .configuration-field-stacked .configuration-label-text { flex-basis: auto; width: auto; max-width: none; }
 @media(max-width:560px) { .configuration-form .configuration-label-text { flex-basis: auto; width: auto; max-width: none; } }
+
+/* Size identity fields to the editor pane, rather than the browser width. */
+.source-task-identity.ant-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.source-task-identity.ant-row > .ant-col { width: auto; max-width: none; }

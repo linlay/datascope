@@ -378,3 +378,7 @@ python3 examples/regional-sales/generate.py --db /tmp/regional-small.sqlite3 --o
 | `region_id` | INTEGER | 销售大区编号 |
 | `office_id` | INTEGER | 分公司编号 |
 | `name` | TEXT | 名称 |
+
+## 行过滤与查询准入
+
+`cities`、`provinces`、`regions`、`product_categories`、`products`、`sales_channels` 和 `schema_comments` 使用「无需行权限过滤」，保留字段限制及在职员工前置准入；其余业务表独立限制可见范围。

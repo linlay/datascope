@@ -90,3 +90,9 @@ SQL 值仅支持 null、字符串、布尔和安全范围内的有限数字。BI
 | `run_import_task` / `trial_import_task` | 任务 `id`、可选 `parameters`；返回运行编号 |
 | `get_import_run` | 运行 `id`，返回日志及脚本快照 |
 | `stop_import_run` | 运行 `id` |
+
+## 可运行的外部导入示例
+
+见 [外部数据库导入体验](../examples/data-imports/README.md)：使用独立 Docker Compose 来源运行 Oracle、PostgreSQL、MySQL，以虚构事件体验增量、更新、软删除、幂等、回滚及每 2/3/5 分钟的自动计划。四个演示库各有符合自身业务场景的三个独立接入表，目标及进度按库隔离，准备前做一致性备份。示例必须显式安装，服务启动不初始化。
+
+通用 `go run ./cmd/import-sources -file <清单.json>` 可给已登记目标导入连接和任务。清单含 `version:1`、`database_id`、`connections` 与 `tasks`；连接附加 `password_env` 从环境取密码，任务结构与管理接口相同。默认保留同名连接和任务，`-replace` 显式更新且保留水位；`-check` 检查清单、脚本、计划及来源连通性，不保存配置或执行导入（可初始化空状态库）；`-discover` 刷新目标表结构并保留新增表默认禁止策略；`-run` 逐任务先回滚试运行再正式执行一次。清单按顺序保存，失败后重跑保留已完成配置，不提供跨清单事务。

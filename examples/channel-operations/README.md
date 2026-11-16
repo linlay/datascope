@@ -41,3 +41,7 @@ go test ./tests/examples/channel-operations ./internal/configbundle ./tests/arch
 ```
 
 测试使用隔离数据库，验证角色和账号授权、到期边界、跨团队访问、成本隐藏、SQL 示例、正常操作、重复状态迁移、预览回滚及确认提交。不会写入本地演示业务库。
+
+## 行过滤与查询准入
+
+共享目录及元数据（`brands`、`ingestion_batches`、`metric_definitions`、`platforms`、`schema_comments`、`teams`、`users`）使用「无需行权限过滤」，保留字段限制及有效运营身份前置准入。共享用户目录不授予账号或内容访问权；账号授权、内容分工、成本角色与授权有效期仍按各业务表独立检查。

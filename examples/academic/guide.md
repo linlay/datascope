@@ -30,6 +30,8 @@
 
 ## 五类身份权限
 
+公共教学目录及元数据（`assessments`、`calendar_days`、`courses`、`exams`、`grade_releases`、`majors`、`prerequisites`、`rooms`、`schema_comments`、`schools`、`section_meetings`、`section_teachers`、`sections`、`teachers`、`terms`）使用「无需行权限过滤」，保留字段限制及有效教务身份前置准入。成绩、学生、选课、考勤、历史学分、联系方式及受限身份/任职表仍独立过滤；公开成绩发布记录不开放未发布成绩。
+
 | 角色 | 可见数据 | 允许操作 |
 | --- | --- | --- |
 | 学生 | 本人选课、考勤、历史学分及已经发布且发布时间已生效的成绩；公共课程和课表目录 | 窗口内选课、退课 |

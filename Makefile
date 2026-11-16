@@ -25,6 +25,7 @@ build:
 	$(GO_ENV) go build -o bin/admin-api ./cmd/admin-api
 	$(GO_ENV) go build -o bin/migrate-state ./cmd/migrate-state
 	$(GO_ENV) go build -o bin/import-config ./cmd/import-config
+	$(GO_ENV) go build -o bin/import-sources ./cmd/import-sources
 	cd web && npm run build
 
 
@@ -78,3 +79,22 @@ check-example:
 # 停止 API/MCP 后执行；备份逐库私有数据并迁移配置。
 migrate-state:
 	$(LOAD_ENV) $(GO_ENV) go run ./cmd/migrate-state
+
+# Explicit local external-import demonstration; never runs during service startup.
+.PHONY: prepare-import-demo start-import-demo seed-import-demo import-source-demo stop-import-demo
+IMPORT_SCENARIO ?= regional-sales
+IMPORT_DEMO_DIR = $(if $(filter regional-sales,$(IMPORT_SCENARIO)),data/import-demo,data/import-demo/$(IMPORT_SCENARIO))
+prepare-import-demo:
+	python3 examples/data-imports/generate.py --scenario "$(IMPORT_SCENARIO)"
+
+start-import-demo:
+	docker compose --env-file data/import-demo/compose.env -f examples/data-imports/compose.yml up -d --wait --wait-timeout 600
+
+seed-import-demo:
+	python3 examples/data-imports/generate.py --scenario "$(IMPORT_SCENARIO)" --seed
+
+import-source-demo:
+	$(LOAD_ENV) set -a; . data/import-demo/compose.env; set +a; $(GO_ENV) go run ./cmd/import-sources -file "$(IMPORT_DEMO_DIR)/sources.json" -discover -run
+
+stop-import-demo:
+	docker compose --env-file data/import-demo/compose.env -f examples/data-imports/compose.yml stop

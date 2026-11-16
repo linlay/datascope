@@ -34,6 +34,8 @@ availability=missing 时，指标为 NULL，表示未获得数据；完整采集
 
 ## 角色与权限
 
+共享目录及元数据（`brands`、`ingestion_batches`、`metric_definitions`、`platforms`、`schema_comments`、`teams`、`users`）使用「无需行权限过滤」，保留字段限制及有效运营身份前置准入。共享用户目录不授予账号或内容访问权；账号授权、内容分工、成本角色与授权有效期仍按各业务表独立检查。
+
 | 角色 | 查询范围 | 操作 |
 | --- | --- | --- |
 | 管理员 OPS001 | 全部业务记录 | 分工、审核及账号操作 |

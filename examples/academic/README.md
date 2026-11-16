@@ -39,3 +39,7 @@ go test ./tests/examples/academic ./internal/configbundle ./tests/architecture -
 ```
 
 Go 测试使用隔离数据库验证权限、全部 SQL 示例及 Action 的预览、提交、越权拒绝和回滚。实际本地库不会被测试写入。
+
+## 行过滤与查询准入
+
+公共教学目录及元数据（`assessments`、`calendar_days`、`courses`、`exams`、`grade_releases`、`majors`、`prerequisites`、`rooms`、`schema_comments`、`schools`、`section_meetings`、`section_teachers`、`sections`、`teachers`、`terms`）使用「无需行权限过滤」，保留字段限制及有效教务身份前置准入。成绩、学生、选课、考勤、历史学分、联系方式及受限身份/任职表仍独立过滤；公开成绩发布记录不开放未发布成绩。

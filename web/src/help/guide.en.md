@@ -36,15 +36,19 @@ Platform accounts sign in to the console. Database grants control access to conf
 
 ## Query configuration, SQL workbench and table data
 
-Query, action, knowledge and view configuration fill the available workspace. Lists and editor content scroll independently within their panels, keeping panel headings and controls visible. The query configuration table list is capped at 420px to accommodate schema-qualified names while giving remaining wide-screen space to details.
+Query, data source, action, knowledge and view configuration fill the available workspace. Lists and editor content scroll independently within their panels, keeping panel headings and controls visible. The query configuration table list is capped at 420px to accommodate schema-qualified names while giving remaining wide-screen space to details.
 
 Select a table in query configuration, expose the required fields, set row filters and limits, and configure masking for sensitive fields. The row filter section is always visible: its heading is Row-level filtering when SQL is empty and Row filter SQL when populated. Expand it to add SQL directly; entering SQL automatically selects Filter with SQL, while clearing it selects No row filter. Query precondition SQL lets you set a condition that must pass before a query and a rejection message; leave it empty to skip this check. Both SQL sections are collapsed by default, whether empty or populated. A SQL configured or No SQL configured tag beside each heading indicates whether it contains SQL. Select a heading to expand or collapse its editor; collapsing does not change policy enforcement or saving. Save the policy. Test with one record the business user should see and one they should not see.
+
+Row filter SQL controls which records are visible; Query precondition SQL controls whether the entire query may run. These settings are independent. Shared catalogs and dictionaries can use No row filter while retaining exposed-field restrictions. Keep a precondition when access requires a valid business identity. A SELECT that only chooses fields without restricting records does not need to be saved as row filter SQL.
 
 In the SQL workbench, choose an identity and run a read-only SELECT. For a database with a customers table, try `SELECT customer_no FROM customers WHERE customer_no = :number` with parameters `{"number":"C001"}`. Inspect the rewritten SQL and results. Users with full query access can compare the raw results.
 
 Use the table data page to browse and filter stored records with full query access. To check a business user's visibility, use that identity in the SQL workbench.
 
 ## Data sources, import scripts and schedules
+
+Import list and Import details align at the top and scroll independently, keeping panel headings and actions visible. Task name and identifier fields share a row when the details pane is wide enough and stack when space is limited.
 
 Choose the target database and open Data sources. Search, create and select tasks in the Import list on the left; edit scripts, schedules and parameters in Import details on the right. Use the External connections button beside the list title to add, edit, test connections or browse schema in a dialog. You can also add a connection directly from task details. Opening the connection dialog preserves unsaved task drafts. Connections can serve multiple tasks, and a task can read multiple connections. SQLite sources connect only to existing files. Referenced connections cannot be deleted. Passwords are encrypted; leave the password blank when editing to keep it.
 
@@ -55,6 +59,8 @@ Save, use Rollback trial to inspect logs and affected rows, then Run now. A tria
 Schedule supports manual, one-time, fixed interval and daily runs. Check the timezone and estimated times, save and enable automatic execution. The same task cannot overlap; missed schedules coalesce into one execution and failures do not retry automatically. The default timeout is 300 seconds, configurable from 1 to 3,600 seconds. Scheduling runs in admin-api and continues when the browser closes.
 
 Open the separate Data run history menu before SQL workbench to view status, logs, script version, actual parameters and progress, and filter by import task. The Data run history button in the task editor opens that task’s records. Stop a running task from its details. Affected rows from trials, failures and stops do not indicate committed data. Check business data before rerunning interrupted or unknown outcomes. Access requires `config.read` and `source.write`. This explicitly permits reading sources and writing the target outside business query row/column policies and masking, so grant it separately.
+
+The optional local import demo provides three real Oracle, PostgreSQL and MySQL source connections for each of Regional Sales, Academic, Channel Operations and Securities, using fictional events suited to each domain. Follow `examples/data-imports/README.md` to install it explicitly. Each database has separate landing tables, tasks, checkpoints and run history, with schedules every 2, 3 and 5 minutes. Use Data sources for rollback trials, incremental runs and simulated failures; inspect checkpoints and logs in Data run history and verify rows in Table data. Each source has a finite stream of 720 pre-generated events; completed streams produce successful empty runs. New landing tables remain unavailable to business queries by default.
 
 ## Action configuration and script reference
 

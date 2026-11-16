@@ -15,8 +15,8 @@ tables:
       - "kind"
       - "weight"
       - "assessment_date"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.section_id, t.name, t.kind, t.weight, t.assessment_date FROM main.assessments t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -43,8 +43,8 @@ tables:
       - "teaching_weekday"
       - "is_teaching_day"
       - "note"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.term_id, t.calendar_date, t.teaching_week, t.teaching_weekday, t.is_teaching_day, t.note FROM main.calendar_days t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -83,8 +83,8 @@ tables:
       - "credits"
       - "kind"
       - "room_type"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.school_id, t.code, t.name, t.credits, t.kind, t.room_type FROM main.courses t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -112,8 +112,8 @@ tables:
       - "period_from"
       - "period_to"
       - "invigilator_id"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.section_id, t.room_id, t.exam_date, t.period_from, t.period_to, t.invigilator_id FROM main.exams t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -123,8 +123,8 @@ tables:
       - "assessment_id"
       - "released_by"
       - "released_at"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.assessment_id, t.released_by, t.released_at FROM main.grade_releases t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -150,8 +150,8 @@ tables:
       - "school_id"
       - "code"
       - "name"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.school_id, t.code, t.name FROM main.majors t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -160,8 +160,8 @@ tables:
     columns:
       - "course_id"
       - "required_course_id"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.course_id, t.required_course_id FROM main.prerequisites t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -187,8 +187,8 @@ tables:
       - "room_no"
       - "room_type"
       - "capacity"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.building, t.room_no, t.room_type, t.capacity FROM main.rooms t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -198,8 +198,8 @@ tables:
       - "table_name"
       - "column_name"
       - "comment_zh"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.table_name, t.column_name, t.comment_zh FROM main.schema_comments t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -209,8 +209,8 @@ tables:
       - "id"
       - "code"
       - "name"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.code, t.name FROM main.schools t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -225,8 +225,8 @@ tables:
       - "period_to"
       - "week_from"
       - "week_to"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.section_id, t.room_id, t.weekday, t.period_from, t.period_to, t.week_from, t.week_to FROM main.section_meetings t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -236,8 +236,8 @@ tables:
       - "section_id"
       - "teacher_id"
       - "is_lead"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.section_id, t.teacher_id, t.is_lead FROM main.section_teachers t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -252,8 +252,8 @@ tables:
       - "status"
       - "audience_year"
       - "version"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.term_id, t.course_id, t.section_no, t.capacity, t.status, t.audience_year, t.version FROM main.sections t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -285,8 +285,8 @@ tables:
     columns:
       - "id"
       - "title"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.title FROM main.teachers t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -
@@ -300,8 +300,8 @@ tables:
       - "enroll_from"
       - "add_drop_until"
       - "max_credits"
-    reason: "可信教务身份；学生本人、授课教学班、有效辅导员任职及学院范围；成绩发布前仅授权教职人员可见"
-    sql: "SELECT t.id, t.name, t.start_date, t.end_date, t.enroll_from, t.add_drop_until, t.max_credits FROM main.terms t"
+    reason: 教务公共目录或元数据；有效教务身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS (SELECT 1 FROM main.users actor WHERE actor.id=${userId} AND actor.active=1)"
     denyMessage: "需要有效的本库教务身份"
   -

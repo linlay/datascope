@@ -90,7 +90,7 @@ export function App() {
          <div className="workspace-label">{current?.name||'数据库管理'}</div>
          <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} onClick={({key})=>navigate(key as Page)} items={navigationItems}/>
         </Layout.Sider>
-        <Layout.Content className={`app-content${['tables', 'actions', 'knowledge', 'views'].includes(activePage || '') ? ' configuration-content' : ''}`} key={activePage==='audit'?'audit':dbID}>
+        <Layout.Content className={`app-content${['tables', 'actions', 'knowledge', 'views', 'sources'].includes(activePage || '') ? ' configuration-content' : ''}`} key={activePage==='audit'?'audit':dbID}>
  {activePage==='database'&&<DatabaseSettings key={current?.id} db={current} onSaved={()=>void refresh()} onRemoved={id=>{
   setItems(previous=>previous.filter(item=>item.id!==id));
   if(selectedDatabase===id){

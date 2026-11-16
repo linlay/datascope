@@ -68,8 +68,8 @@ tables:
     columns:
       - "id"
       - "name"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.id,t.name FROM main.brands t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -190,8 +190,8 @@ tables:
       - "captured_at"
       - "status"
       - "note"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.id,t.platform_id,t.business_date,t.captured_at,t.status,t.note FROM main.ingestion_batches t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -216,8 +216,8 @@ tables:
       - "unit"
       - "aggregation"
       - "definition"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.platform_id,t.code,t.label,t.unit,t.aggregation,t.definition FROM main.metric_definitions t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -241,8 +241,8 @@ tables:
       - "id"
       - "name"
       - "content_format"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.id,t.name,t.content_format FROM main.platforms t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -318,8 +318,8 @@ tables:
       - "table_name"
       - "column_name"
       - "comment_zh"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.table_name,t.column_name,t.comment_zh FROM main.schema_comments t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -329,8 +329,8 @@ tables:
       - "id"
       - "name"
       - "kind"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.id,t.name,t.kind FROM main.teams t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"
   -
@@ -356,7 +356,7 @@ tables:
       - "team_id"
       - "role"
       - "active"
-    reason: "账号有效授权与内容分工；推广成本仅管理员、负责人、分析员可见"
-    sql: "SELECT t.id,t.login_no,t.name,t.team_id,t.role,t.active FROM main.users t"
+    reason: 运营共享目录或元数据；有效运营身份可读全部行，保留字段开放限制
+    passthrough: true
     denyUnless: "EXISTS(SELECT 1 FROM main.users u WHERE u.id=${userId} AND u.active=1)"
     denyMessage: "需要有效运营身份及相应数据能力"

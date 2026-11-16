@@ -32,6 +32,8 @@
 
 ## 权限与登录
 
+`cities`、`provinces`、`regions`、`product_categories`、`products`、`sales_channels` 和 `schema_comments` 使用「无需行权限过滤」，保留字段限制及在职员工前置准入；其余业务表独立限制可见范围。
+
 独立业务账号，与平台管理账号及证券库账号完全隔离。
 
 | 账号 | 业务员工ID | 范围 |
