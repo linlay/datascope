@@ -143,6 +143,32 @@ func TestPermissionsCannotBypassViaChildrenCTEOrUnion(t *testing.T) {
 	}
 }
 
+func TestOfficeAndPriceScopes(t *testing.T) {
+	_, svc := fixture(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		id      int64
+		offices string
+		regions string
+	}{{1, "1=1", "1=1"}, {2, "o.region_id=1", "p.region_id=1"}, {3, "o.region_id=2", "p.region_id=2"}, {9, "o.id=1", "p.region_id=1"}, {107078, "o.id=1", "p.region_id=1"}, {900330, "o.id=1", "p.region_id=1"}} {
+		for table, expectedSQL := range map[string]string{
+			"sales_offices":  "SELECT COUNT(*) AS n FROM sales_offices o WHERE " + tc.offices,
+			"departments":    "SELECT COUNT(*) AS n FROM departments d JOIN sales_offices o ON o.id=d.office_id WHERE " + tc.offices,
+			"price_lists":    "SELECT COUNT(*) AS n FROM price_lists p WHERE " + tc.regions,
+			"product_prices": "SELECT COUNT(*) AS n FROM product_prices x JOIN price_lists p ON p.id=x.price_list_id WHERE " + tc.regions,
+		} {
+			want, err := svc.Store.RawQuery(ctx, expectedSQL, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := svc.Query(ctx, "SELECT COUNT(*) AS n FROM "+table, tc.id, 1)
+			if err != nil || !reflect.DeepEqual(got.Rows, want.Rows) {
+				t.Fatalf("table=%s user=%d want=%+v got=%+v err=%v", table, tc.id, want, got, err)
+			}
+		}
+	}
+}
+
 func TestInstallPreservesExistingConfigurationAndPasswords(t *testing.T) {
 	path, _ := fixture(t)
 	ctx := context.Background()

@@ -10,11 +10,10 @@ tables:
         - province_id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.province_id, t.name FROM main.cities t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: customer_contacts
@@ -24,7 +23,7 @@ tables:
         - name
         - job_title
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿客户可见范围过滤；电话和邮箱不向业务查询开放
       alternative: ""
       divergent: false
       passthrough: false
@@ -44,7 +43,7 @@ tables:
         - segment
         - acquired_date
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司或客户归属销售员过滤
       alternative: ""
       divergent: false
       passthrough: false
@@ -57,11 +56,11 @@ tables:
         - office_id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿可见分公司过滤部门；销售员可读所在公司部门
       alternative: ""
       divergent: false
       passthrough: false
-      sql: SELECT t.id, t.office_id, t.name FROM main.departments t WHERE t.office_id IN (SELECT o.id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
+      sql: SELECT t.id, t.office_id, t.name FROM main.departments t WHERE t.office_id IN (SELECT o.id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.id) OR (s.scope_type='SELF' AND o.id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: employee_scopes
@@ -72,7 +71,7 @@ tables:
         - region_id
         - office_id
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 仅本人或具有全国范围的员工可读授权配置
       alternative: ""
       divergent: false
       passthrough: false
@@ -90,7 +89,7 @@ tables:
         - role
         - active
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 本人可读自身；非销售角色另可读授权范围内员工
       alternative: ""
       divergent: false
       passthrough: false
@@ -106,7 +105,7 @@ tables:
         - reserved
         - snapshot_date
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿可见仓库过滤库存；销售员可读所在公司仓库库存
       alternative: ""
       divergent: false
       passthrough: false
@@ -120,7 +119,7 @@ tables:
         - order_id
         - amount_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 同时校验关联订单和回款的可见范围
       alternative: ""
       divergent: false
       passthrough: false
@@ -138,7 +137,7 @@ tables:
         - method
         - amount_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司或回款归属销售员过滤
       alternative: ""
       divergent: false
       passthrough: false
@@ -153,11 +152,11 @@ tables:
         - valid_from
         - valid_to
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按可见分公司所在大区过滤价目表
       alternative: ""
       divergent: false
       passthrough: false
-      sql: SELECT t.id, t.region_id, t.name, t.valid_from, t.valid_to FROM main.price_lists t WHERE t.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
+      sql: SELECT t.id, t.region_id, t.name, t.valid_from, t.valid_to FROM main.price_lists t WHERE t.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.id) OR (s.scope_type='SELF' AND o.id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1)))))
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: product_categories
@@ -165,11 +164,10 @@ tables:
         - id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.name FROM main.product_categories t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: product_prices
@@ -179,11 +177,11 @@ tables:
         - product_id
         - price_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿可见地区价目表过滤商品价格
       alternative: ""
       divergent: false
       passthrough: false
-      sql: SELECT t.id, t.price_list_id, t.product_id, t.price_cents FROM main.product_prices t WHERE t.price_list_id IN (SELECT pl.id FROM main.price_lists pl WHERE pl.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))))
+      sql: SELECT t.id, t.price_list_id, t.product_id, t.price_cents FROM main.product_prices t WHERE t.price_list_id IN (SELECT pl.id FROM main.price_lists pl WHERE pl.region_id IN (SELECT o.region_id FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.id) OR (s.scope_type='SELF' AND o.id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))))
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: products
@@ -197,11 +195,10 @@ tables:
         - standard_cost_cents
         - active
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.sku, t.name, t.category_id, t.brand, t.list_price_cents, t.standard_cost_cents, t.active FROM main.products t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: provinces
@@ -210,11 +207,10 @@ tables:
         - region_id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.region_id, t.name FROM main.provinces t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: refunds
@@ -225,7 +221,7 @@ tables:
         - refund_date
         - amount_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 同时校验关联退货订单和原回款的可见范围
       alternative: ""
       divergent: false
       passthrough: false
@@ -238,11 +234,10 @@ tables:
         - code
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.code, t.name FROM main.regions t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: sales_channels
@@ -251,11 +246,10 @@ tables:
         - code
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.id, t.code, t.name FROM main.sales_channels t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: sales_offices
@@ -265,11 +259,11 @@ tables:
         - city_id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司范围过滤；销售员可读所在公司
       alternative: ""
       divergent: false
       passthrough: false
-      sql: SELECT o.id, o.region_id, o.city_id, o.name FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.office_id) OR (s.scope_type='SELF' AND o.office_id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))
+      sql: SELECT o.id, o.region_id, o.city_id, o.name FROM main.sales_offices o WHERE EXISTS (SELECT 1 FROM main.employee_scopes s JOIN main.employees actor ON actor.id=s.employee_id WHERE actor.id=${userId} AND actor.active=1 AND (s.scope_type='ALL' OR (s.scope_type='REGION' AND s.region_id=o.region_id) OR (s.scope_type='OFFICE' AND s.office_id=o.id) OR (s.scope_type='SELF' AND o.id IN (SELECT office_id FROM main.employees WHERE id=${userId} AND active=1))))
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: sales_order_items
@@ -283,7 +277,7 @@ tables:
         - discount_cents
         - net_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿订单可见范围过滤订单明细
       alternative: ""
       divergent: false
       passthrough: false
@@ -304,7 +298,7 @@ tables:
         - status
         - total_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司或订单历史归属销售员过滤
       alternative: ""
       divergent: false
       passthrough: false
@@ -319,7 +313,7 @@ tables:
         - quantity
         - amount_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿退货单对应订单的可见范围过滤退货明细
       alternative: ""
       divergent: false
       passthrough: false
@@ -334,7 +328,7 @@ tables:
         - reason
         - status
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿订单可见范围过滤退货单
       alternative: ""
       divergent: false
       passthrough: false
@@ -350,7 +344,7 @@ tables:
         - owner_employee_id
         - target_cents
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司或目标归属销售员过滤
       alternative: ""
       divergent: false
       passthrough: false
@@ -363,11 +357,10 @@ tables:
         - column_name
         - comment_zh
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 公共字典或结构注释；在职员工可读全部行，保留字段开放限制
       alternative: ""
       divergent: false
-      passthrough: false
-      sql: SELECT t.table_name, t.column_name, t.comment_zh FROM main.schema_comments t
+      passthrough: true
       denyUnless: EXISTS (SELECT 1 FROM main.employees WHERE id=${userId} AND active=1)
       denyMessage: 需要有效的本库在职员工身份
     - table: shipment_items
@@ -377,7 +370,7 @@ tables:
         - order_item_id
         - quantity
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿发货单对应订单的可见范围过滤发货明细
       alternative: ""
       divergent: false
       passthrough: false
@@ -392,7 +385,7 @@ tables:
         - shipped_date
         - delivered_date
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 沿订单可见范围过滤发货单
       alternative: ""
       divergent: false
       passthrough: false
@@ -406,7 +399,7 @@ tables:
         - office_id
         - name
       scheme: CUSTOM
-      reason: 按可信员工身份及授权范围过滤；联系人电话和邮箱不开放
+      reason: 按全国、大区、分公司范围过滤；销售员可读所在公司仓库
       alternative: ""
       divergent: false
       passthrough: false

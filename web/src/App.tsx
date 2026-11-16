@@ -70,7 +70,7 @@ export function App() {
   const pages = group.filter(page => visiblePages.includes(page));
   if (!pages.length) return;
   if (navigationItems.length) navigationItems.push({ type: 'divider', key: `section-${index}` });
-  navigationItems.push(...pages.map(key => ({ key, icon: icons[key], label: current && ['actions', 'knowledge', 'views'].includes(key) ? <span className="sidebar-capability-label"><span>{t(titles[key])}</span><span className="sidebar-capability-status">{t(capabilityEnabled(current,key as 'actions'|'knowledge'|'views') ? '已打开' : '打开')}</span></span> : t(titles[key]) })));
+  navigationItems.push(...pages.map(key => ({ key, icon: icons[key], label: current && ['actions', 'knowledge', 'views'].includes(key) ? <span className="sidebar-capability-label"><span>{t(titles[key])}</span>{capabilityEnabled(current,key as 'actions'|'knowledge'|'views') && <span className="sidebar-capability-status">{t('已打开')}</span>}</span> : t(titles[key]) })));
  });
  const activePage=!current&&user.system_admin&&route.page!=='audit'?'database':visiblePages.includes(route.page)?route.page:route.page==='ddl'&&visiblePages.includes('database')?'database':visiblePages[0];
  useEffect(()=>{if(current&&activePage&&activePage!==route.page)navigate(activePage,undefined,{database:dbID},true);},[current,activePage,route.page,dbID]);
@@ -90,7 +90,7 @@ export function App() {
          <div className="workspace-label">{current?.name||'数据库管理'}</div>
          <Menu mode="inline" theme={dark?'dark':'light'} selectedKeys={[activePage]} onClick={({key})=>navigate(key as Page)} items={navigationItems}/>
         </Layout.Sider>
-        <Layout.Content className={`app-content${['tables', 'actions', 'knowledge', 'views'].includes(activePage || '') ? ' configuration-content' : ''}`} key={activePage==='audit'?'audit':dbID}>
+        <Layout.Content className={`app-content${['tables', 'actions', 'knowledge', 'views', 'sources'].includes(activePage || '') ? ' configuration-content' : ''}`} key={activePage==='audit'?'audit':dbID}>
  {activePage==='database'&&<DatabaseSettings key={current?.id} db={current} onSaved={()=>void refresh()} onRemoved={id=>{
   setItems(previous=>previous.filter(item=>item.id!==id));
   if(selectedDatabase===id){

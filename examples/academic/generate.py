@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Deterministic fictional college records; Python standard library only; never overwrites."""
 import argparse
 import datetime as dt

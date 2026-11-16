@@ -14,10 +14,10 @@ export function IconButton({ label, help, ...props }: Omit<ButtonProps, 'childre
 
 export function SaveButton(props: Omit<ButtonProps, 'children' | 'icon' | 'aria-label'>) {
  const t = useI18n();
- return <IconButton type="primary" {...props} label={t('保存')} icon={<SaveOutlined />} />;
+ return <Button type="primary" {...props} icon={<SaveOutlined />}>{t('保存')}</Button>;
 }
 
 export function useSaveModalProps() {
  const t = useI18n();
- return { okText: <SaveOutlined />, okButtonProps: { 'aria-label': t('保存'), title: t('保存') } };
+ return { okText: t('保存'), okButtonProps: { 'aria-label': t('保存'), title: t('保存') } };
 }

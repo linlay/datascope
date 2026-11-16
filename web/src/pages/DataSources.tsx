@@ -141,7 +141,7 @@ export default function DataSources({ db }: { db: Database }) {
  const status = (run?: ImportRun) => importRunStatus(run, t);
  const scheduleLabel = (task: ImportTask) => task.schedule.mode === 'manual' ? t('仅手动') : task.schedule.mode === 'once' ? stamp(task.schedule.at) : task.schedule.mode === 'interval' ? t('每 {0} 分钟', { '0': task.schedule.minutes || 30 }) : `${t('每天')} ${task.schedule.time}`;
 
- return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+ return <div className="configuration-page source-configuration-page">
   {db.driver !== 'sqlite' && !db.write_enabled && <Alert type="warning" showIcon title={t('网络目标库需要先在动作配置中启用写入并配置独立写入账号。')} />}
   {error && <Alert type="error" showIcon title={t('操作失败')} description={error} closable onClose={() => setError('')} />}
   <div className="action-workspace source-workspace">
@@ -173,7 +173,7 @@ export default function DataSources({ db }: { db: Database }) {
     {draft ? <>
      {selected && selected.revision !== draft.revision && <Alert type="warning" title={t('任务已被其他窗口修改，请保留草稿后刷新。')} />}
      <Form className="configuration-form" layout="horizontal" labelAlign="left" labelWrap disabled={busy}>
-      <Row gutter={16}><Col xs={24} md={12}><Form.Item label={<span className="configuration-label-text">{t('任务名称')}</span>} required><Input value={draft.name} maxLength={200} onChange={e => patch({ name: e.target.value })} /></Form.Item></Col>
+      <Row className="source-task-identity" gutter={16}><Col xs={24} md={12}><Form.Item label={<span className="configuration-label-text">{t('任务名称')}</span>} required><Input value={draft.name} maxLength={200} onChange={e => patch({ name: e.target.value })} /></Form.Item></Col>
        <Col xs={24} md={12}><Form.Item label={<span className="configuration-label-text">{t('任务标识')}</span>} required help={t('以字母开头，使用字母、数字、下划线或短横线。保存后固定。')}><Input value={draft.id} disabled={!!draft.revision} maxLength={64} onChange={e => patch({ id: e.target.value })} /></Form.Item></Col></Row>
       <Tabs activeKey={taskTab} onChange={value => setRouteParams({ taskTab: value }, false, true)} items={[
        { key: 'script', label: t('脚本'), children: <>
@@ -241,5 +241,5 @@ export default function DataSources({ db }: { db: Database }) {
    <Typography.Paragraph>{runTask?.name}</Typography.Paragraph><Input.TextArea aria-label={t('本次运行参数（JSON）')} rows={7} value={runParameters} onChange={e => setRunParameters(e.target.value)} />
   </Modal>
   <ImportRunDetails databaseID={db.id} runID={details} onClose={() => setDetails(undefined)} />
- </Space>;
+ </div>;
 }
