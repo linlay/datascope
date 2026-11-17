@@ -1,0 +1,9 @@
+sqlExamples:
+  - label: 订单或发货清单
+    sql: "SELECT * FROM sales_orders ORDER BY id"
+  - label: 最新变更水位
+    sql: "SELECT * FROM order_changes ORDER BY change_seq"
+  - label: 订单与明细金额核对
+    sql: "SELECT o.order_no,o.total_cents,SUM(i.net_cents) AS lines_cents FROM sales_orders o JOIN sales_order_items i ON i.order_id=o.id GROUP BY o.id,o.order_no,o.total_cents ORDER BY o.id"
+  - label: 回款分配
+    sql: "SELECT order_id,COUNT(*) AS receipts,SUM(amount_cents) AS paid_cents FROM payment_allocations GROUP BY order_id ORDER BY order_id"

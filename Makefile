@@ -68,6 +68,21 @@ init-academic:
 init-channel-operations:
 	python3 examples/channel-operations/generate.py
 
+# Two tiny related upstream SQLite databases. Target is read-only during creation.
+.PHONY: init-supply-chain-demo advance-supply-chain-demo check-supply-chain-demo import-supply-chain-demo
+init-supply-chain-demo:
+	python3 examples/sales-transactions/generate.py
+
+advance-supply-chain-demo:
+	python3 examples/sales-transactions/generate.py --advance
+
+check-supply-chain-demo:
+	$(LOAD_ENV) $(GO_ENV) go run ./cmd/import-sources -file data/supply-chain/sources.json -check
+
+import-supply-chain-demo:
+	python3 examples/sales-transactions/generate.py --backup-target
+	$(LOAD_ENV) $(GO_ENV) go run ./cmd/import-sources -file data/supply-chain/sources.json -run
+
 # EXAMPLE 指向 examples/ 下的声明式配置包；新账号密码由环境变量提供。
 EXAMPLE ?= securities
 import-example:

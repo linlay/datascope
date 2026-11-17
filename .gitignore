@@ -41,3 +41,4 @@ coverage.out
 
 # Local fictional external import fixtures and generated credentials.
 /data/import-demo/
+/data/supply-chain/
