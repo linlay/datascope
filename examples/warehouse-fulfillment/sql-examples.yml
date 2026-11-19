@@ -1,0 +1,9 @@
+sqlExamples:
+  - label: 订单或发货清单
+    sql: "SELECT * FROM shipments ORDER BY id"
+  - label: 最新变更水位
+    sql: "SELECT * FROM order_changes ORDER BY change_seq"
+  - label: 分批发货
+    sql: "SELECT s.order_id,COUNT(DISTINCT s.id) AS shipments,SUM(i.quantity) AS units FROM shipments s JOIN shipment_items i ON i.shipment_id=s.id GROUP BY s.order_id ORDER BY s.order_id"
+  - label: 库存快照
+    sql: "SELECT * FROM inventory_balances ORDER BY id"

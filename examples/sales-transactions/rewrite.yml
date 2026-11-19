@@ -1,0 +1,60 @@
+version: 1
+schemes:
+  - scheme: CUSTOM
+    name: 演示查询员
+tables:
+  - table: customers
+    scheme: CUSTOM
+    columns: ["id", "customer_no", "name", "region_id", "office_id", "owner_employee_id", "channel_id"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, customer_no, name, region_id, office_id, owner_employee_id, channel_id FROM main.customers WHERE ${userId}=1
+  - table: products
+    scheme: CUSTOM
+    columns: ["id", "sku", "name", "list_price_cents", "standard_cost_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, sku, name, list_price_cents, standard_cost_cents FROM main.products WHERE ${userId}=1
+  - table: sales_orders
+    scheme: CUSTOM
+    columns: ["id", "order_no", "customer_id", "region_id", "office_id", "owner_employee_id", "channel_id", "order_date", "due_date", "status", "total_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, order_no, customer_id, region_id, office_id, owner_employee_id, channel_id, order_date, due_date, status, total_cents FROM main.sales_orders WHERE ${userId}=1
+  - table: sales_order_items
+    scheme: CUSTOM
+    columns: ["id", "order_id", "product_id", "quantity", "unit_price_cents", "unit_cost_cents", "discount_cents", "net_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, order_id, product_id, quantity, unit_price_cents, unit_cost_cents, discount_cents, net_cents FROM main.sales_order_items WHERE ${userId}=1
+  - table: payments
+    scheme: CUSTOM
+    columns: ["id", "customer_id", "region_id", "office_id", "owner_employee_id", "paid_date", "method", "amount_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, customer_id, region_id, office_id, owner_employee_id, paid_date, method, amount_cents FROM main.payments WHERE ${userId}=1
+  - table: payment_allocations
+    scheme: CUSTOM
+    columns: ["id", "payment_id", "order_id", "amount_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, payment_id, order_id, amount_cents FROM main.payment_allocations WHERE ${userId}=1
+  - table: refunds
+    scheme: CUSTOM
+    columns: ["id", "return_id", "payment_id", "refund_date", "amount_cents"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, return_id, payment_id, refund_date, amount_cents FROM main.refunds WHERE ${userId}=1
+  - table: order_changes
+    scheme: CUSTOM
+    columns: ["order_id", "change_seq"]
+    reason: 仅演示查询员可读
+    sql: SELECT order_id, change_seq FROM main.order_changes WHERE ${userId}=1
+  - table: settlement_changes
+    scheme: CUSTOM
+    columns: ["order_id", "change_seq"]
+    reason: 仅演示查询员可读
+    sql: SELECT order_id, change_seq FROM main.settlement_changes WHERE ${userId}=1
+  - table: demo_state
+    scheme: CUSTOM
+    columns: ["id", "phase"]
+    reason: 仅演示查询员可读
+    sql: SELECT id, phase FROM main.demo_state WHERE ${userId}=1
+  - table: schema_comments
+    scheme: CUSTOM
+    columns: ["table_name", "column_name", "comment_zh"]
+    reason: 仅演示查询员可读
+    sql: SELECT table_name, column_name, comment_zh FROM main.schema_comments WHERE ${userId}=1

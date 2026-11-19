@@ -1,0 +1,40 @@
+version: 1
+accounts:
+  - businessUserId: 1
+    username: WMS001
+    name: 仓储履约演示库查询员
+    permissions: [query]
+database:
+  id: warehouse_fulfillment_demo
+  name: 仓储履约演示库
+  description: "提供 2 个仓库、20 张订单的引用、15 张初始发货单、12 行库存快照和一笔部分退货。订单和明细编号来自销售交易演示库。 全部业务为虚构，金额为人民币整数分，业务发生于 2026 年 11 月 1–16 日。用于演示关联抽取，不连接真实系统。"
+  documentation: |
+    提供 2 个仓库、20 张订单的引用、15 张初始发货单、12 行库存快照和一笔部分退货。订单和明细编号来自销售交易演示库。 全部业务为虚构，金额为人民币整数分，业务发生于 2026 年 11 月 1–16 日。用于演示关联抽取，不连接真实系统。
+
+    先查看订单、明细和变更序号，再在区域销售库的数据来源中运行导入任务。首次顺序为订单与明细、发货与退货、回款与退款、库存快照。来源只读，写入发生在目标库。缺失依赖时任务整次失败，不推进水位；补齐后重跑。
+
+    可询问：UP-202611-001 是否分批发货、分次回款？UP-202611-002 的退货和退款是多少？UP-202611-019 是否已经取消？两个库只能分别查询，关联分析应查看抽取后的区域销售库。
+
+    显式执行 make advance-supply-chain-demo 只推进一次：订单 001 补齐发货与回款，订单 019 取消，一行 2026-11-15 库存快照修订。再次运行导入查看变化。数据不会随时间自动增长，change_seq 记录每个对象的最新版本，不是完整历史事件表。
+
+    WMS001（业务身份 1）可只读查询此小库全部演示数据，无业务写入动作。账号密码由配置导入时的 DATASCOPE_EXAMPLE_PASSWORD 提供。此账号不能配置抽取；抽取由有 source.write 权限的平台管理员操作。
+  driver: sqlite
+  path: ../../data/supply-chain/warehouse_fulfillment_demo.sqlite3
+  mcpEnabled: true
+  mcpPath: warehouse_fulfillment_demo
+  tools: [list_tables, describe_table, query]
+  authentication:
+    type: local
+    source: DATABASE
+    provider:
+      id: warehouse-fulfillment-accounts
+      name: 本库业务账号
+      type: DEMO_OAUTH
+      enabled: true
+    access:
+      id: database-auth
+      name: 本库账号 OAuth
+      mode: OAUTH
+      providerId: warehouse-fulfillment-accounts
+policyFile: rewrite.yml
+sqlExamplesFile: sql-examples.yml
