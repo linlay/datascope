@@ -1204,6 +1204,7 @@ export const english: Record<string,string> = {
   "登录过于频繁，请稍后再试": "Too many sign-in attempts. Please try again later.",
   "暂时无法登录，请稍后重试": "Sign-in is temporarily unavailable. Please try again later.",
   "服务端返回的 Token 无效": "The server returned an invalid token.",
+  "业务登录接口返回无效数据，请检查部署路径和反向代理配置": "The business sign-in API returned invalid data. Check the deployment path and reverse proxy configuration.",
   "Token 已复制": "Token copied",
   "复制失败，请显示 Token 后手动复制": "Could not copy. Reveal the token and copy it manually.",
   "Token 已过期，请重新登录": "Your token has expired. Please sign in again.",

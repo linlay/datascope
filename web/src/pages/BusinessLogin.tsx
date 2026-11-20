@@ -2,21 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Descriptions, Form, Input, Space, Spin, Tag, Typography, message } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { useI18n } from '../ui/preferences';
+import { appURL } from '../api';
+import { publicRequest } from '../businessLoginRequest';
 
 interface LoginInfo { database_id: string; name: string; mcp_endpoint: string; expires_in: number }
 interface Token { access_token: string; expires_in: number; token_type: string }
-
-// Public business authentication must not redirect through platform login or
-// persist passwords/tokens in browser storage, URLs, or platform sessions.
-async function publicRequest<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
- const response = await fetch(path, {
-  method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store', signal,
-  headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
- });
- const data = await response.json().catch(() => null);
- if (!response.ok) throw new Error(data?.error || (response.status === 429 ? '登录过于频繁，请稍后再试' : '暂时无法登录，请稍后重试'));
- return data as T;
-}
 
 export default function BusinessLogin({ database }: { database: string }) {
  const t = useI18n();
@@ -30,12 +20,15 @@ export default function BusinessLogin({ database }: { database: string }) {
  const [remaining, setRemaining] = useState(0);
  const [expired, setExpired] = useState(false);
  const request = useRef<AbortController>();
- const endpoint = `/auth/databases/${encodeURIComponent(database)}`;
+ const endpoint = appURL(`/auth/databases/${encodeURIComponent(database)}`);
  useEffect(() => {
   const controller = new AbortController();
   if (!database) { setError(t('请从数据库业务认证页面打开登录链接')); setLoading(false); return; }
   void publicRequest<LoginInfo>(`${endpoint}/login-info`, undefined, controller.signal)
-   .then(setInfo).catch(e => { if (!controller.signal.aborted) setError(e.message); })
+   .then(data => {
+    if (data.database_id !== database || typeof data.name !== 'string' || typeof data.mcp_endpoint !== 'string' || !data.mcp_endpoint || !Number.isFinite(data.expires_in) || data.expires_in <= 0) throw new Error('业务登录接口返回无效数据，请检查部署路径和反向代理配置');
+    setInfo(data);
+   }).catch(e => { if (!controller.signal.aborted) setError(e.message); })
    .finally(() => { if (!controller.signal.aborted) setLoading(false); });
   return () => { controller.abort(); request.current?.abort(); };
  }, [database]);
