@@ -112,8 +112,10 @@ ONEID/TOKEN 不发布浏览器 OAuth 授权服务器元数据。切换模式后�
 
 账号密码方式（`ACCOUNT`）的数据库可使用独立登录页：`/#/business-login?database=<数据库 ID>`。数据库业务认证卡片提供“登录并获取个人 Token”入口，不要求先登录平台管理后台。
 
-页面使用公开的 `GET /auth/databases/<ID>/login-info` 获取数据库名称、MCP 地址和有效期，再调用已有的 `POST /auth/databases/<ID>/token` 验证业务账号密码，签发有效期为一小时的个人 Bearer Token。连接器选择 **Token → Bearer**，粘贴 Token。权限来自当前业务账号；账号停用、密码或权限变更、认证配置变更后，旧 Token 按现有校验机制失效。
+页面使用公开的 `GET /auth/databases/<ID>/login-info` 获取数据库名称、MCP 地址和有效期，再调用已有的 `POST /auth/databases/<ID>/token` 验证业务账号密码，签发个人 Bearer Token。默认有效期为 1 小时；登录页可选 24 小时、7 天、30 天、90 天、1 年（365 天）、自定义或永久。自定义使用整数分钟、小时或天，总时长为 1 分钟至 365 天。连接器选择 **Token → Bearer**，粘贴 Token。权限来自当前业务账号；账号停用、密码或权限变更、认证配置变更后，旧 Token 按现有校验机制失效。
 
 密码和 Token 不写入浏览器存储、URL 或平台登录会话。Token 在当前页面内存中保留，刷新、关闭或到期后清除；页面清除不等于服务端撤销。共享 API Key（`TOKEN`）、OAuth 和 OneID 配置不通过此页面换票。使用账号登录时，应在管理后台选择“Token / API Key → 账号密码 / 业务 Token”，并建立该库自己的业务账号。
 
-前端代理需将 `/auth` 转发到管理 API，与 `/api` 的目标相同；本地 Vite 已配置此规则。外部部署应使用 HTTPS。
+接口请求可携带可选的 `expires_in`（整数秒）：省略或 `null` 时默认 3600，60–31536000 表示有限时长，0 表示永久；其他数值或类型返回 400。响应中的 `expires_in` 返回实际时长，0 表示不按时间过期。永久 JWT 带 `non_expiring: true` 且不包含 `exp`；只有绑定数据库和业务账号的签名 Token 可使用此语义，仍逐次检查账号状态、版本和认证配置。OAuth 授权码换票的有效期保持原有契约。
+
+前端请求保留应用部署前缀（例如 `/datascope/`）；非 JSON 或无效登录信息会显示错误提示。前端代理需将该前缀下的 `/auth` 转发到管理 API，与 `/api` 的目标相同；本地 Vite 已配置此规则。外部部署应使用 HTTPS。

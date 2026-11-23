@@ -205,12 +205,21 @@ func (s *Server) accountToken(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16384)
 	var in struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Resource string `json:"resource"`
+		Username  string `json:"username"`
+		Password  string `json:"password"`
+		Resource  string `json:"resource"`
+		ExpiresIn *int64 `json:"expires_in"`
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil {
 		jsonOut(w, 400, map[string]string{"error": "无效请求"})
+		return
+	}
+	expiresIn := int64(3600)
+	if in.ExpiresIn != nil {
+		expiresIn = *in.ExpiresIn
+	}
+	if expiresIn != 0 && (expiresIn < 60 || expiresIn > 365*24*60*60) {
+		jsonOut(w, 400, map[string]string{"error": "Token 有效期须为 1 分钟至 365 天，或选择永久"})
 		return
 	}
 	d, err := s.cfg.Catalog.Get(r.PathValue("database"))
@@ -244,7 +253,13 @@ func (s *Server) accountToken(w http.ResponseWriter, r *http.Request) {
 		jsonOut(w, 401, map[string]string{"error": "账号或密码错误"})
 		return
 	}
-	token, err := s.signClaims(map[string]any{"iss": d.AuthorizationIssuer(s.cfg.Issuer), "aud": resource, "sub": a.Username, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix(), "scope": "sql:query", "jti": random(), "identity": "database:" + d.ID, "auth_config": d.AuthenticationVersion(), "business": a})
+	claims := map[string]any{"iss": d.AuthorizationIssuer(s.cfg.Issuer), "aud": resource, "sub": a.Username, "iat": time.Now().Unix(), "scope": "sql:query", "jti": random(), "identity": "database:" + d.ID, "auth_config": d.AuthenticationVersion(), "business": a}
+	if expiresIn == 0 {
+		claims["non_expiring"] = true
+	} else {
+		claims["exp"] = time.Now().Unix() + expiresIn
+	}
+	token, err := s.signClaims(claims)
 	if err != nil {
 		http.Error(w, "signing failed", 500)
 		return
@@ -253,7 +268,7 @@ func (s *Server) accountToken(w http.ResponseWriter, r *http.Request) {
 	if ev != nil {
 		ev.SubjectID = a.BusinessUserID
 	}
-	jsonOut(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": 3600})
+	jsonOut(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expiresIn})
 }
 func (v *Verifier) accountIdentity(ctx context.Context, a management.BusinessAccount, identity, config string) (management.BusinessAccount, error) {
 	if v.Catalog == nil || v.Catalog.Management == nil {

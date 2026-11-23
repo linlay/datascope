@@ -746,9 +746,15 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 		Identity             string
 		AuthConfig           string                      `json:"auth_config"`
 		Business             *management.BusinessAccount `json:"business,omitempty"`
+		NonExpiring          bool                        `json:"non_expiring"`
 	}
 	raw, e := b64.DecodeString(parts[1])
-	if e != nil || json.Unmarshal(raw, &c) != nil || c.Iss != v.Issuer || c.Aud != v.Resource || c.Exp <= time.Now().Unix() || c.Iat > time.Now().Add(30*time.Second).Unix() {
+	if e != nil || json.Unmarshal(raw, &c) != nil || c.Iss != v.Issuer || c.Aud != v.Resource || c.Iat > time.Now().Add(30*time.Second).Unix() {
+		return nil, bad
+	}
+	// Only explicitly marked, database-bound account tokens may omit expiry.
+	permanent := c.NonExpiring && c.Exp == 0 && c.Business != nil && v.DatabaseID != "" && databaseIdentity(c.Identity)
+	if c.NonExpiring && !permanent || !permanent && c.Exp <= time.Now().Unix() {
 		return nil, bad
 	}
 	if v.DatabaseID != "" && (v.Management != nil || v.Catalog != nil && v.Catalog.Management != nil) {
@@ -765,7 +771,11 @@ func (v *Verifier) Verify(ctx context.Context, token string, r *http.Request) (*
 		}
 		audit.UpdateRequest(ctx, v.DatabaseID, 0)
 		audit.SetRequestBusinessIdentity(ctx, a.ID, a.BusinessUserID, a.Username)
-		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: time.Unix(c.Exp, 0), Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID, "business_account": a}}, nil
+		expiration := time.Time{}
+		if !permanent {
+			expiration = time.Unix(c.Exp, 0)
+		}
+		return &auth.TokenInfo{UserID: strconv.FormatInt(a.ID, 10), Expiration: expiration, Scopes: scopes, Extra: map[string]any{"identity": "database", "database_id": a.DatabaseID, "username": a.Username, "business_user_id": a.BusinessUserID, "business_account": a}}, nil
 	}
 	if databaseIdentity(c.Identity) {
 		return nil, bad

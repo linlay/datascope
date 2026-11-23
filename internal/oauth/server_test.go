@@ -309,15 +309,19 @@ func TestDiscoveryAndJWTValidation(t *testing.T) {
 	raw, _ := os.ReadFile(e.key)
 	block, _ := pem.Decode(raw)
 	key, _ := x509.ParsePKCS1PrivateKey(block.Bytes)
-	forge := func(issuer, aud, sub, scope string, exp int64) string {
+	forge := func(issuer, aud, sub, scope string, exp int64, nonExpiring ...bool) string {
 		head := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"at+jwt","kid":"demo-rsa-1"}`))
-		claims, _ := json.Marshal(map[string]any{"iss": issuer, "aud": aud, "sub": sub, "scope": scope, "exp": exp, "iat": time.Now().Unix()})
+		values := map[string]any{"iss": issuer, "aud": aud, "sub": sub, "scope": scope, "exp": exp, "iat": time.Now().Unix()}
+		if len(nonExpiring) > 0 {
+			values["non_expiring"] = nonExpiring[0]
+		}
+		claims, _ := json.Marshal(values)
 		body := head + "." + base64.RawURLEncoding.EncodeToString(claims)
 		h := sha256.Sum256([]byte(body))
 		sig, _ := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])
 		return body + "." + base64.RawURLEncoding.EncodeToString(sig)
 	}
-	for _, token := range []string{"bad", forge(e.issuer, e.resource, "E0001", "sql:query", time.Now().Add(-time.Second).Unix()), forge(e.issuer, "other", "E0001", "sql:query", time.Now().Add(time.Hour).Unix()), forge("other", e.resource, "E0001", "sql:query", time.Now().Add(time.Hour).Unix()), forge(e.issuer, e.resource, "E0176", "sql:query", time.Now().Add(time.Hour).Unix()), forge(e.issuer, e.resource, "E0001", "sql:query sql:debug", time.Now().Add(time.Hour).Unix())} {
+	for _, token := range []string{"bad", forge(e.issuer, e.resource, "E0001", "sql:query", 0), forge(e.issuer, e.resource, "E0001", "sql:query", 0, true), forge(e.issuer, e.resource, "E0001", "sql:query", time.Now().Add(-time.Second).Unix()), forge(e.issuer, "other", "E0001", "sql:query", time.Now().Add(time.Hour).Unix()), forge("other", e.resource, "E0001", "sql:query", time.Now().Add(time.Hour).Unix()), forge(e.issuer, e.resource, "E0176", "sql:query", time.Now().Add(time.Hour).Unix()), forge(e.issuer, e.resource, "E0001", "sql:query sql:debug", time.Now().Add(time.Hour).Unix())} {
 		status, _, _ := request(t, http.DefaultClient, "POST", e.resource, nil, token)
 		if status != 401 {
 			t.Fatalf("invalid JWT status %d", status)
