@@ -18,6 +18,63 @@ func engine(driver string) dialect.Engine {
 	return dialect.Engine{Driver: driver, Schema: "business", Tables: map[string]string{"records": "Records"}}
 }
 
+func TestNullPredicatesPreserveSemantics(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE Records(id INTEGER, value); INSERT INTO Records VALUES(1,NULL),(2,''),(3,'value'),(4,0)`); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, query string
+		ids         []int
+	}{
+		{"not_null", `SELECT r.id FROM main.records r WHERE r.value IS NOT NULL ORDER BY r.id`, []int{2, 3, 4}},
+		{"is_null", `SELECT r.id FROM main.records r WHERE r.value IS NULL ORDER BY r.id`, []int{1}},
+		{"negated_is_null", `SELECT r.id FROM main.records r WHERE NOT (r.value IS NULL) ORDER BY r.id`, []int{2, 3, 4}},
+		{"negated_not_null", `SELECT r.id FROM main.records r WHERE NOT (r.value IS NOT NULL) ORDER BY r.id`, []int{1}},
+		{"case", `SELECT r.id FROM main.records r WHERE CASE WHEN r.value IS NOT NULL THEN 1 ELSE 0 END = 1 ORDER BY r.id`, []int{2, 3, 4}},
+		{"join", `SELECT r.id FROM main.records r JOIN main.records b ON r.id=b.id AND b.value IS NOT NULL ORDER BY r.id`, []int{2, 3, 4}},
+		{"subquery", `SELECT r.id FROM main.records r WHERE EXISTS (SELECT 1 FROM main.records b WHERE b.id=r.id AND b.value IS NOT NULL) ORDER BY r.id`, []int{2, 3, 4}},
+	}
+	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
+		for _, tc := range cases {
+			t.Run(driver+"/"+tc.name, func(t *testing.T) {
+				e := engine(driver)
+				e.Schema = "main"
+				out, args, err := e.Compile(tc.query)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(tc.query, "IS NOT NULL") && !strings.Contains(out, "IS NOT NULL") {
+					t.Fatalf("nonstandard null predicate: %s", out)
+				}
+				rows, err := db.Query(out, args...)
+				if err != nil {
+					t.Fatalf("%s: %v", out, err)
+				}
+				defer rows.Close()
+				var got []int
+				for rows.Next() {
+					var id int
+					if err := rows.Scan(&id); err != nil {
+						t.Fatal(err)
+					}
+					got = append(got, id)
+				}
+				if err := rows.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, tc.ids) {
+					t.Fatalf("null filtering changed: got %v, want %v; SQL: %s", got, tc.ids, out)
+				}
+			})
+		}
+	}
+}
+
 func TestMySQLBuiltinsHaveNoSpaceBeforeParenthesis(t *testing.T) {
 	for _, driver := range []string{"mysql", "oceanbase"} {
 		out, _, err := engine(driver).Compile(`SELECT SUM(id), COUNT(*), MAX(id), MIN(id), AVG(id), 'SUM (id)' AS literal FROM main.records`)
@@ -100,6 +157,7 @@ func TestRejectUnreviewedOrMutatingSQL(t *testing.T) {
 		`SELECT id COLLATE NOCASE FROM records`, `SELECT id || owner FROM records`,
 		`SELECT * FROM records LIMIT -1`, `SELECT * FROM records LIMIT :limit`,
 		`SELECT ROW_NUMBER() OVER () FROM records`,
+		`SELECT id FROM records WHERE load_file('/etc/passwd') IS NOT NULL`,
 		`WITH RECURSIVE x AS (SELECT 1) SELECT * FROM x`,
 	}
 	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
@@ -141,7 +199,7 @@ tables:
 	if err != nil {
 		t.Fatal(err)
 	}
-	queries := []string{`SELECT * FROM records ORDER BY id`, `WITH x AS (SELECT * FROM records) SELECT * FROM x ORDER BY id`, `SELECT a.id,a.owner FROM records a JOIN records b ON a.id=b.id ORDER BY a.id`}
+	queries := []string{`SELECT * FROM records ORDER BY id`, `SELECT * FROM records WHERE owner IS NOT NULL ORDER BY id`, `WITH x AS (SELECT * FROM records) SELECT * FROM x ORDER BY id`, `SELECT a.id,a.owner FROM records a JOIN records b ON a.id=b.id ORDER BY a.id`}
 	for _, driver := range []string{"mysql", "oceanbase", "postgresql", "oracle", "dameng"} {
 		for _, query := range queries {
 			e := engine(driver)

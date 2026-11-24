@@ -261,8 +261,13 @@ func (e Engine) compile(query string, write bool, args ...any) (string, []any, e
 				return nil, errors.New("Oracle 查询请使用数值或比较表达式代替布尔字面量")
 			}
 		case *parser.Null:
+			if x.Op == parser.NOTNULL {
+				// The parser also represents standard IS NOT NULL as this node,
+				// but Null.String emits SQLite's postfix NOT NULL spelling.
+				return &parser.BinaryExpr{X: x.X, Op: parser.ISNOT, Y: &parser.NullLit{}}, nil
+			}
 			if x.Op != parser.ISNULL {
-				return nil, errors.New("请使用 IS NOT NULL，不能使用 SQLite 的 NOT NULL 表达式")
+				return nil, errors.New("不支持该空值判断表达式")
 			}
 		case *parser.CastExpr:
 			// Keep the first release's expression semantics explicit. Browsing

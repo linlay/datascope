@@ -132,6 +132,8 @@ function run(args, ctx) {
 
 只需汇总时，直接使用 `SUM`、`COUNT`、`MIN`、`MAX`、`AVG` 和 `GROUP BY`，例如 `SELECT natural_day, SUM(coop_fund) AS total FROM cashmgmt GROUP BY natural_day ORDER BY natural_day`（将表名、字段名替换为当前库已开放的名称）。这些聚合仍遵守行权限及字段限制。MySQL 与 OceanBase MySQL 模式支持这些普通聚合调用，不要求客户端设置 `IGNORE_SPACE`。
 
+空值判断使用 `IS NULL` 和 `IS NOT NULL`，例如 `SELECT id FROM records WHERE amount IS NOT NULL`（替换为已开放的表和字段）。可在 `WHERE`、`JOIN ON`、`CASE WHEN` 和受支持的子查询中使用；NULL 与数值零不同，空字符串的存储和比较遵循目标数据库语义。筛选仍遵守行权限及字段限制。
+
 确需明细时，按稳定且唯一的键排序分页。例如 `SELECT id, amount FROM records WHERE id > :arg_after ORDER BY id`，传入 `parameters: {"arg_after": 0}` 和 `max_rows: 1000`；每页保存成功后，以最后一行的 id 作为下一页参数。根据实际表结构替换示例；复合键需要完整的排序和续页条件。`truncated: true` 表示本条 SQL 的结果超过返回上限。没有 SQL `LIMIT` 时可据此判断是否续页；SQL 自带 `LIMIT` 时，`truncated: false` 只表示该 SQL 的结果没有被额外截断，不能证明后面没有记录。多次请求不共享数据库快照，数据变动时需固定业务时间窗或使用业务快照。
 
 托管 MCP 的 `query` / `raw_query` 复用同一配置版本的连接池和已校验规则，空闲一分钟释放，持续使用满五分钟后重新初始化。配置变化后的新请求重新初始化；每次调用仍校验当前身份及工具权限，不缓存查询结果。排查耗时时，在审计中按请求 ID 对照 `query.initialize`（详情 `cache_hit` 标明是否命中复用）、`sql.rewrite`、`sql.guard`、`sql.execute` 和 `mcp.request` 的起止时间；这些事件可能嵌套，不能直接相加。
