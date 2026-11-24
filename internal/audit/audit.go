@@ -43,6 +43,7 @@ type Event struct {
 	StartedAt    string `json:"started_at"`
 	FinishedAt   string `json:"finished_at,omitempty"`
 	Rows         int    `json:"rows"`
+	RowsKind     string `json:"rows_kind,omitempty"`
 	Truncated    bool   `json:"truncated"`
 	Detail       any    `json:"detail,omitempty"`
 }

@@ -193,6 +193,9 @@ func TestPlatformHTTPPermissionsAndAudit(t *testing.T) {
 	var execution, denied, invalid bool
 	for _, ev := range events {
 		if ev.Kind == "sql.execute" {
+			if ev.RowsKind != "returned" {
+				t.Fatalf("missing returned-row audit metadata: %+v", ev)
+			}
 			execution = true
 			if ev.OriginalSQL == "" || ev.RewrittenSQL == "" || ev.ExecutedSQL == "" || ev.ActorID != f.reader.ID || ev.SubjectID != 10 || ev.RequestID == "" {
 				t.Fatalf("incomplete execution %+v", ev)

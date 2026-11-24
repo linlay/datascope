@@ -265,6 +265,7 @@ func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native
 	}
 	if event != nil {
 		event.RewrittenSQL = rewritten
+		event.RowsKind = "returned"
 		event.ExecutedSQL = query
 		event.Binds = args
 	}

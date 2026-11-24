@@ -376,6 +376,9 @@ func TestActionConcurrentInvokeAndUnknownReceipt(t *testing.T) {
 	writes := 0
 	for _, ev := range events {
 		if ev.Kind == "action.sql" && strings.Contains(ev.ExecutedSQL, "UPDATE") {
+			if ev.RowsKind != "affected" || ev.Rows != 1 {
+				t.Fatalf("missing affected-row audit metadata: %+v", ev)
+			}
 			writes++
 		}
 	}

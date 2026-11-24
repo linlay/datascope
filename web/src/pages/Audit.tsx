@@ -2,19 +2,21 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { IconButton } from '../components/IconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
-import { Alert, Button, Card, Col, Collapse, DatePicker, Descriptions, Empty, Form, Input, Row, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Col, Collapse, DatePicker, Descriptions, Empty, Form, Input, InputNumber, Row, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { managementCall, type AuditEvent, type AuditFilters, type AuditResult, type Database } from '../api';
 import { useAuth } from '../Auth';
 import { useI18n } from '../ui/preferences';
 import { selectResource, setRouteParams, useRoute, useRouteChoice } from '../navigation';
+import { auditDuration } from './auditTiming';
 
 interface FilterForm {
  database?:string;actor_id?:number;kind?:string;source?:string;status?:string;tool?:string;request_id?:string;query?:string;
+ min_duration_ms?:number;sort?:AuditFilters['sort'];
  range?:[{toISOString:()=>string},{toISOString:()=>string}];
 }
 const sourceLabels:Record<string,string>={web:'管理后台','management-mcp':'管理 MCP','database-mcp':'数据库 MCP',discovery:'结构检查'};
 const statusLabels:Record<string,string>={success:'成功',failed:'失败',running:'进行中',unknown:'结果未知'};
-const kindLabels:Record<string,string>={'http.request':'后台请求','mcp.request':'MCP 请求','sql.execute':'SQL 执行','sql.raw':'全量只读查询','sql.rewrite':'SQL 改写','sql.validation':'SQL 校验','auth.login':'登录','auth.logout':'退出登录','database.create':'添加数据库','database.update':'修改数据库','database.annotate':'编辑表字段说明','database.discovery_applied':'确认结构变化','database.discovery_detected':'发现结构变化','database.discovery_check':'检查结构','database.discovery_failed':'结构检查失败','access.denied':'权限拒绝'};
+const kindLabels:Record<string,string>={'http.request':'后台请求','mcp.request':'MCP 请求','sql.execute':'SQL 执行','action.sql':'动作 SQL','sql.raw':'全量只读查询','sql.rewrite':'SQL 改写','sql.validation':'SQL 校验','auth.login':'登录','auth.logout':'退出登录','database.create':'添加数据库','database.update':'修改数据库','database.annotate':'编辑表字段说明','database.discovery_applied':'确认结构变化','database.discovery_detected':'发现结构变化','database.discovery_check':'检查结构','database.discovery_failed':'结构检查失败','access.denied':'权限拒绝'};
 
 export function AuditPage({databases}:{databases:Database[]}){
  const t=useI18n();
@@ -35,6 +37,10 @@ export function AuditPage({databases}:{databases:Database[]}){
   for(const key of ['kind','source','status','tool'] as const){const value=params.get(key);if(value)filters[key]=value;}
   if(params.get('requestId'))filters.request_id=params.get('requestId')!;
   if(params.get('q'))filters.query=params.get('q')!;
+  const minimum=Number(params.get('minDuration'));
+  if(params.has('minDuration')&&Number.isFinite(minimum)&&minimum>=0)filters.min_duration_ms=minimum;
+  const sort=params.get('sort');
+  if(sort==='duration_desc'||sort==='duration_asc'||sort==='time_desc')filters.sort=sort;
   const actor=Number(params.get('actorId'));
   if(params.has('actorId')&&Number.isSafeInteger(actor)&&actor>=0)filters.actor_id=actor;
   for(const [urlKey,key] of [['from','started_from'],['to','started_to']] as const){const value=params.get(urlKey);if(value&&dayjs(value).isValid())filters[key]=dayjs(value).toISOString();}
@@ -44,7 +50,7 @@ export function AuditPage({databases}:{databases:Database[]}){
  const setQuery=(update:(previous:typeof query)=>typeof query)=>{
   const next=update(query),filters=next.filters;
   if(next.refresh!==query.refresh)setRefresh(next.refresh);
-  setRouteParams({scope:filters.platform_only?'__platform__':filters.database_id||undefined,status:filters.status,kind:filters.kind,source:filters.source,tool:filters.tool,requestId:filters.request_id,actorId:filters.actor_id===undefined?undefined:String(filters.actor_id),q:filters.query,from:filters.started_from,to:filters.started_to,page:next.page===1?undefined:String(next.page),size:next.size===50?undefined:String(next.size)},false,true);
+  setRouteParams({scope:filters.platform_only?'__platform__':filters.database_id||undefined,status:filters.status,kind:filters.kind,source:filters.source,tool:filters.tool,requestId:filters.request_id,actorId:filters.actor_id===undefined?undefined:String(filters.actor_id),q:filters.query,minDuration:filters.min_duration_ms===undefined?undefined:String(filters.min_duration_ms),sort:filters.sort,from:filters.started_from,to:filters.started_to,page:next.page===1?undefined:String(next.page),size:next.size===50?undefined:String(next.size)},false,true);
   selectResource(undefined,true);
  };
  const [result,setResult]=useState<AuditResult>();
@@ -56,7 +62,7 @@ export function AuditPage({databases}:{databases:Database[]}){
  useEffect(()=>{
   const filters=query.filters;
   form.resetFields();
-  form.setFieldsValue({database:filters.platform_only?'__platform__':filters.database_id||defaultScope,status:filters.status,actor_id:filters.actor_id,kind:filters.kind,source:filters.source,tool:filters.tool,request_id:filters.request_id,query:filters.query,range:filters.started_from&&filters.started_to?[dayjs(filters.started_from),dayjs(filters.started_to)]:undefined});
+  form.setFieldsValue({database:filters.platform_only?'__platform__':filters.database_id||defaultScope,status:filters.status,actor_id:filters.actor_id,kind:filters.kind,source:filters.source,tool:filters.tool,request_id:filters.request_id,query:filters.query,min_duration_ms:filters.min_duration_ms,sort:filters.sort??'time_desc',range:filters.started_from&&filters.started_to?[dayjs(filters.started_from),dayjs(filters.started_to)]:undefined});
  },[appliedFilterKey,defaultScope]);
  const sequence=useRef(0);
  useEffect(()=>{
@@ -74,11 +80,13 @@ export function AuditPage({databases}:{databases:Database[]}){
   const filters:AuditFilters={};
   if(values.database==='__platform__')filters.platform_only=true;else if(values.database)filters.database_id=values.database;
   for(const key of ['kind','source','status','tool','request_id','query'] as const){const value=values[key]?.trim();if(value)filters[key]=value}
+  if(values.min_duration_ms!==undefined&&values.min_duration_ms!==null)filters.min_duration_ms=values.min_duration_ms;
+  if(values.sort)filters.sort=values.sort;
   if(values.actor_id!==undefined)filters.actor_id=values.actor_id;
   if(values.range?.[0]&&values.range?.[1]){filters.started_from=values.range[0].toISOString();filters.started_to=values.range[1].toISOString()}
   setQuery(old=>({...old,filters,page:1,refresh:old.refresh+1}));
  };
- const advancedCount=([query.filters.actor_id,query.filters.kind,query.filters.source,query.filters.tool,query.filters.request_id] as unknown[]).filter(value=>value!==undefined&&value!=='').length;
+ const advancedCount=([query.filters.actor_id,query.filters.kind,query.filters.source,query.filters.tool,query.filters.request_id,query.filters.min_duration_ms] as unknown[]).filter(value=>value!==undefined&&value!=='').length;
  const actorName=(id:number)=>id===0?t('系统任务'):(result?.actor_names[String(id)]||`${t('用户')} #${id}`);
  const eventActor=(event:AuditEvent)=>{
   if(event.business_username)return event.subject_id?`${event.business_username} · #${event.subject_id}`:event.business_username;
@@ -87,6 +95,11 @@ export function AuditPage({databases}:{databases:Database[]}){
   return event.kind==='mcp.request'?'—':actorName(0);
  };
  const dbName=(id:string)=>id?(databases.find(db=>db.id===id)?.name??id):t('平台操作');
+ const durationHint=t('事件结束时间减去开始时间；SQL 耗时包含准备、连接或事务获取及结果读取，嵌套事件耗时不能直接相加。');
+ const rowsKind=(event:AuditEvent)=>event.rows_kind??(event.kind==='sql.execute'?'returned':undefined);
+ const sqlResult=(event:AuditEvent)=>event.status==='success'&&(event.kind==='sql.execute'||event.kind==='action.sql');
+ const rowCount=(event:AuditEvent)=>sqlResult(event)?<Space size={4}><span>{event.rows}</span><Typography.Text type="secondary">{t(rowsKind(event)==='affected'?'影响行数':rowsKind(event)==='returned'?'返回行数':'行数')}</Typography.Text></Space>:'—';
+ const truncation=(event:AuditEvent)=>event.truncated?<Tag color="orange">{t('已截断')}</Tag>:sqlResult(event)&&rowsKind(event)==='returned'?<Tag>{t('完整')}</Tag>:'—';
  const detail=(event:AuditEvent)=><Space orientation="vertical" style={{width:'100%'}} size="middle">
   <Descriptions size="small" column={{xs:1,md:3}} items={[
    {key:'request',label:t('请求 ID'),children:<Typography.Text copyable>{event.request_id}</Typography.Text>},
@@ -96,6 +109,11 @@ export function AuditPage({databases}:{databases:Database[]}){
    {key:'subject',label:t('业务身份'),children:event.subject_id||'—'},
    {key:'tool',label:t('工具'),children:event.tool||'—'},
    {key:'version',label:t('策略版本'),children:event.policy_version||'—'},
+   {key:'rows',label:t('返回 / 影响行数'),children:rowCount(event)},
+   {key:'truncated',label:t('结果集'),children:truncation(event)},
+   {key:'started',label:t('开始时间'),children:event.started_at||'—'},
+   {key:'finished',label:t('结束时间'),children:event.finished_at||'—'},
+   {key:'duration',label:t('耗时'),children:<Tooltip title={durationHint}>{auditDuration(event)}</Tooltip>},
   ]}/>
   {([[t("原始 SQL"),event.original_sql],[t("改写 SQL"),event.rewritten_sql],[t("执行 SQL"),event.executed_sql],[t("绑定参数"),event.binds?JSON.stringify(event.binds,null,2):''],[t("错误信息"),event.error],[t("操作详情"),event.detail?JSON.stringify(event.detail,null,2):'']] as const).filter(([,value])=>value).map(([label,value])=><div key={label} style={{width:'100%'}}><Typography.Text strong>{t(label)}</Typography.Text><pre className="audit-detail">{value}</pre></div>)}
  </Space>;
@@ -117,6 +135,8 @@ export function AuditPage({databases}:{databases:Database[]}){
       <Col xs={24} sm={12} lg={8}><Form.Item name="source" label={<span className="configuration-label-text">{t('来源')}</span>}><Select className="query-short" aria-label={t('筛选来源')} placeholder={t('全部来源')} allowClear showSearch optionFilterProp="label" options={(result?.sources??[]).map(source=>({value:source,label:t(sourceLabels[source]??source)}))}/></Form.Item></Col>
       <Col xs={24} sm={12}><Form.Item name="request_id" label={<span className="configuration-label-text">{t('请求 ID')}</span>}><Input className="query-id" aria-label={t('筛选请求 ID')} placeholder={t('关联同一次操作')} allowClear maxLength={200}/></Form.Item></Col>
       <Col xs={24} sm={12}><Form.Item name="tool" label={<span className="configuration-label-text">{t('工具 / 动作')}</span>}><Input className="query-search" aria-label={t('筛选工具')} placeholder={t('例如 query、save_policy')} allowClear maxLength={200}/></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item name="min_duration_ms" label={<span className="configuration-label-text">{t('最小耗时（ms）')}</span>}><InputNumber min={0} step={100} className="query-short" aria-label={t('最小耗时（ms）')} placeholder={t('例如 1000')} /></Form.Item></Col>
+      <Col xs={24} sm={12}><Form.Item name="sort" label={<span className="configuration-label-text">{t('排序')}</span>}><Select className="query-person" aria-label={t('日志排序')} options={[{value:'time_desc',label:t('最新优先')},{value:'duration_desc',label:t('耗时从高到低')},{value:'duration_asc',label:t('耗时从低到高')}]}/></Form.Item></Col>
      </Row>,
     }]}/>
     <Space style={{marginTop:12}}><Button type="primary" htmlType="submit" loading={busy}>{t('查询')}</Button><Button disabled={busy} onClick={()=>{form.resetFields();apply({database:defaultScope})}}>{t('重置')}</Button></Space>
@@ -124,14 +144,16 @@ export function AuditPage({databases}:{databases:Database[]}){
   </Card>
   <Card title={t('日志记录')} extra={<IconButton label={t('刷新')} icon={<ReloadOutlined />} loading={busy} onClick={()=>setQuery(old=>({...old,refresh:old.refresh+1}))} />}>
    {error&&<Alert type="error" showIcon title={t('日志查询失败')} description={error} style={{marginBottom:12}}/>}
-   <Table<AuditEvent> rowKey="id" size="small" loading={busy} dataSource={result?.items??[]} scroll={{x:1100}} locale={{emptyText:<Empty description={t('没有符合条件的日志')}/>}} pagination={{current:query.page,pageSize:query.size,total:result?.total??0,showSizeChanger:true,pageSizeOptions:[20,50,100,200],showTotal:total=>t('共 {count} 条',{count:total}),onChange:(page,size)=>setQuery(old=>({...old,page:size===old.size?page:1,size}))}} columns={[
+   <Table<AuditEvent> rowKey="id" size="small" loading={busy} dataSource={result?.items??[]} scroll={{x:1400}} locale={{emptyText:<Empty description={t('没有符合条件的日志')}/>}} pagination={{current:query.page,pageSize:query.size,total:result?.total??0,showSizeChanger:true,pageSizeOptions:[20,50,100,200],showTotal:total=>t('共 {count} 条',{count:total}),onChange:(page,size)=>setQuery(old=>({...old,page:size===old.size?page:1,size}))}} columns={[
     {title:t('时间'),dataIndex:'started_at',width:180,render:value=>new Date(value).toLocaleString()},
     {title:t('数据库'),dataIndex:'database_id',width:150,render:dbName},
     {title:t('操作用户'),dataIndex:'actor_id',width:160,render:(_,event)=>eventActor(event)},
     {title:t('来源'),dataIndex:'source',width:130,render:value=>t(sourceLabels[value]??value)},
     {title:t('操作类型'),dataIndex:'kind',render:kind=><Space orientation="vertical" size={0}><Typography.Text>{t(kindLabels[kind]??kind)}</Typography.Text>{kindLabels[kind]&&<Typography.Text type="secondary" className="mono">{kind}</Typography.Text>}</Space>},
     {title:t('状态'),align:'center',dataIndex:'status',width:100,render:status=><Tag color={status==='success'?'green':status==='failed'?'red':status==='running'?'blue':'orange'}>{t(statusLabels[status]??status)}</Tag>},
-    {title:t('返回行数'),align:'right',dataIndex:'rows',width:90},
+    {title:t('返回 / 影响行数'),align:'right',key:'rows',width:180,render:(_,event)=>rowCount(event)},
+    {title:t('结果集'),key:'truncated',width:100,render:(_,event)=>truncation(event)},
+    {title:<Tooltip title={durationHint}>{t('耗时')}</Tooltip>,key:'duration',align:'right',width:130,render:(_,event)=>auditDuration(event)},
    ]} expandable={{expandedRowRender:detail,expandedRowKeys:route.selection?[route.selection]:[],onExpand:(expanded,event)=>selectResource(expanded?event.id:undefined)}}/>
   </Card>
  </Space>;

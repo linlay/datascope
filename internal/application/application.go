@@ -60,6 +60,8 @@ type Input struct {
 	Tool           string                         `json:"tool,omitempty"`
 	StartedFrom    string                         `json:"started_from,omitempty"`
 	StartedTo      string                         `json:"started_to,omitempty"`
+	MinDurationMS  *float64                       `json:"min_duration_ms,omitempty"`
+	Sort           string                         `json:"sort,omitempty"`
 	Resolutions    []catalog.AnnotationResolution `json:"resolutions,omitempty"`
 	Table          string                         `json:"table,omitempty"`
 	Column         string                         `json:"column,omitempty"`
@@ -702,7 +704,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 				return nil, e
 			}
 		}
-		page, e := s.Management.Audit.Search(ctx, audit.Filter{DatabaseID: in.DatabaseID, PlatformOnly: in.PlatformOnly, RequestID: in.RequestID, ActorID: in.ActorID, Kind: in.Kind, Source: in.Source, Status: in.Status, Tool: in.Tool, Query: in.Query, StartedFrom: in.StartedFrom, StartedTo: in.StartedTo, Limit: in.Limit, Offset: in.Offset})
+		page, e := s.Management.Audit.Search(ctx, audit.Filter{DatabaseID: in.DatabaseID, PlatformOnly: in.PlatformOnly, RequestID: in.RequestID, ActorID: in.ActorID, Kind: in.Kind, Source: in.Source, Status: in.Status, Tool: in.Tool, Query: in.Query, StartedFrom: in.StartedFrom, StartedTo: in.StartedTo, MinDurationMS: in.MinDurationMS, Sort: in.Sort, Limit: in.Limit, Offset: in.Offset})
 		if e != nil {
 			return nil, e
 		}

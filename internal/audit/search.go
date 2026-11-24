@@ -6,25 +6,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
 )
 
 type Filter struct {
-	DatabaseID   string
-	PlatformOnly bool
-	RequestID    string
-	ActorID      *int64
-	Kind         string
-	Source       string
-	Status       string
-	Tool         string
-	Query        string
-	StartedFrom  string
-	StartedTo    string
-	Limit        int
-	Offset       int
+	DatabaseID    string
+	PlatformOnly  bool
+	RequestID     string
+	ActorID       *int64
+	Kind          string
+	Source        string
+	Status        string
+	Tool          string
+	Query         string
+	StartedFrom   string
+	StartedTo     string
+	MinDurationMS *float64
+	Sort          string
+	Limit         int
+	Offset        int
 }
 type Page struct {
 	Items []Event `json:"items"`
@@ -39,6 +42,12 @@ type Page struct {
 }
 
 func (f *Filter) validate() error {
+	if f.MinDurationMS != nil && (math.IsNaN(*f.MinDurationMS) || math.IsInf(*f.MinDurationMS, 0) || *f.MinDurationMS < 0) {
+		return errors.New("最小耗时必须为非负有限毫秒数")
+	}
+	if !slices.Contains([]string{"", "time_desc", "duration_desc", "duration_asc"}, f.Sort) {
+		return errors.New("无效的日志排序")
+	}
 	if f.PlatformOnly && f.DatabaseID != "" {
 		return errors.New("平台日志不能同时指定数据库")
 	}
@@ -136,6 +145,19 @@ func (s *Store) localSearch(ctx context.Context, f Filter, facets bool) (*Page, 
 		where = append(where, "instr(lower(DATA_),lower(?))>0")
 		args = append(args, f.Query)
 	}
+	const durationSQL = "datascope_audit_duration_ms(STARTED_AT_,json_extract(DATA_,'$.finished_at'))"
+	if f.MinDurationMS != nil {
+		where = append(where, durationSQL+">=?")
+		args = append(args, *f.MinDurationMS)
+	}
+	order := "julianday(STARTED_AT_) DESC,ID_ DESC"
+	if f.Sort == "duration_desc" || f.Sort == "duration_asc" {
+		direction := "DESC"
+		if f.Sort == "duration_asc" {
+			direction = "ASC"
+		}
+		order = durationSQL + " IS NULL ASC," + durationSQL + " " + direction + ",ID_ DESC"
+	}
 	clause := " WHERE " + strings.Join(where, " AND ")
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -147,7 +169,7 @@ func (s *Store) localSearch(ctx context.Context, f Filter, facets bool) (*Page, 
 		return nil, err
 	}
 	pageArgs := append(append([]any(nil), args...), f.Limit, f.Offset)
-	rows, err := tx.QueryContext(ctx, "SELECT DATA_ FROM AUDIT_EVENT"+clause+" ORDER BY julianday(STARTED_AT_) DESC,ID_ DESC LIMIT ? OFFSET ?", pageArgs...)
+	rows, err := tx.QueryContext(ctx, "SELECT DATA_ FROM AUDIT_EVENT"+clause+" ORDER BY "+order+" LIMIT ? OFFSET ?", pageArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -258,6 +280,23 @@ func (s *Store) search(ctx context.Context, f Filter, facets bool) (*Page, error
 		}
 	}
 	slices.SortFunc(events, func(a, b Event) int {
+		if f.Sort == "duration_desc" || f.Sort == "duration_asc" {
+			ad, av := eventDuration(a.StartedAt, a.FinishedAt)
+			bd, bv := eventDuration(b.StartedAt, b.FinishedAt)
+			if av != bv {
+				if av {
+					return -1
+				}
+				return 1
+			}
+			if av && ad != bd {
+				if (ad > bd) == (f.Sort == "duration_desc") {
+					return -1
+				}
+				return 1
+			}
+			return strings.Compare(b.ID, a.ID)
+		}
 		if a.StartedAt != b.StartedAt {
 			return strings.Compare(b.StartedAt, a.StartedAt)
 		}

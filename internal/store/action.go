@@ -214,6 +214,10 @@ func (t *ActionTx) prepare(ctx context.Context, query string, write bool, args [
 		return "", nil, nil, e
 	}
 	if ev != nil {
+		ev.RowsKind = "returned"
+		if write {
+			ev.RowsKind = "affected"
+		}
 		ev.Binds = args
 		ev.ExecutedSQL = query
 	}

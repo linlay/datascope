@@ -53,8 +53,8 @@ var operations = map[string][]operation{
 		{"view", "templates", "list_view_templates", "database_id", ""},
 		{"action", "list", "list_actions", "database_id", ""},
 		{"action", "describe", "describe_action", "database_id name", ""},
-		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
-		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to limit offset"},
+		{"audit", "search", "search_audit_events", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to min_duration_ms sort limit offset"},
+		{"audit", "page", "get_audit_page", "", "database_id request_id actor_id platform_only kind source status tool query started_from started_to min_duration_ms sort limit offset"},
 	},
 	"datascope_manage": {
 		{"capability", "set", "configure_capability", "database_id capability enabled revision", "database write_password"},
