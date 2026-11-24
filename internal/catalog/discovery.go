@@ -48,6 +48,9 @@ type Discovery struct {
 // available when the source schema has made an old policy invalid.
 func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, error) {
 	defer requesttiming.Start(ctx, "store_open")()
+	if err := d.ValidateTimeouts(); err != nil {
+		return nil, err
+	}
 	if c.Management != nil && d.Driver == "sqlite" {
 		if err := c.Management.ValidatePath(d.Path); err != nil {
 			return nil, err
@@ -63,9 +66,9 @@ func (c *Catalog) OpenStore(ctx context.Context, d *Database) (*store.Store, err
 		if e != nil {
 			return nil, e
 		}
-		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.Timeout)
+		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.QueryTimeout(d), c.ConnectTimeout(d))
 	} else {
-		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.QueryTimeout(d), c.ConnectTimeout(d))
 	}
 	if err != nil {
 		return nil, err

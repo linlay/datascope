@@ -40,7 +40,7 @@ func (c *Catalog) EditConnection(ctx context.Context, id string, revision int, i
 	}
 	var st *store.Store
 	if password != "" {
-		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, "", &next, password, c.Timeout)
+		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, "", &next, password, c.QueryTimeout(d), c.ConnectTimeout(d))
 	} else {
 		st, err = c.OpenStore(ctx, d)
 	}

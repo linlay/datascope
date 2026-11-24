@@ -61,6 +61,9 @@ func validateActions(d Database) error {
 	return nil
 }
 func (c *Catalog) OpenWriter(ctx context.Context, d *Database) (*store.Store, error) {
+	if err := d.ValidateTimeouts(); err != nil {
+		return nil, err
+	}
 	if !d.WriteEnabled {
 		return nil, fmt.Errorf("此数据库尚未启用 action 写入")
 	}
@@ -74,7 +77,7 @@ func (c *Catalog) OpenWriter(ctx context.Context, d *Database) (*store.Store, er
 		if e := c.Management.ValidatePath(d.Path); e != nil {
 			return nil, e
 		}
-		st, e := store.OpenWriter(ctx, d.Path, c.Timeout)
+		st, e := store.OpenWriter(ctx, d.Path, c.QueryTimeout(d))
 		if st != nil {
 			st.Audit = c.Management.AuditFor(d.ID)
 		}
@@ -90,9 +93,9 @@ func (c *Catalog) OpenWriter(ctx context.Context, d *Database) (*store.Store, er
 		if err != nil {
 			return nil, err
 		}
-		st, e = store.OpenConnectionWithPassword(ctx, d.Driver, "", d.WriteConnection, password, c.Timeout)
+		st, e = store.OpenConnectionWithPassword(ctx, d.Driver, "", d.WriteConnection, password, c.QueryTimeout(d), c.ConnectTimeout(d))
 	} else {
-		st, e = store.OpenConnection(ctx, d.Driver, "", d.WriteConnection, c.Timeout)
+		st, e = store.OpenConnection(ctx, d.Driver, "", d.WriteConnection, c.QueryTimeout(d), c.ConnectTimeout(d))
 	}
 	if st != nil {
 		st.Audit = c.Management.AuditFor(d.ID)

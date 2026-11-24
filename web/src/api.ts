@@ -225,6 +225,8 @@ export interface AuthPolicy {id:string;name:string;mode:'ACCOUNT'|'OAUTH'|'NONE'
 export interface AuthConfig {revision:number;default_policy_id:string;providers:AuthProvider[];policies:AuthPolicy[];bindings:{target_type:'API'|'DATABASE';target_id:string;policy_id:string}[]}
 export interface SQLExample { label: string; sql: string }
 export interface Database {
+ query_timeout_seconds?: number; connect_timeout_seconds?: number;
+ effective_query_timeout_seconds?: number; effective_connect_timeout_seconds?: number;
  views_enabled?: boolean; capabilities?: {actions:boolean;knowledge:boolean;views:boolean};
  description?: string; documentation?: string;
 	ddl_enabled?:boolean;

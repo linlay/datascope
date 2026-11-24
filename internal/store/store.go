@@ -9,6 +9,7 @@ import (
 	"datascope-server/internal/dialect"
 	"datascope-server/internal/queryparams"
 	"datascope-server/internal/requesttiming"
+	"datascope-server/internal/sqlinspect"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -24,9 +25,10 @@ import (
 )
 
 const (
-	DefaultMaxRows      = 200
-	HardMaxRows         = 1000
-	DefaultQueryTimeout = 10 * time.Second
+	DefaultMaxRows        = 200
+	HardMaxRows           = 1000
+	DefaultQueryTimeout   = 30 * time.Second
+	DefaultConnectTimeout = 10 * time.Second
 )
 
 // Store is the shared execution facade; engine selects the network SQL adapter.
@@ -104,6 +106,15 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 	maxRows = min(maxRows, HardMaxRows)
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
+	if c, e := sqlinspect.Parse(stmt); e != nil {
+		return nil, e
+	} else if c != nil && c.Kind == "explain" {
+		result, e := s.explain(ctx, stmt, maxRows, args...)
+		if e == nil {
+			result.SetRowLimit(requested)
+		}
+		return result, e
+	}
 	stmt, plan, err := s.prepareMaskingContext(ctx, stmt, false)
 	if err != nil {
 		return nil, err
@@ -116,7 +127,11 @@ func (s *Store) Query(ctx context.Context, rawSQL string, maxRows int, args ...a
 		err = s.applyMasking(result, plan)
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("查询超过 %s 被中断", s.queryTimeout)
+		cause := err
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		return nil, OperationError(ctx, "查询执行", s.queryTimeout, cause)
 	}
 	if err != nil {
 		return nil, err
@@ -138,6 +153,7 @@ func (s *Store) QueryBool(ctx context.Context, query string, args ...any) (out b
 	defer func() { err = audit.Join(err, s.Audit.Finish(event, err)) }()
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
+	defer func() { err = OperationError(ctx, "权限前置检查", s.queryTimeout, err) }()
 	query, args, err = s.Prepare(query, args...)
 	if err != nil {
 		return false, err
@@ -186,9 +202,27 @@ func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRo
 	maxRows = min(maxRows, HardMaxRows)
 	ctx, cancel := context.WithTimeout(ctx, s.queryTimeout)
 	defer cancel()
-	args, err := queryparams.Args(body, parameters)
+	bindSQL := body
+	diagnostic, e := sqlinspect.Parse(body)
+	if e != nil {
+		return nil, e
+	}
+	if diagnostic != nil {
+		if diagnostic.Kind != "explain" {
+			return s.InspectMetadata(ctx, rawSQL, diagnostic, nil, requested)
+		}
+		bindSQL = diagnostic.Query
+	}
+	args, err := queryparams.Args(bindSQL, parameters)
 	if err != nil {
 		return nil, err
+	}
+	if diagnostic != nil {
+		result, e := s.explain(ctx, body, maxRows, args...)
+		if e == nil {
+			result.SetRowLimit(requested)
+		}
+		return result, e
 	}
 	body, plan, err := s.prepareMaskingContext(ctx, body, true)
 	if err != nil {
@@ -202,7 +236,11 @@ func (s *Store) RawQueryWithParameters(ctx context.Context, rawSQL string, maxRo
 		err = s.applyMasking(result, plan)
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, fmt.Errorf("查询超过 %s 被中断", s.queryTimeout)
+		cause := err
+		if cause == nil {
+			cause = ctx.Err()
+		}
+		return nil, OperationError(ctx, "查询执行", s.queryTimeout, cause)
 	}
 	if err != nil {
 		return nil, err
@@ -255,6 +293,8 @@ func (s *Store) read(ctx context.Context, maxRows int, query string, args ...any
 // native is reserved for server-generated browsing SQL with validated identifiers.
 func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native bool, args ...any) (out *QueryResult, err error) {
 	defer requesttiming.Start(ctx, "query_execute")()
+	stage := "查询准备"
+
 	original, rewritten := audit.SQL(ctx)
 	if original == "" {
 		original = query
@@ -276,10 +316,12 @@ func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native
 		}
 		err = audit.Join(err, s.Audit.Finish(event, err))
 	}()
+	defer func() { err = OperationError(ctx, stage, s.queryTimeout, err) }()
 	if !native {
 		query = boundedQuery(query, maxRows)
 	}
 	var tx *sql.Tx
+	var conn *sql.Conn
 	if s.engine != nil {
 		if !native {
 			query, args, err = s.Prepare(query, args...)
@@ -287,21 +329,30 @@ func (s *Store) readQuery(ctx context.Context, maxRows int, query string, native
 				return nil, err
 			}
 		}
+		stage = "连接或只读事务获取"
 		tx, err = s.beginReadOnly(ctx)
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback()
+	} else {
+		stage = "连接或只读事务获取"
+		conn, err = s.db.Conn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
 	}
 	if event != nil {
 		event.ExecutedSQL = query
 		event.Binds = args
 	}
+	stage = "SQL 执行与结果读取"
 	var rows *sql.Rows
 	if tx != nil {
 		rows, err = tx.QueryContext(ctx, query, args...)
 	} else {
-		rows, err = s.db.QueryContext(ctx, query, args...)
+		rows, err = conn.QueryContext(ctx, query, args...)
 	}
 	if err != nil {
 		return nil, err

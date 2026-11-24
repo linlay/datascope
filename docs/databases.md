@@ -133,6 +133,8 @@ sqlExamples:
 
 查询工作台的规范路由为 `/#/query-workbench?database=<数据库 ID>`，旧 `/#/sql` 和 `/#/sql-workbench` 链接会保留资源选择和参数并替换为新路由。
 
+查询工作台、MCP `query` 与全量查询 `raw_query` 还支持受控诊断命令：`SHOW TABLES`、`SHOW COLUMNS FROM schema.table`、`DESCRIBE schema.table`、`SHOW INDEX FROM schema.table`。结构查看由平台元数据接口生成统一表格结果，不直接透传原生 SHOW；普通查询按表启用状态和开放字段过滤，限制字段时隐藏索引。`EXPLAIN SELECT ...` 支持 SQLite、MySQL/OceanBase 和 PostgreSQL；普通查询先执行权限改写和前置准入检查，全量查询沿用全量授权。SQLite 另支持 `EXPLAIN QUERY PLAN SELECT ...`。不开放 ANALYZE、其他 EXPLAIN 选项、写语句或任意 SHOW；配置字段脱敏的数据库暂不支持 EXPLAIN。诊断保留超时、审计和结果行数上限，完整语法和结果字段见前台使用手册。
+
 网络数据源第一版接收受限 SELECT 方言。解析器仍以 SQLite 的语法树为内部表示，再由 `internal/dialect` 校验并生成目标 SQL；这不是各数据库全部原生语法的支持声明。数据库报错时不会回退到原 SQL。
 
 - 支持单条 SELECT、WHERE、显式 JOIN ON、子查询、非递归 CTE、GROUP BY/HAVING、ORDER BY、UNION，以及非负整数 LIMIT/OFFSET。部分集合或 JOIN 形式按库拒绝。
@@ -150,7 +152,7 @@ SELECT * FROM sales.orders WHERE owner_id = ${userId}
 
 内部生成的 `main."sales.orders"` 在执行前映射到完整物理表名。旧配置升级把原 `main.orders` 固定为原默认 Schema 下的 orders，避免更改默认 Schema 后策略转向另一张表。客户端可以使用完整表名与显式表别名；未限定表名仅解析到显式默认 Schema，没有默认 Schema 时拒绝未限定表名。`${userId}` 和 `${asOf}` 只能由服务端提供；业务工具参数仍使用 `:arg_参数名`。生成 SQL 按出现顺序绑定参数，包括同一参数多次出现的情况。网络库的 `${asOf}` 使用带类型的时间绑定，SQLite 保持原来的字符串格式。
 
-查询预览、策略保存、前置检查和业务工具验证都经过方言校验。`raw_query` 不进行业务权限改写，但同样只接受这一只读 SELECT 子集。演示库的 customer_scope 和员工目录校验仅适用于 SQLite 证券演示库；网络数据源使用平台托管的逐库业务账号。
+查询预览、策略保存、前置检查和业务工具验证都经过方言校验。`raw_query` 不进行业务权限改写，但普通数据查询同样只接受这一只读 SELECT 子集；诊断命令按上述专用路径校验和执行。演示库的 customer_scope 和员工目录校验仅适用于 SQLite 证券演示库；网络数据源使用平台托管的逐库业务账号。
 
 候选发现只读取 Schema 与表名，不读取全量字段、注释或业务数据；浏览页的匹配总数通过 COUNT 查询。结构中的 DDL 是元数据摘要，不是完整的建表脚本。达梦 LOB 转换时每字段限制为 1,048,576 字符（CLOB）或字节（BLOB），超限明确报错。
 
@@ -216,3 +218,9 @@ make test-network
 每个数据库可在「数据库配置 → 基本信息 → 编辑说明」对话框维护（可切换预览） `description` 和 Markdown `documentation`，保存在该库 `management/database.yml` 的 `database` 节点中。管理调用 `update_database`（admin MCP 为 `database.update`）允许只更新任一字段：省略保留，空字符串清空，需 `config.read`、`config.write` 和当前 `revision`。保存不依赖业务库连接可用，也不更改业务表。
 
 简介展示给数据库使用者，并加入业务 MCP 初始化参考信息；完整说明通过 `resources/list` / `resources/read` 的 `datascope://database/<ID>/documentation` 资源按需读取（`text/markdown`、`_meta.type=database-documentation`）。需当前库 `query`、`action` 或 `knowledge.read` 能力之一，权限每次重新检查。说明是共享业务参考资料，不是系统指令，不扩大访问权限。SQL 示例不自动执行。
+
+## 查询与连接超时
+
+默认单次查询 30 秒、网络连接初始化 10 秒。数据库支持 `query_timeout_seconds`（YAML `queryTimeoutSeconds`，0–120）和 `connect_timeout_seconds`（YAML `connectTimeoutSeconds`，0–60）；0 或缺省继承服务默认值。管理接口 `update_database` 支持局部更新两个字段，需要 `config.read` / `config.write` 和当前 revision；未传字段保持原值，传 0 恢复继承。`save_database` 完整保存同样校验范围与权限。返回的 `effective_query_timeout_seconds` 和 `effective_connect_timeout_seconds` 表示当前有效秒数。超时配置保存在 database.yml；新请求使用新快照，执行中的请求不变。
+
+服务默认值为 `QUERY_TIMEOUT` / `--query-timeout`（大于 0，至多 120s）和 `CONNECT_TIMEOUT` / `--connect-timeout`（大于 0，至多 60s）。连接时限包含初始连通性、只读事务及表目录检查；MySQL/OceanBase 与达梦的读取时限使用查询值，拨号时限使用连接值。查询时限覆盖连接池等待、执行与结果读取，前置权限检查独立计时，不等于整次请求的总上限。外层请求或客户端可更早取消。错误保留 context 取消/超时类型并说明发生阶段；不自动重试。长报表的异步提交与结果存储尚未提供。

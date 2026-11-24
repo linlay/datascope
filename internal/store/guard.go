@@ -4,12 +4,14 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"datascope-server/internal/sqlinspect"
 )
 
 // ErrStatementNotAllowed is returned for anything other than a single
-// SELECT / WITH / VALUES statement. The connection is also opened read-only,
+// SELECT / WITH / VALUES statement or supported diagnostic. The connection is also opened read-only,
 // so this check is a first line of defense, not the only one.
-var ErrStatementNotAllowed = errors.New("只允许执行单条只读 SELECT / WITH / VALUES 语句")
+var ErrStatementNotAllowed = errors.New("只允许单条只读 SELECT / WITH / VALUES、EXPLAIN SELECT 或受支持的结构查看命令")
 
 var allowedLeadingKeywords = map[string]bool{"SELECT": true, "WITH": true, "VALUES": true}
 
@@ -22,6 +24,11 @@ func NormalizeReadOnlySQL(sql string) (string, error) {
 	}
 	if strings.TrimSpace(stripComments(rest)) != "" {
 		return "", errors.New("不支持多条语句")
+	}
+	if c, e := sqlinspect.Parse(body); e != nil {
+		return "", e
+	} else if c != nil && c.Kind == "explain" {
+		return strings.TrimSpace(body), nil
 	}
 	keyword := leadingKeyword(body)
 	if !allowedLeadingKeywords[keyword] {
@@ -117,6 +124,11 @@ func NormalizeRawReadOnlySQL(query string) (string, error) {
 	}
 	if strings.TrimSpace(stripComments(rest)) != "" {
 		return "", errors.New("不支持多条语句")
+	}
+	if c, e := sqlinspect.Parse(body); e != nil {
+		return "", e
+	} else if c != nil {
+		return strings.TrimSpace(body), nil
 	}
 	if stmt, e := NormalizeReadOnlySQL(body); e == nil {
 		return stmt, nil

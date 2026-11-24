@@ -133,7 +133,7 @@ func SupportedDriver(driver string) bool {
 	return false
 }
 
-func OpenConnection(ctx context.Context, driver, path string, c *Connection, timeout time.Duration) (*Store, error) {
+func OpenConnection(ctx context.Context, driver, path string, c *Connection, timeout time.Duration, connectTimeouts ...time.Duration) (*Store, error) {
 	if err := ValidateConnection(driver, c); err != nil {
 		return nil, err
 	}
@@ -147,13 +147,14 @@ func OpenConnection(ctx context.Context, driver, path string, c *Connection, tim
 	if !ok || password == "" {
 		return nil, fmt.Errorf("服务端未配置密码环境变量 %s", c.PasswordEnv)
 	}
-	return OpenConnectionWithPassword(ctx, driver, path, c, password, timeout)
+	return OpenConnectionWithPassword(ctx, driver, path, c, password, timeout, connectTimeouts...)
 }
 
 // OpenConnectionWithPassword uses a request-scoped password. It never persists
 // it or includes it in connection errors. The reference is validated separately.
-func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Connection, password string, timeout time.Duration) (*Store, error) {
+func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Connection, password string, timeout time.Duration, connectTimeouts ...time.Duration) (out *Store, err error) {
 	defer requesttiming.Start(ctx, "connection_open")()
+	connectionTimeout := connectLimit(connectTimeouts)
 	if err := ValidateConnection(driver, c); err != nil {
 		return nil, err
 	}
@@ -173,7 +174,7 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	if timeout <= 0 {
 		timeout = DefaultQueryTimeout
 	}
-	driverName, dsn := connectionDSN(driver, *c, password, timeout)
+	driverName, dsn := connectionDSN(driver, *c, password, timeout, connectionTimeout)
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("%s 连接配置无效", driver)
@@ -181,8 +182,10 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(2)
 	db.SetConnMaxLifetime(5 * time.Minute)
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
 	defer cancel()
+	stage := "数据库连接初始化"
+	defer func() { err = OperationError(ctx, stage, connectionTimeout, err) }()
 	pingDone := requesttiming.Start(ctx, "connection_ping")
 	err = db.PingContext(ctx)
 	pingDone()
@@ -200,6 +203,7 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 	// Verify that a read-only session can actually be established. In particular,
 	// go-ora does not implement driver.TxOptions.ReadOnly; DM ignores errors
 	// from its session-readonly toggle. Both use a checked SQL transaction setup.
+	stage = "连接初始化：只读事务校验"
 	readonlyDone := requesttiming.Start(ctx, "connection_readonly")
 	tx, err := s.beginReadOnly(ctx)
 	if err != nil {
@@ -213,6 +217,7 @@ func OpenConnectionWithPassword(ctx context.Context, driver, path string, c *Con
 		db.Close()
 		return nil, fmt.Errorf("%s 无法结束只读事务", driver)
 	}
+	stage = "连接初始化：表目录读取"
 	namesDone := requesttiming.Start(ctx, "connection_table_names")
 	_, err = s.TableNames(ctx)
 	namesDone()
@@ -235,7 +240,8 @@ func validateOceanBaseMode(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-func connectionDSN(driver string, c Connection, password string, timeout time.Duration) (string, string) {
+func connectionDSN(driver string, c Connection, password string, timeout time.Duration, connectTimeouts ...time.Duration) (string, string) {
+	connectionTimeout := connectLimit(connectTimeouts)
 	address := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 	switch dialect.Family(driver) {
 	case "mysql":
@@ -245,7 +251,7 @@ func connectionDSN(driver string, c Connection, password string, timeout time.Du
 		cfg.Net = "tcp"
 		cfg.Addr = address
 		cfg.DBName = c.Database
-		cfg.Timeout = timeout
+		cfg.Timeout = connectionTimeout
 		cfg.ReadTimeout = timeout
 		cfg.WriteTimeout = timeout
 		cfg.ParseTime = true
@@ -264,18 +270,18 @@ func connectionDSN(driver string, c Connection, password string, timeout time.Du
 			mode = "verify-full"
 		}
 		q.Set("sslmode", mode)
-		q.Set("connect_timeout", strconv.Itoa(max(1, int(timeout.Seconds()))))
+		q.Set("connect_timeout", strconv.Itoa(max(1, int(connectionTimeout.Seconds()))))
 		q.Set("default_transaction_read_only", "on")
 		q.Set("search_path", "pg_catalog")
 		u.RawQuery = q.Encode()
 		return "pgx", u.String()
 	case "oracle":
-		return "oracle", ora.BuildUrl(c.Host, c.Port, c.ServiceName, c.Username, password, map[string]string{"CONNECTION TIMEOUT": strconv.Itoa(max(1, int(timeout.Seconds())))})
+		return "oracle", ora.BuildUrl(c.Host, c.Port, c.ServiceName, c.Username, password, map[string]string{"CONNECTION TIMEOUT": strconv.Itoa(max(1, int(connectionTimeout.Seconds())))})
 	default:
 		u := url.URL{Scheme: "dm", User: url.UserPassword(c.Username, password), Host: address}
 		q := url.Values{}
 		q.Set("schema", c.Schema)
-		q.Set("connectTimeout", strconv.FormatInt(timeout.Milliseconds(), 10))
+		q.Set("connectTimeout", strconv.FormatInt(connectionTimeout.Milliseconds(), 10))
 		q.Set("socketTimeout", strconv.Itoa(max(1, int(timeout.Seconds()))))
 		q.Set("logLevel", "off")
 		u.RawQuery = q.Encode()

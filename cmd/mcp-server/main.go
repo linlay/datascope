@@ -40,6 +40,7 @@ func run() error {
 	addr := flag.String("addr", envflag.String("SERVER_ADDR", "127.0.0.1:8080"), "HTTP 监听地址")
 	path := flag.String("path", envflag.String("MCP_PATH", "/mcp"), "MCP HTTP 端点路径")
 	stateless := flag.Bool("stateless", envflag.Bool("MCP_STATELESS", true), "HTTP 无状态模式（不使用 Mcp-Session-Id）")
+	connectTimeout := flag.Duration("connect-timeout", envflag.Duration("CONNECT_TIMEOUT", store.DefaultConnectTimeout), "数据库连接初始化超时（不含查询执行）")
 	queryTimeout := flag.Duration("query-timeout", envflag.Duration("QUERY_TIMEOUT", store.DefaultQueryTimeout), "单条查询超时")
 	userHeader := flag.String("user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "网关传入可信用户编号的请求头")
 	defaultUserID := flag.Int64("default-user-id", envflag.Int64("MCP_DEFAULT_USER_ID", 0), "请求头缺失时使用的用户编号（stdio 或本地调试）；0 表示拒绝")
@@ -50,6 +51,12 @@ func run() error {
 	issuer := envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081")
 	resource := envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")
 	flag.Parse()
+	if *queryTimeout <= 0 || *queryTimeout > 120*time.Second {
+		return fmt.Errorf("query-timeout 必须大于 0 且不超过 120s")
+	}
+	if *connectTimeout <= 0 || *connectTimeout > 60*time.Second {
+		return fmt.Errorf("connect-timeout 必须大于 0 且不超过 60s")
+	}
 	if authMode != "oauth" && authMode != "header" && authMode != "none" {
 		return fmt.Errorf("invalid MCP_AUTH_MODE %q", authMode)
 	}
@@ -87,6 +94,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	catalogue.ConnectionTimeout = *connectTimeout
 	defer catalogue.CloseQueryCache()
 
 	app := &application.Service{ManagementMCPURL: strings.TrimRight(envflag.String("OAUTH_ISSUER", "http://127.0.0.1:8081"), "/") + "/mcp/admin", Management: manager, Catalog: catalogue, MCPBase: envflag.String("MCP_RESOURCE_URL", "http://127.0.0.1:8080/mcp")}

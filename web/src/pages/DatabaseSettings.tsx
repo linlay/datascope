@@ -1,5 +1,6 @@
 import { DatabaseDocumentation, DatabaseDocumentationSettings } from '../components/DatabaseDocumentation';
 import { SchemaScopeSettings } from '../components/SchemaScopeSettings';
+import { DatabaseTimeoutSettings } from '../components/DatabaseTimeoutSettings';
 import { EditConnection } from '../components/EditConnection';
 import { DatabaseIcon } from '../components/DatabaseIcon';
 import { SaveButton } from '../components/IconButton';
@@ -79,6 +80,7 @@ export function DatabaseSettings({ db, onSaved, onRemoved }: { db?: Database; on
     </Space>
    </Card>
    {connection&&<SchemaScopeSettings db={db} onSaved={onSaved} disabled={!can('config.write')}/> }
+   <DatabaseTimeoutSettings db={db} onSaved={onSaved} disabled={!can('config.write')} />
    <DatabaseAuthentication db={db} onSaved={onSaved} />
    {user.system_admin && <div className="database-removal-footer"><Button danger disabled={busy} onClick={() => { setRemoveError(undefined); setRemoveOpen(true); }}>{t('移除数据源')}</Button></div>}
    <Modal title={t('移除数据源')} open={removeOpen} confirmLoading={busy} okButtonProps={{ danger: true }} okText={t('确认移除')} onOk={() => void remove()} onCancel={() => { if (!busy) setRemoveOpen(false); }}>

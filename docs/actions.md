@@ -14,6 +14,8 @@ Action 通过 API 保持数据库配置中的 `actions` 数组契约，实际保
 
 在「开放工具」启用 `list_actions`、`describe_action`、`invoke_action`，并为当前数据库的业务账号授予 `action`。业务账号可以只有 `action`，与 `query` 并列；该账号不能登录管理后台。`my.*` 始终应用数据库已有查询策略，不需要额外授予业务账号通用查询工具。
 
+数据库的连接超时也用于建立动作写连接；增大查询超时不会延长 Action 自身的脚本/事务执行时限。动作脚本接口和事务回滚规则保持不变。
+
 ## qiuer 风格脚本
 
 新 Action 参照 qiuer-go 正式业务 JS 契约：入口为 `main(params, context)`，公共库使用 CommonJS，相对 `require` 只解析当前数据库的公共库。DataScope 仍使用自身的 Goja 执行器与事务管理，不需要部署 qiuer 服务；开放的是受限的 Action API，并非 qiuer 全部宿主能力。

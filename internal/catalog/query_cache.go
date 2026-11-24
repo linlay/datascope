@@ -38,10 +38,11 @@ func (c *Catalog) AcquireQuery(ctx context.Context, d *Database) (*service.Query
 		snapshot.Discovery = &discovery
 	}
 	raw, err := json.Marshal(struct {
-		Database *Database
-		AsOf     time.Time
-		Timeout  time.Duration
-	}{&snapshot, c.AsOf, c.Timeout})
+		Database       *Database
+		AsOf           time.Time
+		Timeout        time.Duration
+		ConnectTimeout time.Duration
+	}{&snapshot, c.AsOf, c.Timeout, c.ConnectionTimeout})
 	if err != nil {
 		return nil, nil, false, err
 	}

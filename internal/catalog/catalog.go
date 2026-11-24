@@ -43,6 +43,8 @@ type SQLExample struct {
 }
 
 type Database struct {
+	QueryTimeoutSeconds    *int                `json:"query_timeout_seconds,omitempty" yaml:"queryTimeoutSeconds,omitempty"`
+	ConnectTimeoutSeconds  *int                `json:"connect_timeout_seconds,omitempty" yaml:"connectTimeoutSeconds,omitempty"`
 	ViewsEnabled           *bool               `json:"views_enabled,omitempty" yaml:"viewsEnabled,omitempty"`
 	Description            *string             `json:"description,omitempty" yaml:"description,omitempty"`
 	Documentation          *string             `json:"documentation,omitempty" yaml:"documentation,omitempty"`
@@ -73,18 +75,19 @@ type Database struct {
 	ETag                   string              `json:"etag,omitempty" yaml:"-"`
 }
 type Catalog struct {
-	Management     *management.Store
-	Audit          *audit.Store
-	Path           string
-	Timeout        time.Duration
-	AsOf           time.Time
-	scanMu         sync.Mutex
-	runtimeMu      sync.Mutex
-	discoveryState map[string]*discoveryRuntime
-	mu             sync.Mutex
-	queryMu        sync.Mutex
-	queryServices  map[string]*queryEntry
-	queryClosed    bool
+	ConnectionTimeout time.Duration
+	Management        *management.Store
+	Audit             *audit.Store
+	Path              string
+	Timeout           time.Duration
+	AsOf              time.Time
+	scanMu            sync.Mutex
+	runtimeMu         sync.Mutex
+	discoveryState    map[string]*discoveryRuntime
+	mu                sync.Mutex
+	queryMu           sync.Mutex
+	queryServices     map[string]*queryEntry
+	queryClosed       bool
 }
 
 // Bootstrap imports legacy JSON or the initial rewrite rules only once.
@@ -413,6 +416,9 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	if d.Authentication == nil && c.Management != nil {
 		d.Authentication = &Authentication{Type: "local", Label: d.Name + "业务账号"}
 	}
+	if err := d.ValidateTimeouts(); err != nil {
+		return err
+	}
 	if err := d.ValidateAuthentication(); err != nil {
 		return err
 	}
@@ -442,9 +448,9 @@ func (c *Catalog) addDatabase(ctx context.Context, d Database, password string) 
 	var st *store.Store
 	var err error
 	if password != "" {
-		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.Timeout)
+		st, err = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, password, c.QueryTimeout(&d), c.ConnectTimeout(&d))
 	} else {
-		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.Timeout)
+		st, err = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, c.QueryTimeout(&d), c.ConnectTimeout(&d))
 	}
 	if err != nil {
 		return err
@@ -541,6 +547,9 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 		}
 		credentials = append(credentials, sealed)
 	}
+	if err := d.ValidateTimeouts(); err != nil {
+		return err
+	}
 	if err := d.ValidateAuthentication(); err != nil {
 		return err
 	}
@@ -587,6 +596,7 @@ func (c *Catalog) SaveWithWritePassword(ctx context.Context, d Database, passwor
 				metadataOnly := old
 				metadataOnly.Name, metadataOnly.DDLEnabled = d.Name, d.DDLEnabled
 				metadataOnly.Description, metadataOnly.Documentation = d.Description, d.Documentation
+				metadataOnly.QueryTimeoutSeconds, metadataOnly.ConnectTimeoutSeconds = d.QueryTimeoutSeconds, d.ConnectTimeoutSeconds
 				metadataOnly.KnowledgeEnabled, metadataOnly.ViewsEnabled = d.KnowledgeEnabled, d.ViewsEnabled
 				metadataOnly.AuthPolicyFingerprint, metadataOnly.ETag = d.AuthPolicyFingerprint, d.ETag
 				if !reflect.DeepEqual(metadataOnly, d) {
@@ -643,6 +653,9 @@ func (c *Catalog) updateContext(ctx context.Context, action, database string, fn
 	files := map[string][]byte{}
 	routes := map[string]bool{}
 	for _, item := range items {
+		if e := item.ValidateTimeouts(); e != nil {
+			return e
+		}
 		if !validID.MatchString(item.ID) {
 			return fmt.Errorf("无效数据库 ID %q", item.ID)
 		}

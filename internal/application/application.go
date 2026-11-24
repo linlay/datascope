@@ -433,8 +433,14 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		case "update_database":
 			if in.Database.Name != "" {
 				d.Name = in.Database.Name
-			} else if in.Database.DDLEnabled == nil && in.Database.Description == nil && in.Database.Documentation == nil {
-				return nil, errors.New("需要数据库名称、简介、使用说明或 ddl_enabled")
+			} else if in.Database.DDLEnabled == nil && in.Database.Description == nil && in.Database.Documentation == nil && in.Database.QueryTimeoutSeconds == nil && in.Database.ConnectTimeoutSeconds == nil {
+				return nil, errors.New("需要数据库名称、简介、使用说明、超时设置或 ddl_enabled")
+			}
+			if in.Database.QueryTimeoutSeconds != nil {
+				d.QueryTimeoutSeconds = in.Database.QueryTimeoutSeconds
+			}
+			if in.Database.ConnectTimeoutSeconds != nil {
+				d.ConnectTimeoutSeconds = in.Database.ConnectTimeoutSeconds
 			}
 			if in.Database.Description != nil {
 				d.Description = in.Database.Description
@@ -540,6 +546,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 			return nil, errors.New("需要 database 参数")
 		}
 		d := *in.Database
+		if e := d.ValidateTimeouts(); e != nil {
+			return nil, e
+		}
 		d.Connection = store.ConnectionDefaults(d.Driver, d.Connection)
 		if in.Password != "" {
 			if d.Driver == "sqlite" || d.Connection == nil {
@@ -558,9 +567,9 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		var st *store.Store
 		var e error
 		if in.Password != "" {
-			st, e = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, in.Password, s.Catalog.Timeout)
+			st, e = store.OpenConnectionWithPassword(ctx, d.Driver, d.Path, d.Connection, in.Password, s.Catalog.QueryTimeout(&d), s.Catalog.ConnectTimeout(&d))
 		} else {
-			st, e = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.Timeout)
+			st, e = store.OpenConnection(ctx, d.Driver, d.Path, d.Connection, s.Catalog.QueryTimeout(&d), s.Catalog.ConnectTimeout(&d))
 		}
 		if e != nil {
 			return nil, e
@@ -626,7 +635,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if !reflect.DeepEqual(old.Authentication, in.Database.Authentication) && !u.SystemAdmin {
 			return nil, management.ErrDenied
 		}
-		if old.Name != in.Database.Name || !reflect.DeepEqual(old.Description, in.Database.Description) || !reflect.DeepEqual(old.Documentation, in.Database.Documentation) || !reflect.DeepEqual(old.Connection, in.Database.Connection) || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
+		if !reflect.DeepEqual(old.QueryTimeoutSeconds, in.Database.QueryTimeoutSeconds) || !reflect.DeepEqual(old.ConnectTimeoutSeconds, in.Database.ConnectTimeoutSeconds) || old.Name != in.Database.Name || !reflect.DeepEqual(old.Description, in.Database.Description) || !reflect.DeepEqual(old.Documentation, in.Database.Documentation) || !reflect.DeepEqual(old.Connection, in.Database.Connection) || !reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) {
 			if e := require("config.write"); e != nil {
 				return nil, e
 			}
@@ -644,7 +653,7 @@ func (s *Service) Call(ctx context.Context, action string, in Input) (out any, e
 		if e := require("config.read"); e != nil {
 			return nil, e
 		}
-		if !maskingChanged && reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && reflect.DeepEqual(old.ViewsEnabled, in.Database.ViewsEnabled) && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.Description, in.Database.Description) && reflect.DeepEqual(old.Documentation, in.Database.Documentation) && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
+		if !maskingChanged && reflect.DeepEqual(old.QueryTimeoutSeconds, in.Database.QueryTimeoutSeconds) && reflect.DeepEqual(old.ConnectTimeoutSeconds, in.Database.ConnectTimeoutSeconds) && reflect.DeepEqual(old.DDLEnabled, in.Database.DDLEnabled) && reflect.DeepEqual(old.Views, in.Database.Views) && old.QueryViewID == in.Database.QueryViewID && reflect.DeepEqual(old.ViewsEnabled, in.Database.ViewsEnabled) && in.WritePassword == "" && reflect.DeepEqual(old.Actions, in.Database.Actions) && reflect.DeepEqual(old.ActionLibraries, in.Database.ActionLibraries) && old.WriteEnabled == in.Database.WriteEnabled && reflect.DeepEqual(old.WriteConnection, in.Database.WriteConnection) && reflect.DeepEqual(old.Authentication, in.Database.Authentication) && reflect.DeepEqual(old.Connection, in.Database.Connection) && old.Name == in.Database.Name && reflect.DeepEqual(old.Description, in.Database.Description) && reflect.DeepEqual(old.Documentation, in.Database.Documentation) && reflect.DeepEqual(old.SQLExamples, in.Database.SQLExamples) && reflect.DeepEqual(old.Config, in.Database.Config) && reflect.DeepEqual(old.KnowledgeEnabled, in.Database.KnowledgeEnabled) && old.MCPEnabled == in.Database.MCPEnabled && old.MCPPath == in.Database.MCPPath && reflect.DeepEqual(old.Tools, in.Database.Tools) {
 			return s.DatabaseView(ctx, *old), nil
 		}
 		if e := s.Catalog.SaveWithWritePassword(ctx, *in.Database, in.WritePassword); e != nil {
@@ -838,12 +847,14 @@ func (s *Service) readKnowledge(ctx context.Context, in Input, full, drafts bool
 }
 
 type DatabaseView struct {
-	Capabilities   map[string]bool          `json:"capabilities"`
-	SchemaEditable bool                     `json:"schema_editable"`
-	ManagementPath string                   `json:"management_path,omitempty"`
-	AuditPath      string                   `json:"audit_path,omitempty"`
-	Access         *management.ResolvedAuth `json:"access,omitempty"`
-	MCPEndpoint    string                   `json:"mcp_endpoint"`
+	EffectiveQueryTimeoutSeconds   float64                  `json:"effective_query_timeout_seconds"`
+	EffectiveConnectTimeoutSeconds float64                  `json:"effective_connect_timeout_seconds"`
+	Capabilities                   map[string]bool          `json:"capabilities"`
+	SchemaEditable                 bool                     `json:"schema_editable"`
+	ManagementPath                 string                   `json:"management_path,omitempty"`
+	AuditPath                      string                   `json:"audit_path,omitempty"`
+	Access                         *management.ResolvedAuth `json:"access,omitempty"`
+	MCPEndpoint                    string                   `json:"mcp_endpoint"`
 	catalog.Database
 	Permissions    []string `json:"permissions"`
 	BusinessUserID int64    `json:"business_user_id"`
@@ -873,7 +884,7 @@ func (s *Service) DatabaseView(ctx context.Context, d catalog.Database) Database
 		d.WriteEnabled = false
 		d.Tools = nil
 	}
-	view := DatabaseView{Capabilities: capabilities, SchemaEditable: s.Management.Can(ctx, u.ID, d.ID, "ddl.write") && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
+	view := DatabaseView{EffectiveQueryTimeoutSeconds: s.Catalog.QueryTimeout(&d).Seconds(), EffectiveConnectTimeoutSeconds: s.Catalog.ConnectTimeout(&d).Seconds(), Capabilities: capabilities, SchemaEditable: s.Management.Can(ctx, u.ID, d.ID, "ddl.write") && s.Catalog.CanEditSchema(&d), MCPEndpoint: strings.TrimRight(s.MCPBase, "/") + "/" + d.MCPRoute(), Database: d, Permissions: p, BusinessUserID: g.BusinessUserID}
 	if s.Management.Can(ctx, u.ID, d.ID, "config.read") {
 		if source, e := s.Management.Source(ctx, d.ID); e == nil {
 			view.ManagementPath = source.Path

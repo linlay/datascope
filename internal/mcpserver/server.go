@@ -129,7 +129,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:  "query",
 		Title: "执行 SQL（按权限改写）",
-		Description: fmt.Sprintf("执行单条 SELECT（%s）。服务端会按当前用户权限把 FROM / JOIN 中的每张表改写为带权限的子查询，"+
+		Description: fmt.Sprintf("执行单条 SELECT（%s）、EXPLAIN SELECT 或结构查看 SHOW TABLES / SHOW COLUMNS/INDEX FROM 表名 / DESCRIBE 表名。结构查看按表和字段开放配置过滤；EXPLAIN 解释权限改写后的查询，不支持 ANALYZE。服务端会按当前用户权限把 FROM / JOIN 中的每张表改写为带权限的子查询，"+
 			"结果只包含该用户可见的数据。不支持写操作、多语句、表值函数和 “IN 表名” 写法。默认最多返回 %d 行，全局上限 %d 行，另受表级策略限制；effective_max_rows、limit_source 和 limiting_tables 解释实际限制。"+
 			"仅需汇总时优先使用 SUM/COUNT/MIN/MAX/AVG 与 GROUP BY，避免下载明细。明细分页使用稳定唯一排序键和 arg_ 参数续页；未设置 SQL LIMIT 时可用 truncated 判断是否还有结果。",
 			dialectLabel, store.DefaultMaxRows, store.HardMaxRows),
@@ -140,7 +140,7 @@ func New(svc *service.QueryService, opts Options) *mcp.Server {
 		mcp.AddTool(server, &mcp.Tool{
 			Name:  "raw_query",
 			Title: "原始 SQL（调试）",
-			Description: "全量只读查询：不做权限改写，仅允许单条查询或结构查看 PRAGMA。" +
+			Description: "全量只读查询：不做权限改写，支持单条查询、EXPLAIN SELECT、SHOW TABLES、SHOW COLUMNS/INDEX FROM 表名、DESCRIBE 表名或结构查看 PRAGMA。结构查看返回平台统一元数据，不支持 ANALYZE 或其他 SHOW 子命令。" +
 				"需要全量查询授权；旧员工模式仅管理员可调用，OAuth 还需 sql:debug。",
 			Annotations: readOnly("原始 SQL（调试）"),
 		}, h.rawQuery)
@@ -285,7 +285,7 @@ func (h handlers) describeTable(ctx context.Context, _ *mcp.CallToolRequest, in 
 
 type queryInput struct {
 	ViewID     string         `json:"view_id,omitempty" jsonschema:"可选已发布视图标识，省略时使用数据库默认查询视图，仅影响展示"`
-	SQL        string         `json:"sql" jsonschema:"单条 SELECT，使用服务器 Instructions 声明的方言，无需添加权限过滤"`
+	SQL        string         `json:"sql" jsonschema:"单条 SELECT、EXPLAIN SELECT 或 SHOW TABLES / SHOW COLUMNS/INDEX FROM 表名 / DESCRIBE 表名，无需添加权限过滤"`
 	MaxRows    int            `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，全局上限 1000，另受表级策略限制；实际限制见 effective_max_rows 和 limit_source"`
 	Parameters map[string]any `json:"parameters,omitempty" jsonschema:"可选绑定参数，键使用 arg_ 前缀，例如 SQL 中 :arg_name 对应 parameters.arg_name；身份参数由服务端提供"`
 }
@@ -342,7 +342,7 @@ func (h handlers) query(ctx context.Context, req *mcp.CallToolRequest, in queryI
 
 type rawQueryInput struct {
 	Parameters map[string]any `json:"parameters,omitempty"`
-	SQL        string         `json:"sql" jsonschema:"单条只读 SELECT / WITH / VALUES 或允许的结构查看 PRAGMA，按原样执行，不做权限改写"`
+	SQL        string         `json:"sql" jsonschema:"单条只读 SELECT / WITH / VALUES、EXPLAIN SELECT、受支持的 SHOW / DESCRIBE 或结构查看 PRAGMA；不做行权限改写，结构查看返回统一元数据"`
 	MaxRows    int            `json:"max_rows,omitempty" jsonschema:"最多返回的行数，默认 200，上限 1000"`
 }
 

@@ -14,6 +14,7 @@ import (
 	"datascope-server/internal/management"
 	"datascope-server/internal/queryparams"
 	"datascope-server/internal/rewrite"
+	"datascope-server/internal/sqlinspect"
 	"datascope-server/internal/store"
 )
 
@@ -133,6 +134,7 @@ func namedArgs(values map[string]any, names []string) []any {
 
 // Rewritten is a rewritten statement plus the bind values for one user.
 type Rewritten struct {
+	diagnostic     *sqlinspect.Command
 	OriginalSQL    string `json:"-"`
 	BusinessUserID int64  `json:"-"`
 	*rewrite.Result
@@ -169,7 +171,28 @@ func (s *QueryService) RewriteWithParameters(ctx context.Context, query string, 
 	for name := range parameters {
 		names = append(names, name)
 	}
-	res, err := s.Rewriter.RewriteWithParameters(query, names)
+	inner := query
+	diagnostic, e := sqlinspect.Parse(query)
+	if e != nil {
+		return nil, e
+	}
+	if diagnostic != nil {
+		if diagnostic.Kind != "explain" {
+			if diagnostic.Kind != "tables" {
+				name := diagnostic.Table
+				if s.Store.Driver() != "sqlite" && !strings.Contains(name, ".") {
+					name = s.Store.DefaultSchema() + "." + name
+				}
+				pol, ok := s.Config().Lookup(name)
+				if !ok || (pol.Enabled != nil && !*pol.Enabled) {
+					return nil, &rewrite.DeniedError{Reason: "表不可访问"}
+				}
+			}
+			return &Rewritten{BusinessUserID: userID, OriginalSQL: query, Result: &rewrite.Result{RewrittenSQL: query}, diagnostic: diagnostic}, nil
+		}
+		inner = diagnostic.Query
+	}
+	res, err := s.Rewriter.RewriteWithParameters(inner, names)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +218,9 @@ func (s *QueryService) RewriteWithParameters(ctx context.Context, query string, 
 	binds := make(map[string]any, len(res.Params))
 	for _, name := range res.Params {
 		binds[name] = values[name]
+	}
+	if diagnostic != nil {
+		res.RewrittenSQL = diagnostic.Prefix + res.RewrittenSQL
 	}
 	return &Rewritten{BusinessUserID: userID, OriginalSQL: query, Result: res, Binds: binds, args: namedArgs(values, res.Params)}, nil
 }
@@ -240,6 +266,15 @@ func (s *QueryService) Execute(ctx context.Context, r *Rewritten, maxRows int) (
 	m.PolicyVersion = s.PolicyVersion
 	ctx = audit.With(ctx, m)
 	ctx = audit.WithSQL(ctx, r.OriginalSQL, r.RewrittenSQL)
+	if r.diagnostic != nil {
+		visible := map[string][]string{}
+		for _, pol := range s.Config().Tables {
+			if pol.Enabled == nil || *pol.Enabled {
+				visible[strings.ToLower(pol.Table)] = pol.Columns
+			}
+		}
+		return s.Store.InspectMetadata(ctx, r.OriginalSQL, r.diagnostic, visible, requested)
+	}
 	result, err := s.Store.Query(ctx, r.RewrittenSQL, maxRows, r.args...)
 	if err == nil {
 		result.SetRowLimit(requested)

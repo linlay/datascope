@@ -98,6 +98,9 @@ func (c *Catalog) updateManaged(ctx context.Context, action, database string, fn
 		routes := map[string]bool{}
 		out := []management.Record{}
 		for _, d := range items {
+			if e := d.ValidateTimeouts(); e != nil {
+				return nil, e
+			}
 			if !validID.MatchString(d.ID) || !validID.MatchString(d.MCPRoute()) || routes[d.MCPRoute()] || d.MCPRoute() == "admin" {
 				return nil, fmt.Errorf("数据库 ID 或 MCP 路径无效、重复或保留")
 			}

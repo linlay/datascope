@@ -43,10 +43,17 @@ func run() error {
 	mcpURL := flag.String("mcp-url", envflag.String("MCP_SERVER_URL", "http://127.0.0.1:8080/mcp"), "被检查的 MCP server 端点")
 	fixtures := flag.String("fixtures-dir", envflag.String("FIXTURES_DIR", ""), "权限与改写验收案例目录，用于校验 MCP")
 	userHeader := flag.String("mcp-user-header", envflag.String("MCP_USER_HEADER", mcpserver.DefaultUserHeader), "MCP server 信任的用户身份请求头")
+	connectTimeout := flag.Duration("connect-timeout", envflag.Duration("CONNECT_TIMEOUT", store.DefaultConnectTimeout), "数据库连接初始化超时（不含查询执行）")
 	queryTimeout := flag.Duration("query-timeout", envflag.Duration("QUERY_TIMEOUT", store.DefaultQueryTimeout), "单条查询超时")
 	rewriteConfig := flag.String("rewrite-config", envflag.String("REWRITE_CONFIG", ""), "SQL 改写规则配置文件")
 	asOf := flag.String("as-of", envflag.String("REWRITE_AS_OF", store.DefaultAsOf.Format(time.RFC3339)), "授权过期判断的参考时间（RFC 3339），需与 MCP server 一致")
 	flag.Parse()
+	if *queryTimeout <= 0 || *queryTimeout > 120*time.Second {
+		return fmt.Errorf("query-timeout 必须大于 0 且不超过 120s")
+	}
+	if *connectTimeout <= 0 || *connectTimeout > 60*time.Second {
+		return fmt.Errorf("connect-timeout 必须大于 0 且不超过 60s")
+	}
 	asOfTime, err := time.Parse(time.RFC3339, *asOf)
 	if err != nil {
 		return fmt.Errorf("-as-of: %w", err)
@@ -74,6 +81,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	catalogue.ConnectionTimeout = *connectTimeout
 	defer catalogue.CloseQueryCache()
 
 	inspector := &adminapi.Inspector{

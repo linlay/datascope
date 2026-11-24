@@ -1287,4 +1287,12 @@ export const english: Record<string,string> = {
   "Schema 范围只限定候选表。请到查询管理选择登记表并配置开放权限。移除 Schema 将移除其已登记表和查询策略。": "Schema scope limits candidate discovery. Select tables and configure access in Query Management. Removing a schema removes its registered tables and query policies.",
   "测试连接后选择，或手动填写。未指定范围时，有默认 Schema 则仅登记该 Schema；否则登记当前可发现的 Schema。": "Select schemas after testing the connection, or enter names. If omitted, only the default schema is included; without a default, currently discoverable schemas are included.",
   "网络数据源先登记 Schema 范围，再到查询配置选择表并配置开放权限；SQLite 自动发现表结构。": "For network sources, configure schema scope, then select tables and grant access in Query Configuration. SQLite discovers table structure automatically.",
+  "超时设置": "Timeout settings",
+  "超时设置已保存": "Timeout settings saved",
+  "填 0 继承服务默认值。查询支持 1–120 秒，连接支持 1–60 秒。保存后新请求生效。": "Enter 0 to inherit service defaults. Queries allow 1–120 seconds; connections allow 1–60 seconds. Changes apply to new requests.",
+  "当前查询上限：{0} 秒": "Current query limit: {0} seconds",
+  "当前连接上限：{0} 秒": "Current connection limit: {0} seconds",
+  "查询超时（秒）": "Query timeout (seconds)",
+  "连接超时（秒）": "Connection timeout (seconds)",
+  "请输入范围内的整数秒数": "Enter an integer number of seconds within the range",
 };
