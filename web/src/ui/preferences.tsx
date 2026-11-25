@@ -36,6 +36,18 @@ function buildTheme(dark: boolean, touch: boolean): ThemeConfig {
  const primary=dark?'#499cff':'#007aff';
  const glass=dark?'rgba(35,41,47,.62)':'rgba(255,255,255,.62)';
  const raised=dark?'rgba(33,40,47,.90)':'rgba(255,255,255,.88)';
+ const fieldBorders = {
+  colorBorder:'var(--color-border-soft)',
+  hoverBorderColor:'var(--field-hover-border, var(--color-border-control))',
+  activeBorderColor:'var(--color-primary-border)',
+  colorError:'var(--danger)', colorErrorBorderHover:'var(--danger)',
+ };
+ const textField = {
+  ...fieldBorders,
+  hoverBg:'var(--field-background, var(--glass-hover))',
+  activeBg:'var(--field-background, var(--glass-field))',
+  activeShadow:'none', errorActiveShadow:'none', warningActiveShadow:'none',
+ };
  return {
   algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
   token: {
@@ -49,10 +61,13 @@ function buildTheme(dark: boolean, touch: boolean): ThemeConfig {
    Layout:{headerBg:glass,headerHeight:52,siderBg:glass},
    Menu:{itemBg:'transparent',darkItemBg:'transparent',darkSubMenuItemBg:'transparent',itemHeight:touch?44:36,itemBorderRadius:6},
    Button:{controlHeight:touch?44:28,controlHeightSM:touch?44:28,paddingInline:8,paddingInlineSM:8,fontWeight:500,primaryShadow:'none',defaultShadow:'none',dangerShadow:'none'},
-   Input:{activeShadow:'none',errorActiveShadow:'none',paddingInline:10},
-   InputNumber:{activeShadow:'none',errorActiveShadow:'none'},
-   Select:{optionHeight:touch?44:28,optionPadding:'4px 8px',activeOutlineColor:'transparent'},
-   DatePicker:{activeShadow:'none',errorActiveShadow:'none',cellHeight:touch?44:32},
+   Input:{...textField,paddingInline:10},
+   InputNumber:textField,
+   Select:{
+    ...fieldBorders,selectorBg:'var(--glass-field)',optionHeight:touch?44:28,optionPadding:'4px 8px',
+    activeOutlineColor:'transparent',colorErrorOutline:'transparent',colorWarningOutline:'transparent',
+   },
+   DatePicker:{...textField,cellHeight:touch?44:32},
    Form:{itemMarginBottom:12,verticalLabelPadding:'0 0 4px'},
    Card:{headerHeight:44,headerHeightSM:40,paddingLG:16,headerFontSize:15,headerFontSizeSM:15},
    Modal:{padding:16,paddingContentHorizontalLG:16},
