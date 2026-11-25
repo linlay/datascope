@@ -435,7 +435,10 @@ func (in *Inspector) Verify(ctx context.Context) (*Report, error) {
 		if m, ok := actual.(map[string]any); ok {
 			rows = map[string]any{"columns": m["columns"], "rows": m["rows"], "row_count": m["row_count"], "truncated": m["truncated"]}
 		}
-		report.compare("权限改写", "超级管理员 query = 原始数据："+q.Name, expected, rows, err, fmt.Sprintf("%d 行一致", expected.RowCount))
+		expectedRows := map[string]any{
+			"columns": expected.Columns, "rows": expected.Rows, "row_count": expected.RowCount, "truncated": expected.Truncated,
+		}
+		report.compare("权限改写", "超级管理员 query = 原始数据："+q.Name, expectedRows, rows, err, fmt.Sprintf("%d 行一致", expected.RowCount))
 	}
 
 	if err := in.verifyRewriteCases(ss, report, profile); err != nil {

@@ -150,7 +150,7 @@ func (s *Store) localSearch(ctx context.Context, f Filter, facets bool) (*Page, 
 		where = append(where, durationSQL+">=?")
 		args = append(args, *f.MinDurationMS)
 	}
-	order := "julianday(STARTED_AT_) DESC,ID_ DESC"
+	order := "datascope_audit_time_sort_key(STARTED_AT_) DESC,ID_ DESC"
 	if f.Sort == "duration_desc" || f.Sort == "duration_asc" {
 		direction := "DESC"
 		if f.Sort == "duration_asc" {
@@ -297,8 +297,8 @@ func (s *Store) search(ctx context.Context, f Filter, facets bool) (*Page, error
 			}
 			return strings.Compare(b.ID, a.ID)
 		}
-		if a.StartedAt != b.StartedAt {
-			return strings.Compare(b.StartedAt, a.StartedAt)
+		if order := strings.Compare(timestampSortKey(b.StartedAt), timestampSortKey(a.StartedAt)); order != 0 {
+			return order
 		}
 		return strings.Compare(b.ID, a.ID)
 	})

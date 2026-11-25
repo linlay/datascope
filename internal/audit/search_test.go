@@ -71,3 +71,44 @@ func TestAuditFiltersCountsAndPaginationUseSameScope(t *testing.T) {
 		t.Fatal("timezone-aware filter failed", err)
 	}
 }
+
+func TestNewestAuditOrderUsesFullTimestamp(t *testing.T) {
+	platform, err := Open(filepath.Join(t.TempDir(), "platform.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer platform.Close()
+	database, err := Open(filepath.Join(t.TempDir(), "database.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	for s, events := range map[*Store][]Event{
+		platform: {
+			{ID: "z-earlier", StartedAt: "2026-11-24T10:00:00Z"},
+			{ID: "a-later", StartedAt: "2026-11-24T10:00:00.000000100Z"},
+		},
+		database: {
+			{ID: "b-newest", StartedAt: "2026-11-24T02:00:00.000000200-08:00"},
+		},
+	} {
+		for _, event := range events {
+			if err := s.Put(t.Context(), event); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	page, err := platform.Search(t.Context(), Filter{Limit: 1})
+	if err != nil || page.Total != 2 || len(page.Items) != 1 || page.Items[0].ID != "a-later" {
+		t.Fatalf("newest local event: %+v, %v", page, err)
+	}
+
+	platform.Sources = func() []*Store { return []*Store{database} }
+	for offset, want := range []string{"b-newest", "a-later", "z-earlier"} {
+		page, err := platform.Search(t.Context(), Filter{Sort: "time_desc", Limit: 1, Offset: offset})
+		if err != nil || page.Total != 3 || len(page.Items) != 1 || page.Items[0].ID != want {
+			t.Fatalf("merged page at offset %d, want %s: %+v, %v", offset, want, page, err)
+		}
+	}
+}

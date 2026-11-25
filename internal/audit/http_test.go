@@ -26,11 +26,14 @@ func TestMCPRequestAuditIdentityAndArguments(t *testing.T) {
 	for _, authenticated := range []bool{true, false} {
 		body := `{"method":"tools/call","params":{"name":"query","arguments":{"sql":"select :arg_x","user_id":777,"max_rows":12,"password":"secret-value","parameters":{"arg_x":"secret-value"}}}}`
 		r := httptest.NewRequest("POST", "/mcp", strings.NewReader(body))
+		requestID := "unauthenticated"
 		if authenticated {
+			requestID = "authenticated"
 			r.Header.Set("Authorization", "secret-value")
 		}
+		r = r.WithContext(With(r.Context(), Metadata{RequestID: requestID}))
 		handler.ServeHTTP(httptest.NewRecorder(), r)
-		events, err := s.List(t.Context(), "sales", "", 1, 0)
+		events, err := s.List(t.Context(), "sales", requestID, 1, 0)
 		if err != nil || len(events) != 1 {
 			t.Fatalf("missing event: %v %v", events, err)
 		}

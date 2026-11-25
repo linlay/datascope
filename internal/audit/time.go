@@ -19,7 +19,20 @@ func eventDuration(start, finish string) (time.Duration, bool) {
 	return b.Sub(a), true
 }
 
+func timestampSortKey(value string) string {
+	at, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return ""
+	}
+	// Normalize offsets and pad fractions so string order matches timestamp order.
+	return at.UTC().Format("2006-01-02T15:04:05.000000000Z")
+}
+
 func init() {
+	sqlite.MustRegisterDeterministicScalarFunction("datascope_audit_time_sort_key", 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		value, _ := args[0].(string)
+		return timestampSortKey(value), nil
+	})
 	// Parse before subtracting: SQLite julianday loses sub-millisecond precision.
 	sqlite.MustRegisterDeterministicScalarFunction("datascope_audit_duration_ms", 2, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
 		start, _ := args[0].(string)
